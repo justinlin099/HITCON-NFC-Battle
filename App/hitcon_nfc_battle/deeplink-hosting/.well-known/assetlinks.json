@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.hitcon_nfc_battle",
+      "sha256_cert_fingerprints": [
+        "6A:45:36:DA:81:CD:73:0E:9B:3C:5C:C2:05:E4:D9:31:5A:B2:32:D5:CE:1F:95:CF:0B:B9:C3:0F:A8:B7:3F:E6"
+      ]
+    }
+  }
+]

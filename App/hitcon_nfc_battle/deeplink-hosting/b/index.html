@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Open HITCON NFC Battle</title>
+    <style>
+      :root {
+        --bg: #0b141a;
+        --card: #10222c;
+        --text: #e5f3ff;
+        --muted: #9ec3dc;
+        --accent: #2ed3a5;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: "Segoe UI", "Noto Sans", sans-serif;
+        color: var(--text);
+        background: radial-gradient(circle at 20% 0%, #163645 0%, var(--bg) 55%);
+      }
+      .card {
+        width: min(92vw, 560px);
+        background: linear-gradient(165deg, #123342 0%, var(--card) 70%);
+        border: 1px solid #25586f;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin-top: 0;
+        margin-bottom: 8px;
+      }
+      p {
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .btn {
+        display: inline-block;
+        padding: 10px 14px;
+        border-radius: 10px;
+        text-decoration: none;
+        font-weight: 700;
+        margin-right: 8px;
+        margin-top: 8px;
+      }
+      .primary {
+        background: var(--accent);
+        color: #062119;
+      }
+      .secondary {
+        border: 1px solid #3d7088;
+        color: var(--text);
+      }
+      code {
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Opening HITCON NFC Battle...</h1>
+      <p id="status">If app is not installed, we will send you to the store.</p>
+      <p>Current link:</p>
+      <p><code id="link"></code></p>
+      <a id="openApp" class="btn primary" href="#">Open App</a>
+      <a id="openStore" class="btn secondary" href="#">Open Store</a>
+    </main>
+
+    <script>
+      const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.example.hitcon_nfc_battle";
+      const APP_STORE_URL = "https://apps.apple.com/app/idREPLACE_WITH_APP_STORE_ID";
+      const current = window.location.href;
+
+      const linkNode = document.getElementById("link");
+      const statusNode = document.getElementById("status");
+      const openAppBtn = document.getElementById("openApp");
+      const openStoreBtn = document.getElementById("openStore");
+
+      linkNode.textContent = current;
+      openAppBtn.href = current;
+
+      const ua = navigator.userAgent || "";
+      const isAndroid = /Android/i.test(ua);
+      const isIOS = /iPhone|iPad|iPod/i.test(ua);
+      const storeUrl = isAndroid ? PLAY_STORE_URL : APP_STORE_URL;
+      openStoreBtn.href = storeUrl;
+
+      setTimeout(() => {
+        if (document.visibilityState === "visible") {
+          statusNode.textContent = "App not opened yet. Redirecting to store...";
+          window.location.replace(storeUrl);
+        }
+      }, 1400);
+    </script>
+  </body>
+</html>

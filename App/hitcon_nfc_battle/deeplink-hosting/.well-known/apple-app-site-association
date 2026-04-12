@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "REPLACE_WITH_APPLE_TEAM_ID.com.example.hitconNfcBattle",
+        "paths": [
+          "/b",
+          "/b/*"
+        ]
+      }
+    ]
+  }
+}
