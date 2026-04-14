@@ -45,6 +45,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   String _status = '初始化中...';
   String _tagId = '-';
   List<String> _records = <String>[];
+  String _lastIncomingUri = '-';
   bool _isReading = false;
   bool _autoWriteEnabled = true;
   String _lastTagId = '';
@@ -82,12 +83,19 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   }
 
   void _consumeIncomingUri(Uri uri) {
-    if (uri.host != _targetHost || uri.path != _targetPath) {
+    final bool hostMatches = uri.host.toLowerCase() == _targetHost;
+    final bool pathMatches = uri.path == _targetPath || uri.path == '$_targetPath/';
+    if (!hostMatches || !pathMatches) {
       return;
     }
 
     final String userId = uri.queryParameters['u'] ?? '';
     final String secretKey = uri.queryParameters['k'] ?? '';
+
+    setState(() {
+      _lastIncomingUri = uri.toString();
+      _status = '已收到外部掃描連結';
+    });
 
     if (userId.isNotEmpty && secretKey.isNotEmpty) {
       _userIdController.text = userId;
@@ -100,12 +108,11 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
   String _buildTargetUri() {
     final String userId = _userIdController.text.trim();
-    final String secretKey = _secretKeyController.text.trim();
 
-    if (userId.isNotEmpty && secretKey.isNotEmpty) {
+    // 只包含 user_id，secret 另外寫成獨立記錄
+    if (userId.isNotEmpty) {
       final Uri uri = Uri.https(_targetHost, _targetPath, <String, String>{
         'u': userId,
-        'k': secretKey,
       });
       return uri.toString();
     }
@@ -114,7 +121,19 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   }
 
   Future<bool> _writeUriToTag(NfcTag tag, String uri) async {
-    final NdefMessage message = NdefMessage(<NdefRecord>[_buildUriRecord(uri)]);
+    final String secretKey = _secretKeyController.text.trim();
+    
+    // 建立多個 NDEF 記錄：URI + Secret（如果存在）
+    final List<NdefRecord> records = <NdefRecord>[
+      _buildUriRecord(uri),
+    ];
+    
+    // 如果有 secret，額外寫入文本記錄
+    if (secretKey.isNotEmpty) {
+      records.add(_buildTextRecord('secret_key', secretKey));
+    }
+    
+    final NdefMessage message = NdefMessage(records);
     final Ndef? ndef = Ndef.from(tag);
 
     if (ndef == null || !ndef.isWritable) {
@@ -150,6 +169,32 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
       typeNameFormat: NdefTypeNameFormat.nfcWellknown,
       type: Uint8List.fromList(<int>[0x55]),
       identifier: Uint8List(0),
+      payload: Uint8List.fromList(payload),
+    );
+  }
+
+  NdefRecord _buildTextRecord(String identifier, String text) {
+    // 構建 NDEF Text record (TNF = NFC Well-known, Type = 'T')
+    // Payload: [狀態碼][語言碼][文本]
+    // 狀態碼：0x65 = UTF-8 編碼 + 語言碼長度 2 ("en")
+    final List<int> encodedText = utf8.encode(text);
+    final List<int> identifierBytes = utf8.encode(identifier);
+    final List<int> languageCode = utf8.encode('en'); // 語言代碼 "en"
+    
+    // Payload 結構：
+    // Byte 0-5: 狀態碼 (0x65 = UTF-8, 語言碼長度為 2)
+    // Bytes 1-2: 語言碼 ('en')
+    // Bytes 3+: 文本內容
+    final List<int> payload = <int>[
+      0x65, // UTF-8 編碼，語言碼長度 2
+      ...languageCode,
+      ...encodedText,
+    ];
+
+    return NdefRecord(
+      typeNameFormat: NdefTypeNameFormat.nfcWellknown,
+      type: Uint8List.fromList(<int>[0x54]), // 'T' = Text record
+      identifier: Uint8List.fromList(identifierBytes),
       payload: Uint8List.fromList(payload),
     );
   }
@@ -198,12 +243,17 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
         final Ndef? ndef = Ndef.from(tag);
         final List<String> parsedRecords = <String>[];
+        final List<String> existingSecrets = <String>[];
 
         if (ndef != null) {
           final NdefMessage? message = ndef.cachedMessage;
           if (message != null) {
             for (final NdefRecord record in message.records) {
               parsedRecords.add(_parseRecord(record));
+              final String? secret = _extractSecretKeyFromRecord(record);
+              if (secret != null) {
+                existingSecrets.add(secret);
+              }
             }
           }
         }
@@ -211,8 +261,16 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
         String writeMessage = '';
         if (_autoWriteEnabled) {
           final String targetUri = _buildTargetUri();
-          if (parsedRecords.contains(targetUri)) {
-            writeMessage = '（Tag 已是目標 URI，略過寫入）';
+          final String targetSecret = _secretKeyController.text.trim();
+          final bool uriMatches = parsedRecords.contains(targetUri);
+          final bool secretMatches = targetSecret.isEmpty
+              ? existingSecrets.isEmpty
+              : existingSecrets.length == 1 && existingSecrets.first == targetSecret;
+
+          if (uriMatches && secretMatches) {
+            writeMessage = targetSecret.isEmpty
+                ? '（Tag 已是目標 URI，略過寫入）'
+                : '（Tag 已是目標 URI + secret，略過寫入）';
           } else {
             try {
               final bool writeSuccess = await _writeUriToTag(tag, targetUri);
@@ -281,6 +339,28 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
     return 'TNF=${record.typeNameFormat.name}, type=${_toHexString(record.type)}, payload=${_toHexString(record.payload)}';
   }
 
+  String? _extractSecretKeyFromRecord(NdefRecord record) {
+    if (record.typeNameFormat != NdefTypeNameFormat.nfcWellknown ||
+        record.type.isEmpty ||
+        record.type.first != 0x54 ||
+        record.payload.length <= 1) {
+      return null;
+    }
+
+    final String identifier = utf8.decode(record.identifier, allowMalformed: true);
+    if (identifier != 'secret_key') {
+      return null;
+    }
+
+    final int languageCodeLength = record.payload.first & 0x3F;
+    final int textStart = 1 + languageCodeLength;
+    if (record.payload.length <= textStart) {
+      return null;
+    }
+
+    return String.fromCharCodes(record.payload.sublist(textStart));
+  }
+
   @override
   void dispose() {
     _linkSubscription?.cancel();
@@ -308,6 +388,8 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
             ),
             const SizedBox(height: 12),
             Text('Tag ID: $_tagId'),
+            const SizedBox(height: 8),
+            Text('外部掃描 URI: $_lastIncomingUri'),
             const SizedBox(height: 16),
             TextField(
               controller: _userIdController,
