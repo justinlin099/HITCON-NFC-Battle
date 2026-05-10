@@ -5,6 +5,9 @@ import 'dart:typed_data';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:nfc_manager/nfc_manager.dart';
+import 'config/app_config.dart';
+import 'pages/user/card_collection_page.dart';
+import 'pages/debug/test_login_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -16,11 +19,17 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'NTag Reader',
+      title: 'HITCON NFC Battle',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
       ),
-      home: const NTagReaderPage(),
+      home: AppConfig.useMockServices
+          ? const TestLoginPage()  // 測試模式：顯示角色選擇頁面
+          : const NTagReaderPage(),  // 生產模式：直接進入主應用
+      routes: {
+        '/home': (context) => const NTagReaderPage(),
+        '/collection': (context) => const CardCollectionPage(),
+      },
     );
   }
 }
