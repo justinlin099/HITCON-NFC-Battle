@@ -1,6 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'my_card_editor_page.dart';
+import 'card_detail_page.dart';
+import 'pixel_card_face.dart';
 import 'pixel_theme.dart';
 import 'score_board_page.dart';
 
@@ -236,16 +240,36 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                 crossAxisCount: 3,
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 10,
-                childAspectRatio: 0.68,
+                childAspectRatio: 0.72,
               ),
               delegate: SliverChildBuilderDelegate(
                 (BuildContext context, int index) {
                   final Map<String, dynamic> card = _cards[index];
+                  final String title = card['card_title'] as String? ?? card['tag_name'] as String? ?? 'Unknown';
+                  final String attributeEmoji = card['attribute_emoji'] as String? ?? '❓';
+                  final String attributeLabel = card['attribute_label'] as String? ?? 'UNKNOWN';
+                  final String rawLink = card['link'] as String? ?? '';
+                  final String link = rawLink.trim().isEmpty ? 'https://hitcon.org' : rawLink;
+                  final Color cardColor = _PixelCard.colorForIndex(index);
+                  final String heroTag = 'card-$index';
                   return _PixelCard(
-                    title: card['name'] as String? ?? 'Unknown',
+                    title: title,
                     uid: card['physical_uid'] as String? ?? '',
                     collectedAt: card['collected_at'] as String? ?? '',
                     index: index,
+                    attributeEmoji: attributeEmoji,
+                    attributeLabel: attributeLabel,
+                    heroTag: heroTag,
+                    onTap: () async => _openCardDetail(
+                      heroTag: heroTag,
+                      title: title,
+                      attributeEmoji: attributeEmoji,
+                      attributeLabel: attributeLabel,
+                      link: link,
+                      uid: card['physical_uid'] as String? ?? '',
+                      collectedAt: card['collected_at'] as String? ?? '',
+                      cardColor: cardColor,
+                    ),
                   );
                 },
                 childCount: _cards.length,
@@ -264,6 +288,49 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _openCardDetail({
+    required String heroTag,
+    required String title,
+    required String attributeEmoji,
+    required String attributeLabel,
+    required String link,
+    required String uid,
+    required String collectedAt,
+    required Color cardColor,
+  }) {
+    return Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierColor: Colors.transparent,
+        transitionDuration: const Duration(milliseconds: 450),
+        reverseTransitionDuration: const Duration(milliseconds: 300),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return CardDetailPage(
+            heroTag: heroTag,
+            title: title,
+            attributeEmoji: attributeEmoji,
+            attributeLabel: attributeLabel,
+            link: link,
+            uid: uid,
+            collectedAt: collectedAt,
+            cardColor: cardColor,
+          );
+        },
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final Animation<double> curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return FadeTransition(
+            opacity: curved,
+            child: child,
+          );
+        },
       ),
     );
   }
@@ -577,20 +644,28 @@ class _PinnedBoothStrip extends StatelessWidget {
 }
 
 /// 像素卡片
-class _PixelCard extends StatelessWidget {
+class _PixelCard extends StatefulWidget {
   const _PixelCard({
     required this.title,
     required this.uid,
     required this.collectedAt,
     required this.index,
+    required this.attributeEmoji,
+    required this.attributeLabel,
+    required this.heroTag,
+    required this.onTap,
   });
 
   final String title;
   final String uid;
   final String collectedAt;
   final int index;
+  final String attributeEmoji;
+  final String attributeLabel;
+  final String heroTag;
+  final Future<void> Function() onTap;
 
-  Color _getCardColor(int seed) {
+  static Color colorForIndex(int seed) {
     const List<Color> colors = <Color>[
       Color(0xFF00AAFF), // 電光藍
       Color(0xFFFFAA00), // 橙
@@ -603,114 +678,101 @@ class _PixelCard extends StatelessWidget {
   }
 
   @override
+  State<_PixelCard> createState() => _PixelCardState();
+}
+
+class _PixelCardState extends State<_PixelCard> {
+  bool _showText = true;
+
+  Future<void> _handleTap() async {
+    setState(() {
+      _showText = false;
+    });
+    await widget.onTap();
+    if (!mounted) {
+      return;
+    }
+    Future<void>.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() {
+          _showText = true;
+        });
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final Color cardColor = _getCardColor(index);
-    final String displayChar = title.isNotEmpty ? title.substring(0, 1) : '?';
-
-    return Container(
-      decoration: BoxDecoration(
-        boxShadow: const [
-          BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
-        ],
+    final Color cardColor = _PixelCard.colorForIndex(widget.index);
+    final Widget cardBody = PixelCardFace(
+      title: widget.title,
+      attributeEmoji: widget.attributeEmoji,
+      attributeLabel: widget.attributeLabel,
+      cardColor: cardColor,
+      showText: _showText,
+      image: Image.asset(
+        'assets/images/mock_card_48.png',
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.none,
       ),
-      child: Container(
-        decoration: BoxDecoration(
-          color: PixelTheme.bgMid,
-          border: Border.all(color: cardColor, width: 3),
-        ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            /// 背景紋理
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [PixelTheme.bgMid, cardColor.withValues(alpha: 0.08)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+    );
+
+    return GestureDetector(
+      onTap: _handleTap,
+      child: Hero(
+        tag: widget.heroTag,
+        flightShuttleBuilder: (context, animation, direction, fromContext, toContext) {
+          final Hero fromHero = fromContext.widget as Hero;
+          final Hero toHero = toContext.widget as Hero;
+            final Widget rawShuttle = direction == HeroFlightDirection.push
+              ? fromHero.child
+              : toHero.child;
+          final ThemeData shuttleTheme = Theme.of(fromContext);
+          final Widget shuttle = Theme(
+            data: shuttleTheme.copyWith(
+              textTheme: shuttleTheme.textTheme.apply(fontFamily: 'Unifont'),
+              primaryTextTheme: shuttleTheme.primaryTextTheme.apply(fontFamily: 'Unifont'),
+            ),
+            child: DefaultTextStyle.merge(
+              style: const TextStyle(fontFamily: 'Unifont'),
+              child: rawShuttle,
+            ),
+          );
+          final Animation<double> curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+
+          return AnimatedBuilder(
+            animation: curved,
+            child: shuttle,
+            builder: (context, child) {
+              final double rotation = (1 - curved.value) * math.pi * 2;
+              final Widget clippedChild = ClipRect(
+                child: MediaQuery.withNoTextScaling(
+                  child: RepaintBoundary(child: child ?? const SizedBox.shrink()),
                 ),
-              ),
-            ),
-
-            /// 內容
-            Padding(
-              padding: const EdgeInsets.all(6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  /// 卡片編號
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: cardColor,
-                      border: Border.all(color: PixelTheme.bgDark),
-                    ),
-                    child: Text(
-                      '#${index + 1}',
-                      style: TextStyle(
-                        color: PixelTheme.bgDark,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
-                        fontFamily: 'Unifont',
-                      ),
-                    ),
-                  ),
-                  const Spacer(),
-
-                  /// 大字符區域
-                  Container(
-                    width: double.infinity,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: PixelTheme.bgDark,
-                      border: Border.all(color: cardColor),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      displayChar,
-                      style: TextStyle(
-                        color: cardColor,
-                        fontSize: 32,
-                        fontWeight: FontWeight.w900,
-                        fontFamily: 'Unifont',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-
-                  /// 卡片名稱
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: PixelTheme.textWhite,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      fontFamily: 'Unifont',
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-
-                  /// 日期
-                  if (collectedAt.isNotEmpty)
-                    Text(
-                      collectedAt.substring(0, collectedAt.length < 10 ? collectedAt.length : 10),
-                      style: TextStyle(
-                        color: PixelTheme.textGray,
-                        fontSize: 7,
-                        fontFamily: 'Unifont',
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
+              );
+              return Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()
+                  ..setEntry(3, 2, 0.001)
+                  ..rotateY(rotation),
+                child: clippedChild,
+              );
+            },
+          );
+        },
+        child: Material(
+          color: Colors.transparent,
+          child: cardBody,
         ),
       ),
     );
   }
 }
+
 
 /// 獎品面板
 class _PrizePanel extends StatelessWidget {

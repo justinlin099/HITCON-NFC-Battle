@@ -2,8 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:nfc_manager/nfc_manager.dart';
+import 'dart:typed_data';
+import 'dart:convert';
 
 import 'pixel_theme.dart';
+import 'pixel_card_face.dart';
+import '../../services/auth_service.dart';
 
 typedef PixelGrid = List<List<Color?>>;
 
@@ -50,9 +55,10 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   String _name = '我的卡片';
   String _link = 'https://';
   String _emoji = '✨';
+  String _description = '卡片介紹文字';
   Color _cardColor = const Color(0xFFFFD700);
   PixelGrid _pixels = _createEmptyGrid(_canvasSize);
-  String _pixelStatus = '尚未編輯點陣圖';
+  String? _pairedUid;
 
   @override
   Widget build(BuildContext context) {
@@ -68,52 +74,107 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
           children: [
-            _OverviewCard(
+            _PokemonStyleCard(
               name: _name,
               link: _link,
               emoji: _emoji,
+              description: _description,
               cardColor: _cardColor,
               pixels: _pixels,
+              onEditImage: _openPixelEditor,
+              onEditName: () => _openTextEditor('name'),
+              onEditEmoji: () => _openTextEditor('emoji'),
+              onEditLink: () => _openTextEditor('link'),
+              onEditDescription: () => _openTextEditor('description'),
             ),
             const SizedBox(height: 12),
-            _SettingButton(
-              icon: Icons.badge_rounded,
-              title: '名稱 / 連結 / Emoji',
-              subtitle: '目前：$_name',
-              onTap: _openTextEditor,
-            ),
-            const SizedBox(height: 10),
-            _SettingButton(
-              icon: Icons.palette_rounded,
-              title: '卡片顏色',
-              subtitle: '點擊進入顏色設定',
-              trailing: Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: _cardColor,
-                  border: Border.all(color: PixelTheme.textWhite),
+            SizedBox(
+              width: double.infinity,
+              child: GestureDetector(
+                onTap: _openColorEditor,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: PixelTheme.bgMid,
+                    border: Border.all(color: PixelTheme.textWhite, width: 2),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: _cardColor,
+                          border: Border.all(color: PixelTheme.textWhite, width: 1),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '設定卡片顏色',
+                        style: TextStyle(
+                          color: PixelTheme.textWhite,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              onTap: _openColorEditor,
             ),
-            const SizedBox(height: 10),
-            _SettingButton(
-              icon: Icons.draw_rounded,
-              title: '圖片 / 點陣圖編輯器',
-              subtitle: _pixelStatus,
-              onTap: _openPixelEditor,
-            ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: PixelTheme.bgMid,
-                border: Border.all(color: PixelTheme.border, width: 2),
-              ),
-              child: Text(
-                '目前解析度：48x48。\n編輯固定使用 48x48，輸出顯示可放大到 128x128。',
-                style: TextStyle(color: PixelTheme.textGray),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: GestureDetector(
+                onTap: _pairedUid == null ? _openNtagScanPage : null,
+                child: Opacity(
+                  opacity: _pairedUid == null ? 1 : 0.7,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: PixelTheme.bgMid,
+                      border: Border.all(color: PixelTheme.textWhite, width: 2),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.nfc_rounded, color: PixelTheme.textWhite),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Text(
+                                _pairedUid == null ? 'NTAG Badge 配對' : '已配對',
+                                style: TextStyle(
+                                  color: PixelTheme.textWhite,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              if (_pairedUid != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  'UID: $_pairedUid',
+                                  style: TextStyle(
+                                    color: PixelTheme.textWhite,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ],
@@ -122,13 +183,15 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
     );
   }
 
-  Future<void> _openTextEditor() async {
+  Future<void> _openTextEditor(String editType) async {
     final _TextEditResult? result = await Navigator.of(context).push<_TextEditResult>(
       MaterialPageRoute<_TextEditResult>(
         builder: (_) => _TextEditorScreen(
+          editType: editType,
           name: _name,
           link: _link,
           emoji: _emoji,
+          description: _description,
         ),
       ),
     );
@@ -141,6 +204,7 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
       _name = result.name;
       _link = result.link;
       _emoji = result.emoji;
+      _description = result.description;
     });
   }
 
@@ -177,165 +241,740 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
 
     setState(() {
       _pixels = result.pixels;
-      _pixelStatus = result.status;
     });
+  }
+
+  Future<void> _openNtagScanPage() async {
+    final String? result = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (_) => const _NtagScanPage(),
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() {
+        _pairedUid = result;
+      });
+    }
   }
 }
 
-class _OverviewCard extends StatelessWidget {
-  const _OverviewCard({
+class _NtagScanPage extends StatefulWidget {
+  const _NtagScanPage();
+
+  @override
+  State<_NtagScanPage> createState() => _NtagScanPageState();
+}
+
+class _NtagScanPageState extends State<_NtagScanPage> {
+  static const String _targetUri = 'https://game.hitcon2026.online/b';
+
+  String _status = '初始化中...';
+  String _tagId = '-';
+  String _userId = '';
+  bool _isReading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _userId = AuthService().currentUserId ?? '';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startSession();
+    });
+  }
+
+  Future<void> _startSession() async {
+    if (_isReading) {
+      return;
+    }
+
+    final bool isAvailable = await NfcManager.instance.isAvailable();
+    if (!isAvailable) {
+      setState(() {
+        _status = '此裝置不支援 NFC 或 NFC 未開啟';
+      });
+      return;
+    }
+
+    if (_userId.trim().isEmpty) {
+      setState(() {
+        _status = '找不到使用者 ID，請先登入';
+      });
+      return;
+    }
+
+    setState(() {
+      _isReading = true;
+      _status = '等待 NFC 標籤...';
+    });
+
+    await NfcManager.instance.startSession(
+      onDiscovered: (NfcTag tag) async {
+        final Map<String, dynamic> data = tag.data;
+        final dynamic idBytes = data['nfca']?['identifier'] ??
+            data['mifareclassic']?['identifier'] ??
+            data['mifareultralight']?['identifier'];
+
+        final String parsedTagId = _toHexString(idBytes);
+
+        final bool writeSuccess = await _writeUserIdToTag(tag, _userId);
+
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _tagId = parsedTagId.isEmpty ? '(讀不到 Tag ID)' : parsedTagId;
+          _status = writeSuccess
+              ? '已寫入 user_id，配對完成'
+              : '寫入失敗：此 Tag 不支援寫入';
+        });
+
+        await NfcManager.instance.stopSession();
+        if (writeSuccess) {
+          Navigator.of(context).pop(_tagId);
+        }
+      },
+      onError: (dynamic error) async {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _status = '讀取失敗: $error';
+          _isReading = false;
+        });
+        await NfcManager.instance.stopSession();
+      },
+    );
+  }
+
+  Future<bool> _writeUserIdToTag(NfcTag tag, String userId) async {
+    final Ndef? ndef = Ndef.from(tag);
+    if (ndef == null || !ndef.isWritable) {
+      return false;
+    }
+
+    final NdefMessage message = NdefMessage(<NdefRecord>[
+      _buildUriRecord(_targetUri),
+      _buildTextRecord('user_id', userId),
+    ]);
+
+    await ndef.write(message);
+    return true;
+  }
+
+  NdefRecord _buildUriRecord(String uri) {
+    const List<String> prefixes = <String>[
+      '',
+      'http://www.',
+      'https://www.',
+      'http://',
+      'https://',
+    ];
+
+    int prefixIndex = 0;
+    String body = uri;
+    for (int i = prefixes.length - 1; i >= 0; i--) {
+      if (prefixes[i].isNotEmpty && uri.startsWith(prefixes[i])) {
+        prefixIndex = i;
+        body = uri.substring(prefixes[i].length);
+        break;
+      }
+    }
+
+    final List<int> payload = <int>[prefixIndex, ...utf8.encode(body)];
+
+    return NdefRecord(
+      typeNameFormat: NdefTypeNameFormat.nfcWellknown,
+      type: Uint8List.fromList(<int>[0x55]),
+      identifier: Uint8List(0),
+      payload: Uint8List.fromList(payload),
+    );
+  }
+
+  NdefRecord _buildTextRecord(String identifier, String text) {
+    final List<int> encodedText = utf8.encode(text);
+    final List<int> identifierBytes = utf8.encode(identifier);
+    final List<int> languageCode = utf8.encode('en');
+
+    final List<int> payload = <int>[
+      0x65,
+      ...languageCode,
+      ...encodedText,
+    ];
+
+    return NdefRecord(
+      typeNameFormat: NdefTypeNameFormat.nfcWellknown,
+      type: Uint8List.fromList(<int>[0x54]),
+      identifier: Uint8List.fromList(identifierBytes),
+      payload: Uint8List.fromList(payload),
+    );
+  }
+
+  String _toHexString(dynamic bytes) {
+    if (bytes is! List) {
+      return '';
+    }
+    final Iterable<int> values = bytes.whereType<int>();
+    return values.map((int b) => b.toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
+  }
+
+  @override
+  void dispose() {
+    NfcManager.instance.stopSession();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: Theme.of(context).copyWith(
+        textTheme: Theme.of(context).textTheme.apply(fontFamily: 'Unifont'),
+        primaryTextTheme: Theme.of(context).primaryTextTheme.apply(fontFamily: 'Unifont'),
+      ),
+      child: Scaffold(
+        backgroundColor: PixelTheme.bgDark,
+        appBar: AppBar(
+          backgroundColor: PixelTheme.bgMid,
+          foregroundColor: PixelTheme.accent,
+          title: const Text('NTAG Badge 配對'),
+        ),
+        body: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: PixelTheme.bgMid,
+              border: Border.all(color: PixelTheme.textWhite, width: 2),
+              boxShadow: const [
+                BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.nfc_rounded, size: 48, color: PixelTheme.accent),
+                const SizedBox(height: 12),
+                Text(
+                  '請將你的 Badge 貼近手機背面',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: PixelTheme.textWhite,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _status,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: PixelTheme.textGray,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'UID: $_tagId',
+                  style: TextStyle(
+                    color: PixelTheme.textWhite,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'user_id: ${_userId.isEmpty ? '-' : _userId}',
+                  style: TextStyle(
+                    color: PixelTheme.textWhite,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PokemonStyleCard extends StatelessWidget {
+  const _PokemonStyleCard({
     required this.name,
     required this.link,
     required this.emoji,
+    required this.description,
     required this.cardColor,
     required this.pixels,
+    required this.onEditImage,
+    required this.onEditName,
+    required this.onEditEmoji,
+    required this.onEditLink,
+    required this.onEditDescription,
   });
 
   final String name;
   final String link;
   final String emoji;
+  final String description;
   final Color cardColor;
   final PixelGrid pixels;
+  final VoidCallback onEditImage;
+  final VoidCallback onEditName;
+  final VoidCallback onEditEmoji;
+  final VoidCallback onEditLink;
+  final VoidCallback onEditDescription;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: cardColor,
-        border: Border.all(color: PixelTheme.textWhite, width: 2),
-        boxShadow: const [
-          BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '我的卡片預覽',
-            style: TextStyle(
-              color: PixelTheme.bgDark,
-              fontWeight: FontWeight.w900,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Container(
-                width: 88,
-                height: 88,
-                decoration: BoxDecoration(
-                  color: PixelTheme.bgDark,
-                  border: Border.all(color: PixelTheme.textWhite),
-                ),
-                child: _hasAnyPixel(pixels)
-                    ? CustomPaint(
-                        painter: _PixelCanvasPainter(pixels: pixels, showGrid: false),
-                        child: const SizedBox.expand(),
-                      )
-                    : Center(
-                        child: Text(
-                          emoji,
-                          style: TextStyle(
-                            fontSize: 32,
-                            color: PixelTheme.textWhite,
-                          ),
+    const double ratio = 0.72;
+    final double cardWidth = MediaQuery.of(context).size.width - 24;
+    final double cardHeight = cardWidth / ratio;
+    final String displayLink = link.trim().isEmpty ? 'https://hitcon.org' : link;
+    final String attributeLabel = _emojiLabel(emoji).toUpperCase();
+
+    return SizedBox(
+      width: cardWidth,
+      height: cardHeight,
+      child: PixelCardFace(
+        title: name,
+        attributeEmoji: emoji,
+        attributeLabel: attributeLabel,
+        cardColor: cardColor,
+        showText: true,
+        titleFontSize: 22,
+        titleFontWeight: FontWeight.w900,
+        attributeFontSize: 12,
+        emojiFontSize: 16,
+        titleMaxLines: 2,
+        imageToTitleSpacing: 6,
+        extraContentSpacing: 4,
+        onTapTitle: onEditName,
+        onTapAttribute: onEditEmoji,
+        titleSuffix: Icon(Icons.edit_rounded, size: 14, color: PixelTheme.textWhite),
+        attributeSuffix: Icon(Icons.edit_rounded, size: 12, color: PixelTheme.textWhite),
+        image: GestureDetector(
+          onTap: onEditImage,
+          behavior: HitTestBehavior.opaque,
+          child: _hasAnyPixel(pixels)
+              ? CustomPaint(
+                  painter: _PixelCanvasPainter(pixels: pixels, showGrid: false),
+                  child: const SizedBox.expand(),
+                )
+              : Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        emoji,
+                        style: TextStyle(
+                          fontSize: 48,
+                          color: PixelTheme.textWhite,
+                          fontFamily: 'Roboto',
+                          fontFamilyFallback: const <String>[
+                            'Segoe UI Emoji',
+                            'Apple Color Emoji',
+                            'Noto Color Emoji',
+                          ],
                         ),
                       ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: TextStyle(
-                        color: PixelTheme.textWhite,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
+                      const SizedBox(height: 6),
+                      Text(
+                        '點擊設定圖片',
+                        style: TextStyle(
+                          color: PixelTheme.textWhite,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      link,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: PixelTheme.textWhite.withValues(alpha: 0.9)),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
+        ),
+        extraContent: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            _EditorLinkRow(
+              link: displayLink,
+              onTap: onEditLink,
+            ),
+            const SizedBox(height: 4),
+            Container(
+              height: 1,
+              width: double.infinity,
+              color: PixelTheme.textWhite,
+            ),
+            const SizedBox(height: 4),
+            _EditorDescription(
+              description: description,
+              onTap: onEditDescription,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _bestTextColor(Color background) {
+    final double luminance = background.computeLuminance();
+    return luminance > 0.6 ? Colors.black : PixelTheme.textWhite;
+  }
+
+  String _emojiLabel(String value) {
+    const Map<String, String> labels = <String, String>{
+      '🐶': 'Dog',
+      '🐱': 'Cat',
+      '🐭': 'Mouse',
+      '🐹': 'Hamster',
+      '🐰': 'Rabbit',
+      '🦊': 'Fox',
+      '🐻': 'Bear',
+      '🐼': 'Panda',
+      '🐨': 'Koala',
+      '🐯': 'Tiger',
+      '🦁': 'Lion',
+      '🐮': 'Cow',
+      '🐷': 'Pig',
+      '🐸': 'Frog',
+      '🐵': 'Monkey',
+      '🐔': 'Chicken',
+      '🐧': 'Penguin',
+      '🐦': 'Bird',
+      '🦉': 'Owl',
+      '🐺': 'Wolf',
+      '🐗': 'Boar',
+      '🐴': 'Horse',
+      '🦄': 'Unicorn',
+      '🐝': 'Bee',
+      '🦋': 'Butterfly',
+      '🐞': 'Ladybug',
+      '🐢': 'Turtle',
+      '🐙': 'Octopus',
+      '🐬': 'Dolphin',
+      '🐳': 'Whale',
+      '🌵': 'Cactus',
+      '🌲': 'Pine',
+      '🌿': 'Herb',
+      '🍀': 'Clover',
+      '🌸': 'Flower',
+      '🍄': 'Mushroom',
+      '🌻': 'Sunflower',
+      '🌷': 'Tulip',
+      '🌾': 'Wheat',
+      '🍁': 'Maple',
+      '🪨': 'Rock',
+      '🪵': 'Wood',
+      '🍎': 'Apple',
+      '🍓': 'Strawberry',
+      '🍌': 'Banana',
+      '🍉': 'Watermelon',
+      '🍇': 'Grapes',
+      '🍑': 'Peach',
+      '🍒': 'Cherry',
+      '🥑': 'Avocado',
+      '🥕': 'Carrot',
+      '🌽': 'Corn',
+      '🍞': 'Bread',
+      '🧀': 'Cheese',
+      '🍪': 'Cookie',
+      '🍩': 'Donut',
+      '🧁': 'Cupcake',
+      '🍰': 'Cake',
+      '🎂': 'Birthday Cake',
+      '🧋': 'Bubble Tea',
+      '☕': 'Coffee',
+      '🍵': 'Tea',
+      '🥛': 'Milk',
+      '🍯': 'Honey',
+      '🍫': 'Chocolate',
+      '🍬': 'Candy',
+      '🍭': 'Lollipop',
+      '🍮': 'Pudding',
+      '🍨': 'Ice Cream',
+      '🍦': 'Soft Serve',
+      '🥮': 'Mooncake',
+      '🥟': 'Dumpling',
+      '🍕': 'Pizza',
+      '🍔': 'Burger',
+      '🍟': 'Fries',
+      '🌭': 'Hot Dog',
+      '🍿': 'Popcorn',
+      '🥨': 'Pretzel',
+      '🥖': 'Baguette',
+      '🥐': 'Croissant',
+      '🥚': 'Egg',
+      '🍗': 'Drumstick',
+      '🥩': 'Steak',
+      '🥓': 'Bacon',
+      '🥗': 'Salad',
+      '🌮': 'Taco',
+      '🌯': 'Burrito',
+      '🥪': 'Sandwich',
+      '🧇': 'Waffle',
+      '🥞': 'Pancake',
+      '🍜': 'Ramen',
+      '🍣': 'Sushi',
+      '🍱': 'Bento',
+      '🍛': 'Curry',
+      '🍲': 'Stew',
+      '🍚': 'Rice',
+      '🍙': 'Rice Ball',
+      '🍘': 'Rice Cracker',
+      '🍥': 'Fish Cake',
+      '🥠': 'Fortune Cookie',
+      '🍡': 'Dango',
+      '🍢': 'Oden',
+      '🧊': 'Ice',
+      '🍋': 'Lemon',
+      '🍊': 'Orange',
+      '🍍': 'Pineapple',
+      '🥭': 'Mango',
+      '🍐': 'Pear',
+      '🥝': 'Kiwi',
+      '🍅': 'Tomato',
+      '🍆': 'Eggplant',
+      '🥔': 'Potato',
+      '🧅': 'Onion',
+      '🧄': 'Garlic',
+      '🫑': 'Bell Pepper',
+      '🥦': 'Broccoli',
+      '🥬': 'Leafy Greens',
+      '🥒': 'Cucumber',
+      '🌶️': 'Chili',
+      '🫒': 'Olive',
+      '🫘': 'Beans',
+      '🌰': 'Chestnut',
+      '🥜': 'Peanut',
+      '🧈': 'Butter',
+      '🧂': 'Salt',
+      '🧪': 'Potion',
+      '🧫': 'Petri',
+      '🔮': 'Crystal Ball',
+      '💎': 'Gem',
+      '🪙': 'Coin',
+      '🧿': 'Nazar',
+      '🔑': 'Key',
+      '🪄': 'Wand',
+      '🧸': 'Teddy',
+      '🎈': 'Balloon',
+      '🎀': 'Ribbon',
+      '🧵': 'Thread',
+      '🧶': 'Yarn',
+      '🪡': 'Needle',
+      '🧰': 'Toolbox',
+      '🪛': 'Screwdriver',
+      '🔧': 'Wrench',
+      '⚙️': 'Gear',
+      '🪤': 'Trap',
+      '🧲': 'Magnet',
+      '🔋': 'Battery',
+      '💡': 'Bulb',
+      '🕯️': 'Candle',
+      '🧹': 'Broom',
+      '🪣': 'Bucket',
+      '🧽': 'Sponge',
+      '🧼': 'Soap',
+      '🧴': 'Lotion',
+      '🪥': 'Toothbrush',
+      '🪒': 'Razor',
+      '🧻': 'Paper',
+      '📦': 'Box',
+      '🐑': 'Sheep',
+      '🐐': 'Goat',
+      '🐪': 'Camel',
+      '🐫': 'Bactrian Camel',
+      '🦙': 'Llama',
+      '🦒': 'Giraffe',
+      '🦌': 'Deer',
+      '🦬': 'Bison',
+      '🐘': 'Elephant',
+      '🦏': 'Rhino',
+      '🦛': 'Hippo',
+      '🐂': 'Ox',
+      '🐃': 'Buffalo',
+      '🐄': 'Cow',
+      '🐖': 'Pig',
+      '🐎': 'Horse',
+      '🫏': 'Donkey',
+      '🦓': 'Zebra',
+      '🦘': 'Kangaroo',
+      '🦥': 'Sloth',
+      '🦦': 'Otter',
+      '🦨': 'Skunk',
+      '🦡': 'Badger',
+      '🐇': 'Rabbit',
+      '🦔': 'Hedgehog',
+      '🦇': 'Bat',
+      '🦅': 'Eagle',
+      '🦆': 'Duck',
+      '🦢': 'Swan',
+      '🦩': 'Flamingo',
+      '🦚': 'Peacock',
+      '🦜': 'Parrot',
+      '🦃': 'Turkey',
+      '🕊️': 'Dove',
+      '🐕‍🦺': 'Service Dog',
+      '🐩': 'Poodle',
+      '🐈‍⬛': 'Black Cat',
+      '🐅': 'Tiger',
+      '🐆': 'Leopard',
+      '🦝': 'Raccoon',
+      '🐀': 'Rat',
+      '🐁': 'Mouse',
+      '🦫': 'Beaver',
+      '🐿️': 'Chipmunk',
+      '🦎': 'Lizard',
+      '🐍': 'Snake',
+      '🦕': 'Sauropod',
+      '🦖': 'T-Rex',
+      '🦈': 'Shark',
+      '🦭': 'Seal',
+      '🦧': 'Orangutan',
+      '🦣': 'Mammoth',
+      '🪱': 'Worm',
+      '🐛': 'Caterpillar',
+      '🦟': 'Mosquito',
+      '🪲': 'Beetle',
+      '🪳': 'Cockroach',
+      '🕷️': 'Spider',
+      '🦂': 'Scorpion',
+      '🪼': 'Jellyfish',
+      '🍏': 'Green Apple',
+      '🍈': 'Melon',
+      '🫐': 'Blueberries',
+      '🥥': 'Coconut',
+      '🫛': 'Pea Pod',
+      '🫚': 'Ginger',
+      '🍳': 'Fried Egg',
+      '🥘': 'Paella',
+      '🥙': 'Stuffed Pita',
+      '🥫': 'Canned Food',
+      '🫕': 'Fondue',
+      '🫔': 'Tamale',
+      '🥡': 'Takeout',
+      '🍝': 'Spaghetti',
+      '🥣': 'Bowl',
+      '🧆': 'Falafel',
+      '🥯': 'Bagel',
+      '🫓': 'Flatbread',
+      '🍧': 'Shaved Ice',
+      '🥧': 'Pie',
+      '🍖': 'Meat',
+      '🍤': 'Shrimp',
+      '🦪': 'Oyster',
+      '🧃': 'Juice Box',
+      '🥤': 'Drink',
+      '🧉': 'Mate',
+      '🍺': 'Beer',
+      '🍻': 'Cheers',
+      '🥂': 'Toast',
+      '🍷': 'Wine',
+      '🍸': 'Cocktail',
+      '🍹': 'Tropical Drink',
+      '🍶': 'Sake',
+      '🍠': 'Sweet Potato',
+      '🍼': 'Bottle',
+      '🫙': 'Jar',
+      '🫗': 'Pouring',
+      '🍽️': 'Plate',
+      '🍴': 'Fork & Knife',
+      '🥄': 'Spoon',
+      '🔥': 'Fire',
+      '❄️': 'Ice',
+      '💧': 'Water',
+      '🌱': 'Earth',
+      '✨': 'Magic',
+    };
+    return labels[value] ?? 'Emoji';
+  }
+}
+
+class _EditorLinkRow extends StatelessWidget {
+  const _EditorLinkRow({required this.link, required this.onTap});
+
+  final String link;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(
+              color: PixelTheme.bgDark,
+              border: Border.all(color: PixelTheme.textWhite, width: 2),
+            ),
+            child: Text(
+              '🔗',
+              style: TextStyle(
+                color: PixelTheme.textWhite,
+                fontSize: 9,
+                fontWeight: FontWeight.w900,
+                fontFamily: 'Unifont',
               ),
-            ],
+            ),
           ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              link,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: PixelTheme.textWhite,
+                fontSize: 9,
+                fontFamily: 'Unifont',
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Icon(Icons.edit_rounded, size: 12, color: PixelTheme.textWhite),
         ],
       ),
     );
   }
 }
 
-class _SettingButton extends StatelessWidget {
-  const _SettingButton({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-    this.trailing,
-  });
+class _EditorDescription extends StatelessWidget {
+  const _EditorDescription({required this.description, required this.onTap});
 
-  final IconData icon;
-  final String title;
-  final String subtitle;
+  final String description;
   final VoidCallback onTap;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: PixelTheme.bgMid,
-          border: Border.all(color: PixelTheme.border, width: 2),
-          boxShadow: const [
-            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(3, 3)),
-          ],
-        ),
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        height: 29.3,
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: PixelTheme.accent),
-            const SizedBox(width: 10),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(Icons.edit_rounded, size: 12, color: PixelTheme.textWhite),
+            ),
+            const SizedBox(width: 6),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: PixelTheme.textWhite,
-                      fontWeight: FontWeight.w900,
-                    ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(right: 4),
+                child: Text(
+                  description,
+                  style: TextStyle(
+                    color: PixelTheme.textWhite,
+                    fontSize: 13,
+                    height: 1.25,
+                    fontFamily: 'Unifont',
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: PixelTheme.textGray,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
-            if (trailing != null) ...[
-              trailing!,
-              const SizedBox(width: 8),
-            ],
-            Icon(Icons.chevron_right_rounded, color: PixelTheme.accent),
           ],
         ),
       ),
@@ -344,11 +983,19 @@ class _SettingButton extends StatelessWidget {
 }
 
 class _TextEditorScreen extends StatefulWidget {
-  const _TextEditorScreen({required this.name, required this.link, required this.emoji});
+  const _TextEditorScreen({
+    required this.editType,
+    required this.name,
+    required this.link,
+    required this.emoji,
+    required this.description,
+  });
 
+  final String editType;
   final String name;
   final String link;
   final String emoji;
+  final String description;
 
   @override
   State<_TextEditorScreen> createState() => _TextEditorScreenState();
@@ -358,6 +1005,271 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
   late final TextEditingController _nameController;
   late final TextEditingController _linkController;
   late final TextEditingController _emojiController;
+  late final TextEditingController _descriptionController;
+  final List<_EmojiOption> _emojiOptions = const <_EmojiOption>[
+    _EmojiOption('🐶', 'Dog'),
+    _EmojiOption('🐱', 'Cat'),
+    _EmojiOption('🐭', 'Mouse'),
+    _EmojiOption('🐹', 'Hamster'),
+    _EmojiOption('🐰', 'Rabbit'),
+    _EmojiOption('🦊', 'Fox'),
+    _EmojiOption('🐻', 'Bear'),
+    _EmojiOption('🐼', 'Panda'),
+    _EmojiOption('🐨', 'Koala'),
+    _EmojiOption('🐯', 'Tiger'),
+    _EmojiOption('🦁', 'Lion'),
+    _EmojiOption('🐮', 'Cow'),
+    _EmojiOption('🐷', 'Pig'),
+    _EmojiOption('🐸', 'Frog'),
+    _EmojiOption('🐵', 'Monkey'),
+    _EmojiOption('🐔', 'Chicken'),
+    _EmojiOption('🐧', 'Penguin'),
+    _EmojiOption('🐦', 'Bird'),
+    _EmojiOption('🦉', 'Owl'),
+    _EmojiOption('🐺', 'Wolf'),
+    _EmojiOption('🐗', 'Boar'),
+    _EmojiOption('🐴', 'Horse'),
+    _EmojiOption('🦄', 'Unicorn'),
+    _EmojiOption('🐝', 'Bee'),
+    _EmojiOption('🦋', 'Butterfly'),
+    _EmojiOption('🐞', 'Ladybug'),
+    _EmojiOption('🐢', 'Turtle'),
+    _EmojiOption('🐙', 'Octopus'),
+    _EmojiOption('🐬', 'Dolphin'),
+    _EmojiOption('🐳', 'Whale'),
+    _EmojiOption('🌵', 'Cactus'),
+    _EmojiOption('🌲', 'Pine'),
+    _EmojiOption('🌿', 'Herb'),
+    _EmojiOption('🍀', 'Clover'),
+    _EmojiOption('🌸', 'Flower'),
+    _EmojiOption('🍄', 'Mushroom'),
+    _EmojiOption('🌻', 'Sunflower'),
+    _EmojiOption('🌷', 'Tulip'),
+    _EmojiOption('🌾', 'Wheat'),
+    _EmojiOption('🍁', 'Maple'),
+    _EmojiOption('🪨', 'Rock'),
+    _EmojiOption('🪵', 'Wood'),
+    _EmojiOption('🍎', 'Apple'),
+    _EmojiOption('🍓', 'Strawberry'),
+    _EmojiOption('🍌', 'Banana'),
+    _EmojiOption('🍉', 'Watermelon'),
+    _EmojiOption('🍇', 'Grapes'),
+    _EmojiOption('🍑', 'Peach'),
+    _EmojiOption('🍒', 'Cherry'),
+    _EmojiOption('🥑', 'Avocado'),
+    _EmojiOption('🥕', 'Carrot'),
+    _EmojiOption('🌽', 'Corn'),
+    _EmojiOption('🍞', 'Bread'),
+    _EmojiOption('🧀', 'Cheese'),
+    _EmojiOption('🍪', 'Cookie'),
+    _EmojiOption('🍩', 'Donut'),
+    _EmojiOption('🧁', 'Cupcake'),
+    _EmojiOption('🍰', 'Cake'),
+    _EmojiOption('🎂', 'Birthday Cake'),
+    _EmojiOption('🧋', 'Bubble Tea'),
+    _EmojiOption('☕', 'Coffee'),
+    _EmojiOption('🍵', 'Tea'),
+    _EmojiOption('🥛', 'Milk'),
+    _EmojiOption('🍯', 'Honey'),
+    _EmojiOption('🍫', 'Chocolate'),
+    _EmojiOption('🍬', 'Candy'),
+    _EmojiOption('🍭', 'Lollipop'),
+    _EmojiOption('🍮', 'Pudding'),
+    _EmojiOption('🍨', 'Ice Cream'),
+    _EmojiOption('🍦', 'Soft Serve'),
+    _EmojiOption('🥮', 'Mooncake'),
+    _EmojiOption('🥟', 'Dumpling'),
+    _EmojiOption('🍕', 'Pizza'),
+    _EmojiOption('🍔', 'Burger'),
+    _EmojiOption('🍟', 'Fries'),
+    _EmojiOption('🌭', 'Hot Dog'),
+    _EmojiOption('🍿', 'Popcorn'),
+    _EmojiOption('🥨', 'Pretzel'),
+    _EmojiOption('🥖', 'Baguette'),
+    _EmojiOption('🥐', 'Croissant'),
+    _EmojiOption('🥚', 'Egg'),
+    _EmojiOption('🍗', 'Drumstick'),
+    _EmojiOption('🥩', 'Steak'),
+    _EmojiOption('🥓', 'Bacon'),
+    _EmojiOption('🥗', 'Salad'),
+    _EmojiOption('🌮', 'Taco'),
+    _EmojiOption('🌯', 'Burrito'),
+    _EmojiOption('🥪', 'Sandwich'),
+    _EmojiOption('🧇', 'Waffle'),
+    _EmojiOption('🥞', 'Pancake'),
+    _EmojiOption('🍜', 'Ramen'),
+    _EmojiOption('🍣', 'Sushi'),
+    _EmojiOption('🍱', 'Bento'),
+    _EmojiOption('🍛', 'Curry'),
+    _EmojiOption('🍲', 'Stew'),
+    _EmojiOption('🍚', 'Rice'),
+    _EmojiOption('🍙', 'Rice Ball'),
+    _EmojiOption('🍘', 'Rice Cracker'),
+    _EmojiOption('🍥', 'Fish Cake'),
+    _EmojiOption('🥠', 'Fortune Cookie'),
+    _EmojiOption('🍡', 'Dango'),
+    _EmojiOption('🍢', 'Oden'),
+    _EmojiOption('🧊', 'Ice'),
+    _EmojiOption('🍋', 'Lemon'),
+    _EmojiOption('🍊', 'Orange'),
+    _EmojiOption('🍍', 'Pineapple'),
+    _EmojiOption('🥭', 'Mango'),
+    _EmojiOption('🍐', 'Pear'),
+    _EmojiOption('🥝', 'Kiwi'),
+    _EmojiOption('🍅', 'Tomato'),
+    _EmojiOption('🍆', 'Eggplant'),
+    _EmojiOption('🥔', 'Potato'),
+    _EmojiOption('🧅', 'Onion'),
+    _EmojiOption('🧄', 'Garlic'),
+    _EmojiOption('🫑', 'Bell Pepper'),
+    _EmojiOption('🥦', 'Broccoli'),
+    _EmojiOption('🥬', 'Leafy Greens'),
+    _EmojiOption('🥒', 'Cucumber'),
+    _EmojiOption('🌶️', 'Chili'),
+    _EmojiOption('🫒', 'Olive'),
+    _EmojiOption('🫘', 'Beans'),
+    _EmojiOption('🌰', 'Chestnut'),
+    _EmojiOption('🥜', 'Peanut'),
+    _EmojiOption('🧈', 'Butter'),
+    _EmojiOption('🧂', 'Salt'),
+    _EmojiOption('🧪', 'Potion'),
+    _EmojiOption('🧫', 'Petri'),
+    _EmojiOption('🔮', 'Crystal Ball'),
+    _EmojiOption('💎', 'Gem'),
+    _EmojiOption('🪙', 'Coin'),
+    _EmojiOption('🧿', 'Nazar'),
+    _EmojiOption('🔑', 'Key'),
+    _EmojiOption('🪄', 'Wand'),
+    _EmojiOption('🧸', 'Teddy'),
+    _EmojiOption('🎈', 'Balloon'),
+    _EmojiOption('🎀', 'Ribbon'),
+    _EmojiOption('🧵', 'Thread'),
+    _EmojiOption('🧶', 'Yarn'),
+    _EmojiOption('🪡', 'Needle'),
+    _EmojiOption('🧰', 'Toolbox'),
+    _EmojiOption('🪛', 'Screwdriver'),
+    _EmojiOption('🔧', 'Wrench'),
+    _EmojiOption('⚙️', 'Gear'),
+    _EmojiOption('🪤', 'Trap'),
+    _EmojiOption('🧲', 'Magnet'),
+    _EmojiOption('🔋', 'Battery'),
+    _EmojiOption('💡', 'Bulb'),
+    _EmojiOption('🕯️', 'Candle'),
+    _EmojiOption('🧹', 'Broom'),
+    _EmojiOption('🪣', 'Bucket'),
+    _EmojiOption('🧽', 'Sponge'),
+    _EmojiOption('🧼', 'Soap'),
+    _EmojiOption('🧴', 'Lotion'),
+    _EmojiOption('🪥', 'Toothbrush'),
+    _EmojiOption('🪒', 'Razor'),
+    _EmojiOption('🧻', 'Paper'),
+    _EmojiOption('📦', 'Box'),
+    _EmojiOption('🐑', 'Sheep'),
+    _EmojiOption('🐐', 'Goat'),
+    _EmojiOption('🐪', 'Camel'),
+    _EmojiOption('🐫', 'Bactrian Camel'),
+    _EmojiOption('🦙', 'Llama'),
+    _EmojiOption('🦒', 'Giraffe'),
+    _EmojiOption('🦌', 'Deer'),
+    _EmojiOption('🦬', 'Bison'),
+    _EmojiOption('🐘', 'Elephant'),
+    _EmojiOption('🦏', 'Rhino'),
+    _EmojiOption('🦛', 'Hippo'),
+    _EmojiOption('🐂', 'Ox'),
+    _EmojiOption('🐃', 'Buffalo'),
+    _EmojiOption('🐄', 'Cow'),
+    _EmojiOption('🐖', 'Pig'),
+    _EmojiOption('🐎', 'Horse'),
+    _EmojiOption('🫏', 'Donkey'),
+    _EmojiOption('🦓', 'Zebra'),
+    _EmojiOption('🦘', 'Kangaroo'),
+    _EmojiOption('🦥', 'Sloth'),
+    _EmojiOption('🦦', 'Otter'),
+    _EmojiOption('🦨', 'Skunk'),
+    _EmojiOption('🦡', 'Badger'),
+    _EmojiOption('🐇', 'Rabbit'),
+    _EmojiOption('🦔', 'Hedgehog'),
+    _EmojiOption('🦇', 'Bat'),
+    _EmojiOption('🦅', 'Eagle'),
+    _EmojiOption('🦆', 'Duck'),
+    _EmojiOption('🦢', 'Swan'),
+    _EmojiOption('🦩', 'Flamingo'),
+    _EmojiOption('🦚', 'Peacock'),
+    _EmojiOption('🦜', 'Parrot'),
+    _EmojiOption('🦃', 'Turkey'),
+    _EmojiOption('🕊️', 'Dove'),
+    _EmojiOption('🐕‍🦺', 'Service Dog'),
+    _EmojiOption('🐩', 'Poodle'),
+    _EmojiOption('🐈‍⬛', 'Black Cat'),
+    _EmojiOption('🐅', 'Tiger'),
+    _EmojiOption('🐆', 'Leopard'),
+    _EmojiOption('🦝', 'Raccoon'),
+    _EmojiOption('🐀', 'Rat'),
+    _EmojiOption('🐁', 'Mouse'),
+    _EmojiOption('🦫', 'Beaver'),
+    _EmojiOption('🐿️', 'Chipmunk'),
+    _EmojiOption('🦎', 'Lizard'),
+    _EmojiOption('🐍', 'Snake'),
+    _EmojiOption('🦕', 'Sauropod'),
+    _EmojiOption('🦖', 'T-Rex'),
+    _EmojiOption('🦈', 'Shark'),
+    _EmojiOption('🦭', 'Seal'),
+    _EmojiOption('🦧', 'Orangutan'),
+    _EmojiOption('🦣', 'Mammoth'),
+    _EmojiOption('🪱', 'Worm'),
+    _EmojiOption('🐛', 'Caterpillar'),
+    _EmojiOption('🦟', 'Mosquito'),
+    _EmojiOption('🪲', 'Beetle'),
+    _EmojiOption('🪳', 'Cockroach'),
+    _EmojiOption('🕷️', 'Spider'),
+    _EmojiOption('🦂', 'Scorpion'),
+    _EmojiOption('🪼', 'Jellyfish'),
+    _EmojiOption('🍏', 'Green Apple'),
+    _EmojiOption('🍈', 'Melon'),
+    _EmojiOption('🫐', 'Blueberries'),
+    _EmojiOption('🥥', 'Coconut'),
+    _EmojiOption('🫛', 'Pea Pod'),
+    _EmojiOption('🫚', 'Ginger'),
+    _EmojiOption('🍳', 'Fried Egg'),
+    _EmojiOption('🥘', 'Paella'),
+    _EmojiOption('🥙', 'Stuffed Pita'),
+    _EmojiOption('🥫', 'Canned Food'),
+    _EmojiOption('🫕', 'Fondue'),
+    _EmojiOption('🫔', 'Tamale'),
+    _EmojiOption('🥡', 'Takeout'),
+    _EmojiOption('🍝', 'Spaghetti'),
+    _EmojiOption('🥣', 'Bowl'),
+    _EmojiOption('🧆', 'Falafel'),
+    _EmojiOption('🥯', 'Bagel'),
+    _EmojiOption('🫓', 'Flatbread'),
+    _EmojiOption('🍧', 'Shaved Ice'),
+    _EmojiOption('🥧', 'Pie'),
+    _EmojiOption('🍖', 'Meat'),
+    _EmojiOption('🍤', 'Shrimp'),
+    _EmojiOption('🦪', 'Oyster'),
+    _EmojiOption('🧃', 'Juice Box'),
+    _EmojiOption('🥤', 'Drink'),
+    _EmojiOption('🧉', 'Mate'),
+    _EmojiOption('🍺', 'Beer'),
+    _EmojiOption('🍻', 'Cheers'),
+    _EmojiOption('🥂', 'Toast'),
+    _EmojiOption('🍷', 'Wine'),
+    _EmojiOption('🍸', 'Cocktail'),
+    _EmojiOption('🍹', 'Tropical Drink'),
+    _EmojiOption('🍶', 'Sake'),
+    _EmojiOption('🍠', 'Sweet Potato'),
+    _EmojiOption('🍼', 'Bottle'),
+    _EmojiOption('🫙', 'Jar'),
+    _EmojiOption('🫗', 'Pouring'),
+    _EmojiOption('🍽️', 'Plate'),
+    _EmojiOption('🍴', 'Fork & Knife'),
+    _EmojiOption('🥄', 'Spoon'),
+    _EmojiOption('🔥', 'Fire'),
+    _EmojiOption('❄️', 'Ice'),
+    _EmojiOption('💧', 'Water'),
+    _EmojiOption('🌱', 'Earth'),
+    _EmojiOption('✨', 'Magic'),
+  ];
 
   @override
   void initState() {
@@ -365,6 +1277,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
     _nameController = TextEditingController(text: widget.name);
     _linkController = TextEditingController(text: widget.link);
     _emojiController = TextEditingController(text: widget.emoji);
+    _descriptionController = TextEditingController(text: widget.description);
   }
 
   @override
@@ -372,6 +1285,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
     _nameController.dispose();
     _linkController.dispose();
     _emojiController.dispose();
+    _descriptionController.dispose();
     super.dispose();
   }
 
@@ -384,53 +1298,173 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
       appBar: AppBar(
         backgroundColor: PixelTheme.bgMid,
         foregroundColor: PixelTheme.accent,
-        title: const Text('編輯卡片資訊'),
+        title: Text(_getTitleForType()),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            TextField(
-              controller: _nameController,
-              style: TextStyle(color: PixelTheme.textWhite),
-              decoration: _inputDecoration('卡片名稱'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _linkController,
-              style: TextStyle(color: PixelTheme.textWhite),
-              decoration: _inputDecoration('超連結'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _emojiController,
-              maxLength: 4,
-              style: TextStyle(color: PixelTheme.textWhite),
-              decoration: _inputDecoration('emoji 屬性'),
-            ),
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () {
-                  Navigator.of(context).pop(
-                    _TextEditResult(
-                      name: _nameController.text.trim(),
-                      link: _linkController.text.trim(),
-                      emoji: _emojiController.text.trim().isEmpty ? '■' : _emojiController.text.trim(),
+      body: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          return Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(12),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: constraints.maxHeight - 24),
+                    child: Column(
+                      children: [
+                        ..._buildFieldsForType(),
+                      ],
                     ),
-                  );
-                },
-                style: FilledButton.styleFrom(
-                  backgroundColor: PixelTheme.accent,
-                  foregroundColor: PixelTheme.bgDark,
+                  ),
                 ),
-                child: const Text('儲存'),
               ),
-            ),
-          ],
-        ),
+              SafeArea(
+                top: false,
+                minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _saveAndClose,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: PixelTheme.accent,
+                      foregroundColor: PixelTheme.bgDark,
+                    ),
+                    child: const Text('儲存'),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
+      ),
+    );
+  }
+
+  String _getTitleForType() {
+    switch (widget.editType) {
+      case 'name':
+        return '編輯卡片名稱';
+      case 'emoji':
+        return '編輯屬性';
+      case 'link':
+        return '編輯連結';
+      case 'description':
+        return '編輯卡片介紹';
+      default:
+        return '編輯卡片資訊';
+    }
+  }
+
+  List<Widget> _buildFieldsForType() {
+    switch (widget.editType) {
+      case 'name':
+        return [
+          TextField(
+            controller: _nameController,
+            style: TextStyle(color: PixelTheme.textWhite),
+            decoration: _inputDecoration('卡片名稱'),
+            autofocus: true,
+          ),
+        ];
+      case 'emoji':
+        return [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _emojiOptions.map((_EmojiOption option) {
+              final bool selected = _emojiController.text == option.emoji;
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _emojiController.text = option.emoji;
+                    _emojiController.selection = TextSelection.collapsed(offset: _emojiController.text.length);
+                  });
+                },
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: selected ? PixelTheme.accent : PixelTheme.bgMid,
+                    border: Border.all(color: selected ? PixelTheme.textWhite : PixelTheme.border, width: 2),
+                  ),
+                  child: Text(
+                    option.emoji,
+                    style: TextStyle(
+                      fontSize: 20,
+                      color: selected ? PixelTheme.bgDark : PixelTheme.textWhite,
+                      fontFamily: 'Roboto',
+                      fontFamilyFallback: const <String>[
+                        'Segoe UI Emoji',
+                        'Apple Color Emoji',
+                        'Noto Color Emoji',
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ];
+      case 'link':
+        return [
+          TextField(
+            controller: _linkController,
+            style: TextStyle(color: PixelTheme.textWhite),
+            decoration: _inputDecoration('超連結'),
+            autofocus: true,
+          ),
+        ];
+      case 'description':
+        return [
+          TextField(
+            controller: _descriptionController,
+            style: TextStyle(color: PixelTheme.textWhite),
+            decoration: _inputDecoration('卡片介紹'),
+            maxLines: 5,
+            minLines: 3,
+            autofocus: true,
+          ),
+        ];
+      default:
+        return [
+          TextField(
+            controller: _nameController,
+            style: TextStyle(color: PixelTheme.textWhite),
+            decoration: _inputDecoration('卡片名稱'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _linkController,
+            style: TextStyle(color: PixelTheme.textWhite),
+            decoration: _inputDecoration('超連結'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _emojiController,
+            maxLength: 4,
+            style: TextStyle(color: PixelTheme.textWhite),
+            decoration: _inputDecoration('emoji 屬性'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _descriptionController,
+            style: TextStyle(color: PixelTheme.textWhite),
+            decoration: _inputDecoration('卡片介紹'),
+            maxLines: 3,
+            minLines: 2,
+          ),
+        ];
+    }
+  }
+
+  void _saveAndClose() {
+    Navigator.of(context).pop(
+      _TextEditResult(
+        name: _nameController.text.trim(),
+        link: _linkController.text.trim(),
+        emoji: _emojiController.text.trim().isEmpty ? '■' : _emojiController.text.trim(),
+        description: _descriptionController.text.trim(),
       ),
     );
   }
@@ -452,6 +1486,13 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
       ),
     );
   }
+}
+
+class _EmojiOption {
+  const _EmojiOption(this.emoji, this.label);
+
+  final String emoji;
+  final String label;
 }
 
 class _ColorEditorScreen extends StatefulWidget {
@@ -516,93 +1557,104 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
         foregroundColor: PixelTheme.accent,
         title: const Text('編輯卡片顏色'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: _swatches
-                  .map(
-                    (Color color) => GestureDetector(
-                      onTap: () {
+      body: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(12),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight - 24),
+              child: Column(
+                children: [
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: _swatches
+                        .map(
+                          (Color color) => GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedColor = color;
+                              });
+                            },
+                            child: Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: color,
+                                border: Border.all(
+                                  color: _selectedColor == color ? PixelTheme.textWhite : PixelTheme.border,
+                                  width: _selectedColor == color ? 3 : 1,
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final Color? custom = await _showCustomColorDialog(
+                          context,
+                          initialColor: _selectedColor,
+                          title: '自訂卡片顏色',
+                        );
+                        if (custom == null) {
+                          return;
+                        }
                         setState(() {
-                          _selectedColor = color;
+                          _selectedColor = custom;
                         });
                       },
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: color,
-                          border: Border.all(
-                            color: _selectedColor == color ? PixelTheme.textWhite : PixelTheme.border,
-                            width: _selectedColor == color ? 3 : 1,
-                          ),
-                        ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: PixelTheme.accent,
+                        side: BorderSide(color: PixelTheme.accent, width: 2),
+                      ),
+                      icon: const Icon(Icons.tune_rounded),
+                      label: const Text('自訂顏色 (RGB)'),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: _selectedColor,
+                      border: Border.all(color: PixelTheme.textWhite, width: 2),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '預覽色塊\n#${_hex6(_selectedColor)}',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _selectedColor.computeLuminance() > 0.5 ? Colors.black : Colors.white,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () async {
-                  final Color? custom = await _showCustomColorDialog(
-                    context,
-                    initialColor: _selectedColor,
-                    title: '自訂卡片顏色',
-                  );
-                  if (custom == null) {
-                    return;
-                  }
-                  setState(() {
-                    _selectedColor = custom;
-                  });
-                },
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: PixelTheme.accent,
-                  side: BorderSide(color: PixelTheme.accent, width: 2),
-                ),
-                icon: const Icon(Icons.tune_rounded),
-                label: const Text('自訂顏色 (RGB)'),
+                  ),
+                  const SizedBox(height: 16),
+                  SafeArea(
+                    top: false,
+                    minimum: const EdgeInsets.only(bottom: 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(context).pop(_selectedColor),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: PixelTheme.accent,
+                          foregroundColor: PixelTheme.bgDark,
+                        ),
+                        child: const Text('套用顏色'),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              height: 120,
-              decoration: BoxDecoration(
-                color: _selectedColor,
-                border: Border.all(color: PixelTheme.textWhite, width: 2),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                '預覽色塊\n#${_hex6(_selectedColor)}',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _selectedColor.computeLuminance() > 0.5 ? Colors.black : Colors.white,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () => Navigator.of(context).pop(_selectedColor),
-                style: FilledButton.styleFrom(
-                  backgroundColor: PixelTheme.accent,
-                  foregroundColor: PixelTheme.bgDark,
-                ),
-                child: const Text('套用顏色'),
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
       ),
     );
@@ -627,6 +1679,7 @@ class _PixelEditorScreen extends StatefulWidget {
 class _PixelEditorScreenState extends State<_PixelEditorScreen> {
   static const double _canvasViewSize = 360;
 
+  final ScrollController _scrollController = ScrollController();
   late PixelGrid _pixels;
   late Color _brushColor;
   _EditorTool _tool = _EditorTool.brush;
@@ -850,6 +1903,12 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
   }
 
   @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return _withUnifont(
       context,
@@ -860,230 +1919,242 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
         foregroundColor: PixelTheme.accent,
         title: const Text('彩色點陣圖編輯器'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            SizedBox(
-              height: 86,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  _PixelToolButton(iconPattern: _iconImport, label: '匯入', onPressed: _importImage),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(iconPattern: _iconClear, label: '清空', onPressed: _clearCanvas),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(
-                    iconPattern: _iconBrush,
-                    label: _tool == _EditorTool.brush ? '畫筆 ON' : '畫筆',
-                    selected: _tool == _EditorTool.brush,
-                    onPressed: () {
-                      setState(() {
-                        _tool = _EditorTool.brush;
-                      });
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(
-                    iconPattern: _iconEraser,
-                    label: _tool == _EditorTool.eraser ? '橡皮擦 ON' : '橡皮擦',
-                    selected: _tool == _EditorTool.eraser,
-                    onPressed: () {
-                      setState(() {
-                        _tool = _EditorTool.eraser;
-                      });
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(
-                    iconPattern: _iconBucket,
-                    label: _tool == _EditorTool.bucket ? '油漆桶 ON' : '油漆桶',
-                    selected: _tool == _EditorTool.bucket,
-                    onPressed: () {
-                      setState(() {
-                        _tool = _EditorTool.bucket;
-                      });
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(
-                    iconPattern: _iconPicker,
-                    label: _tool == _EditorTool.picker ? '吸管 ON' : '吸管',
-                    selected: _tool == _EditorTool.picker,
-                    onPressed: () {
-                      setState(() {
-                        _tool = _EditorTool.picker;
-                      });
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(
-                    iconPattern: _iconUndo,
-                    label: '復原',
-                    onPressed: _undo,
-                  ),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(
-                    iconPattern: _iconRedo,
-                    label: '重做',
-                    onPressed: _redo,
-                  ),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(
-                    iconPattern: _iconGrid,
-                    label: _showGrid ? '格線 ON' : '格線 OFF',
-                    selected: _showGrid,
-                    onPressed: () {
-                      setState(() {
-                        _showGrid = !_showGrid;
-                      });
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(
-                    iconPattern: _iconMinus,
-                    label: '筆刷-',
-                    onPressed: () {
-                      setState(() {
-                        if (_brushSize > 1) {
-                          _brushSize--;
-                        }
-                      });
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _PixelToolButton(
-                    iconPattern: _iconPlus,
-                    label: '筆刷+',
-                    onPressed: () {
-                      setState(() {
-                        if (_brushSize < 3) {
-                          _brushSize++;
-                        }
-                      });
-                    },
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 48,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _swatches.length + 1,
-                separatorBuilder: (BuildContext context, int index) => const SizedBox(width: 8),
-                itemBuilder: (BuildContext context, int index) {
-                  if (index == _swatches.length) {
-                    return GestureDetector(
-                      onTap: () async {
-                        final Color? custom = await _showCustomColorDialog(
-                          context,
-                          initialColor: _brushColor,
-                          title: '自訂筆刷顏色',
-                        );
-                        if (custom == null) {
-                          return;
-                        }
-                        setState(() {
-                          _brushColor = custom;
-                          if (_tool == _EditorTool.eraser || _tool == _EditorTool.picker) {
-                            _tool = _EditorTool.brush;
-                          }
-                          _status = '已設定自訂筆刷顏色';
-                        });
-                      },
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: PixelTheme.bgMid,
-                          border: Border.all(color: PixelTheme.accent, width: 2),
+      body: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final double size = constraints.maxWidth < _canvasViewSize ? constraints.maxWidth : _canvasViewSize;
+          return Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(12),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: constraints.maxHeight - 24),
+                    child: Column(
+                      children: [
+                        Center(
+                          child: SizedBox(
+                            width: size,
+                            height: size,
+                            child: GestureDetector(
+                              onPanDown: (DragDownDetails details) => _handleCanvasTouch(details.localPosition, Size(size, size), beginStroke: true),
+                              onPanUpdate: (DragUpdateDetails details) => _handleCanvasTouch(details.localPosition, Size(size, size), beginStroke: false),
+                              onPanEnd: (_) {
+                                _strokeInProgress = false;
+                              },
+                              onTapDown: (TapDownDetails details) {
+                                _handleCanvasTouch(details.localPosition, Size(size, size), beginStroke: true);
+                                _strokeInProgress = false;
+                              },
+                              child: CustomPaint(
+                                painter: _PixelCanvasPainter(pixels: _pixels, showGrid: _showGrid),
+                                child: const SizedBox.expand(),
+                              ),
+                            ),
+                          ),
                         ),
-                        child: Icon(Icons.add_rounded, color: PixelTheme.accent),
-                      ),
-                    );
-                  }
-                  final Color color = _swatches[index];
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _brushColor = color;
-                        if (_tool == _EditorTool.eraser || _tool == _EditorTool.picker) {
-                          _tool = _EditorTool.brush;
-                        }
-                      });
-                    },
-                    child: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: color,
-                        border: Border.all(
-                          color: _brushColor == color && _tool != _EditorTool.eraser ? PixelTheme.textWhite : PixelTheme.border,
-                          width: _brushColor == color && _tool != _EditorTool.eraser ? 3 : 1,
+                        const SizedBox(height: 10),
+                        Text(
+                          '$_status | 工具: ${_tool.label} | 筆刷: $_brushSize',
+                          style: TextStyle(color: PixelTheme.accentBlue),
                         ),
-                      ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 86,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            children: [
+                              _PixelToolButton(iconPattern: _iconImport, label: '匯入', onPressed: _importImage),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(iconPattern: _iconClear, label: '清空', onPressed: _clearCanvas),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconBrush,
+                                label: _tool == _EditorTool.brush ? '畫筆 ON' : '畫筆',
+                                selected: _tool == _EditorTool.brush,
+                                onPressed: () {
+                                  setState(() {
+                                    _tool = _EditorTool.brush;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconEraser,
+                                label: _tool == _EditorTool.eraser ? '橡皮擦 ON' : '橡皮擦',
+                                selected: _tool == _EditorTool.eraser,
+                                onPressed: () {
+                                  setState(() {
+                                    _tool = _EditorTool.eraser;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconBucket,
+                                label: _tool == _EditorTool.bucket ? '油漆桶 ON' : '油漆桶',
+                                selected: _tool == _EditorTool.bucket,
+                                onPressed: () {
+                                  setState(() {
+                                    _tool = _EditorTool.bucket;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconPicker,
+                                label: _tool == _EditorTool.picker ? '吸管 ON' : '吸管',
+                                selected: _tool == _EditorTool.picker,
+                                onPressed: () {
+                                  setState(() {
+                                    _tool = _EditorTool.picker;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconUndo,
+                                label: '復原',
+                                onPressed: _undo,
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconRedo,
+                                label: '重做',
+                                onPressed: _redo,
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconGrid,
+                                label: _showGrid ? '格線 ON' : '格線 OFF',
+                                selected: _showGrid,
+                                onPressed: () {
+                                  setState(() {
+                                    _showGrid = !_showGrid;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconMinus,
+                                label: '筆刷-',
+                                onPressed: () {
+                                  setState(() {
+                                    if (_brushSize > 1) {
+                                      _brushSize--;
+                                    }
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconPlus,
+                                label: '筆刷+',
+                                onPressed: () {
+                                  setState(() {
+                                    if (_brushSize < 3) {
+                                      _brushSize++;
+                                    }
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 48,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _swatches.length + 1,
+                            separatorBuilder: (BuildContext context, int index) => const SizedBox(width: 8),
+                            itemBuilder: (BuildContext context, int index) {
+                              if (index == _swatches.length) {
+                                return GestureDetector(
+                                  onTap: () async {
+                                    final Color? custom = await _showCustomColorDialog(
+                                      context,
+                                      initialColor: _brushColor,
+                                      title: '自訂筆刷顏色',
+                                    );
+                                    if (custom == null) {
+                                      return;
+                                    }
+                                    setState(() {
+                                      _brushColor = custom;
+                                      if (_tool == _EditorTool.eraser || _tool == _EditorTool.picker) {
+                                        _tool = _EditorTool.brush;
+                                      }
+                                      _status = '已設定自訂筆刷顏色';
+                                    });
+                                  },
+                                  child: Container(
+                                    width: 48,
+                                    height: 48,
+                                    decoration: BoxDecoration(
+                                      color: PixelTheme.bgMid,
+                                      border: Border.all(color: PixelTheme.accent, width: 2),
+                                    ),
+                                    child: Icon(Icons.add_rounded, color: PixelTheme.accent),
+                                  ),
+                                );
+                              }
+                              final Color color = _swatches[index];
+                              return GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _brushColor = color;
+                                    if (_tool == _EditorTool.eraser || _tool == _EditorTool.picker) {
+                                      _tool = _EditorTool.brush;
+                                    }
+                                  });
+                                },
+                                child: Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    border: Border.all(
+                                      color: _brushColor == color && _tool != _EditorTool.eraser ? PixelTheme.textWhite : PixelTheme.border,
+                                      width: _brushColor == color && _tool != _EditorTool.eraser ? 3 : 1,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                     ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: Center(
-                child: LayoutBuilder(
-                  builder: (BuildContext context, BoxConstraints constraints) {
-                    final double size = constraints.maxWidth < _canvasViewSize ? constraints.maxWidth : _canvasViewSize;
-                    return SizedBox(
-                      width: size,
-                      height: size,
-                      child: GestureDetector(
-                        onPanDown: (DragDownDetails details) => _handleCanvasTouch(details.localPosition, Size(size, size), beginStroke: true),
-                        onPanUpdate: (DragUpdateDetails details) => _handleCanvasTouch(details.localPosition, Size(size, size), beginStroke: false),
-                        onPanEnd: (_) {
-                          _strokeInProgress = false;
-                        },
-                        onTapDown: (TapDownDetails details) {
-                          _handleCanvasTouch(details.localPosition, Size(size, size), beginStroke: true);
-                          _strokeInProgress = false;
-                        },
-                        child: CustomPaint(
-                          painter: _PixelCanvasPainter(pixels: _pixels, showGrid: _showGrid),
-                          child: const SizedBox.expand(),
-                        ),
-                      ),
-                    );
-                  },
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              '$_status | 工具: ${_tool.label} | 筆刷: $_brushSize',
-              style: TextStyle(color: PixelTheme.accentBlue),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () {
-                  Navigator.of(context).pop(
-                    _PixelEditResult(
-                      pixels: _cloneGrid(_pixels),
-                      status: '已更新彩色點陣圖（${widget.canvasSize}x${widget.canvasSize}）',
+              SafeArea(
+                top: false,
+                minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.of(context).pop(
+                        _PixelEditResult(
+                          pixels: _cloneGrid(_pixels),
+                          status: '已更新彩色點陣圖（${widget.canvasSize}x${widget.canvasSize}）',
+                        ),
+                      );
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: PixelTheme.accent,
+                      foregroundColor: PixelTheme.bgDark,
                     ),
-                  );
-                },
-                style: FilledButton.styleFrom(
-                  backgroundColor: PixelTheme.accent,
-                  foregroundColor: PixelTheme.bgDark,
+                    child: const Text('儲存點陣圖'),
+                  ),
                 ),
-                child: const Text('儲存點陣圖'),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
       ),
     );
@@ -1115,6 +2186,7 @@ class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
   Offset _viewOffset = Offset.zero;
   Offset _baseOffset = Offset.zero;
   Offset _scaleStartFocalPoint = Offset.zero;
+
   @override
   void initState() {
     super.initState();
@@ -1201,143 +2273,154 @@ class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
         foregroundColor: PixelTheme.accent,
         title: Text('匯入前處理 - ${widget.sourceName} (${widget.sourceFormat})'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: PixelTheme.bgMid,
-                border: Border.all(color: PixelTheme.border, width: 2),
-              ),
-              child: const Text(
-                '先調整旋轉與裁切，再進入點陣圖。\n此流程不會強制拉伸比例。',
-              ),
-            ),
-            const SizedBox(height: 12),
-            Center(
-              child: Container(
-                width: _previewSize,
-                height: _previewSize,
-                decoration: BoxDecoration(
-                  color: _hasTransparency ? Colors.white : PixelTheme.bgMid,
-                  border: Border.all(color: PixelTheme.border, width: 2),
-                ),
-                child: GestureDetector(
-                  onScaleStart: (ScaleStartDetails details) {
-                    _baseScale = _viewScale;
-                    _baseOffset = _viewOffset;
-                    _scaleStartFocalPoint = details.localFocalPoint;
-                  },
-                  onScaleUpdate: (ScaleUpdateDetails details) {
-                    setState(() {
-                      _viewScale = (_baseScale * details.scale).clamp(0.2, 4.0);
-                      _viewOffset = _baseOffset + (details.localFocalPoint - _scaleStartFocalPoint);
-                    });
-                  },
-                  child: ClipRect(
-                    child: Center(
-                      child: SizedBox(
-                        width: _previewSize,
-                        height: _previewSize,
-                        child: Builder(
-                          builder: (BuildContext context) {
-                            final _PlacedRectPx rect = _computePlacedRectPx(
-                              boxSize: _previewSize,
-                              sourceWidth: _layoutPreviewWidth,
-                              sourceHeight: _layoutPreviewHeight,
-                              offsetScale: 1.0,
-                            );
-                            return Stack(
-                              children: [
-                                Positioned(
-                                  left: rect.dx.toDouble(),
-                                  top: rect.dy.toDouble(),
-                                  width: rect.drawW.toDouble(),
-                                  height: rect.drawH.toDouble(),
-                                  child: Image.memory(
-                                    _workingPreviewBytes,
-                                    fit: BoxFit.fill,
-                                    gaplessPlayback: true,
-                                    filterQuality: FilterQuality.none,
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
+      body: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(12),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight - 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: PixelTheme.bgMid,
+                      border: Border.all(color: PixelTheme.border, width: 2),
+                    ),
+                    child: const Text(
+                      '先調整旋轉與裁切，再進入點陣圖。\n此流程不會強制拉伸比例。',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Container(
+                      width: _previewSize,
+                      height: _previewSize,
+                      decoration: BoxDecoration(
+                        color: _hasTransparency ? Colors.white : PixelTheme.bgMid,
+                        border: Border.all(color: PixelTheme.border, width: 2),
+                      ),
+                      child: GestureDetector(
+                        onScaleStart: (ScaleStartDetails details) {
+                          _baseScale = _viewScale;
+                          _baseOffset = _viewOffset;
+                          _scaleStartFocalPoint = details.localFocalPoint;
+                        },
+                        onScaleUpdate: (ScaleUpdateDetails details) {
+                          setState(() {
+                            _viewScale = (_baseScale * details.scale).clamp(0.2, 4.0);
+                            _viewOffset = _baseOffset + (details.localFocalPoint - _scaleStartFocalPoint);
+                          });
+                        },
+                        child: ClipRect(
+                          child: Center(
+                            child: SizedBox(
+                              width: _previewSize,
+                              height: _previewSize,
+                              child: Builder(
+                                builder: (BuildContext context) {
+                                  final _PlacedRectPx rect = _computePlacedRectPx(
+                                    boxSize: _previewSize,
+                                    sourceWidth: _layoutPreviewWidth,
+                                    sourceHeight: _layoutPreviewHeight,
+                                    offsetScale: 1.0,
+                                  );
+                                  return Stack(
+                                    children: [
+                                      Positioned(
+                                        left: rect.dx.toDouble(),
+                                        top: rect.dy.toDouble(),
+                                        width: rect.drawW.toDouble(),
+                                        height: rect.drawH.toDouble(),
+                                        child: Image.memory(
+                                          _workingPreviewBytes,
+                                          fit: BoxFit.fill,
+                                          gaplessPlayback: true,
+                                          filterQuality: FilterQuality.none,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _ToolButton(
-                  label: '左轉 90°',
-                  onPressed: () {
-                    setState(() {
-                      _rotationQuarterTurns = (_rotationQuarterTurns + 3) % 4;
-                      _refreshWorkingPreview();
-                    });
-                  },
-                ),
-                _ToolButton(
-                  label: '右轉 90°',
-                  onPressed: () {
-                    setState(() {
-                      _rotationQuarterTurns = (_rotationQuarterTurns + 1) % 4;
-                      _refreshWorkingPreview();
-                    });
-                  },
-                ),
-                _ToolButton(
-                  label: '重置位置/縮放',
-                  onPressed: () {
-                    setState(() {
-                      _viewScale = 1.0;
-                      _viewOffset = Offset.zero;
-                    });
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text('手勢操作：單指拖曳位置、雙指縮放（固定比例）', style: TextStyle(color: PixelTheme.accent)),
-            if (_hasTransparency) ...[
-              const SizedBox(height: 8),
-              Text('偵測到透明背景，預覽與輸出都會以白色底處理。', style: TextStyle(color: PixelTheme.accentBlue)),
-            ],
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () {
-                  Navigator.of(context).pop(
-                    _ImagePreprocessResult(
-                      image: _buildProcessedSquare(outputSize: 512),
-                      usedBackgroundColor: _hasTransparency,
-                      sourceName: widget.sourceName,
-                      sourceFormat: widget.sourceFormat,
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _ToolButton(
+                        label: '左轉 90°',
+                        onPressed: () {
+                          setState(() {
+                            _rotationQuarterTurns = (_rotationQuarterTurns + 3) % 4;
+                            _refreshWorkingPreview();
+                          });
+                        },
+                      ),
+                      _ToolButton(
+                        label: '右轉 90°',
+                        onPressed: () {
+                          setState(() {
+                            _rotationQuarterTurns = (_rotationQuarterTurns + 1) % 4;
+                            _refreshWorkingPreview();
+                          });
+                        },
+                      ),
+                      _ToolButton(
+                        label: '重置位置/縮放',
+                        onPressed: () {
+                          setState(() {
+                            _viewScale = 1.0;
+                            _viewOffset = Offset.zero;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text('手勢操作：單指拖曳位置、雙指縮放（固定比例）', style: TextStyle(color: PixelTheme.accent)),
+                  if (_hasTransparency) ...[
+                    const SizedBox(height: 8),
+                    Text('偵測到透明背景，預覽與輸出都會以白色底處理。', style: TextStyle(color: PixelTheme.accentBlue)),
+                  ],
+                  const SizedBox(height: 16),
+                  SafeArea(
+                    top: false,
+                    minimum: const EdgeInsets.only(bottom: 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () {
+                          Navigator.of(context).pop(
+                            _ImagePreprocessResult(
+                              image: _buildProcessedSquare(outputSize: 512),
+                              usedBackgroundColor: _hasTransparency,
+                              sourceName: widget.sourceName,
+                              sourceFormat: widget.sourceFormat,
+                            ),
+                          );
+                        },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: PixelTheme.accent,
+                          foregroundColor: PixelTheme.bgDark,
+                        ),
+                        child: const Text('套用裁切並繼續'),
+                      ),
                     ),
-                  );
-                },
-                style: FilledButton.styleFrom(
-                  backgroundColor: PixelTheme.accent,
-                  foregroundColor: PixelTheme.bgDark,
-                ),
-                child: const Text('套用裁切並繼續'),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          );
+        },
       ),
       ),
     );
@@ -1623,11 +2706,17 @@ class _PixelCanvasPainter extends CustomPainter {
 }
 
 class _TextEditResult {
-  const _TextEditResult({required this.name, required this.link, required this.emoji});
+  const _TextEditResult({
+    required this.name,
+    required this.link,
+    required this.emoji,
+    required this.description,
+  });
 
   final String name;
   final String link;
   final String emoji;
+  final String description;
 }
 
 class _PixelEditResult {

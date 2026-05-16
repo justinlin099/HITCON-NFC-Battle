@@ -42,62 +42,96 @@ class MockApiService {
   };
 
   /// 模擬 NFC 標籤數據庫
-  static final List<Map<String, dynamic>> _mockTags = [
-    {
-      'uid': '04:1A:2B:3C:4D:5E:6F',
-      'owner': 'test_user_456',
-      'name': 'Card_001',
-      'collected_at': '2026-04-20T10:30:00Z'
-    },
-    {
-      'uid': '04:2B:3C:4D:5E:6F:7G',
-      'owner': 'test_user_456',
-      'name': 'Card_002',
-      'collected_at': '2026-04-21T14:15:00Z'
-    },
-    {
-      'uid': '04:3C:4D:5E:6F:7G:8H',
-      'owner': 'test_user_456',
-      'name': 'Card_003',
-      'collected_at': '2026-04-22T09:45:00Z'
-    },
-    {
-      'uid': '04:4D:5E:6F:7G:8H:9I',
-      'owner': 'test_user_456',
-      'name': 'Card_004',
-      'collected_at': '2026-04-22T10:10:00Z'
-    },
-    {
-      'uid': '04:5E:6F:7G:8H:9I:0J',
-      'owner': 'test_user_456',
-      'name': 'Card_005',
-      'collected_at': '2026-04-22T11:05:00Z'
-    },
-    {
-      'uid': '04:6F:7G:8H:9I:0J:1K',
-      'owner': 'test_user_456',
-      'name': 'Card_006',
-      'collected_at': '2026-04-22T12:30:00Z'
-    },
-    {
-      'uid': '04:7G:8H:9I:0J:1K:2L',
-      'owner': 'test_user_456',
-      'name': 'Card_007',
-      'collected_at': '2026-04-22T13:45:00Z'
-    },
-    {
-      'uid': '04:8H:9I:0J:1K:2L:3M',
-      'owner': 'test_user_456',
-      'name': 'Card_008',
-      'collected_at': '2026-04-22T15:20:00Z'
-    },
-    {
-      'uid': '04:9I:0J:1K:2L:3M:4N',
-      'owner': 'test_user_456',
-      'name': 'Card_009',
-      'collected_at': '2026-04-22T16:50:00Z'
-    },
-  ];
+  static final List<Map<String, dynamic>> _mockTags = _buildMockTags();
+
+  static List<Map<String, dynamic>> _buildMockTags() {
+    const List<Map<String, String>> baseCards = <Map<String, String>>[
+      {
+        'card_title': 'Neon Dolphin',
+        'image_file': 'dolphin_01.png',
+        'attribute_emoji': '💧',
+        'attribute_label': 'WATER',
+      },
+      {
+        'card_title': 'Pixel Fox',
+        'image_file': 'fox_02.png',
+        'attribute_emoji': '🔥',
+        'attribute_label': 'FIRE',
+      },
+      {
+        'card_title': 'Circuit Owl',
+        'image_file': 'owl_03.png',
+        'attribute_emoji': '💨',
+        'attribute_label': 'WIND',
+      },
+      {
+        'card_title': 'Byte Panda',
+        'image_file': 'panda_04.png',
+        'attribute_emoji': '🌱',
+        'attribute_label': 'EARTH',
+      },
+      {
+        'card_title': 'Glitch Tiger',
+        'image_file': 'tiger_05.png',
+        'attribute_emoji': '✨',
+        'attribute_label': 'LIGHT',
+      },
+      {
+        'card_title': 'Turbo Bee',
+        'image_file': 'bee_06.png',
+        'attribute_emoji': '⚡',
+        'attribute_label': 'ELECTRIC',
+      },
+      {
+        'card_title': 'Star Koala',
+        'image_file': 'koala_07.png',
+        'attribute_emoji': '🌟',
+        'attribute_label': 'STAR',
+      },
+      {
+        'card_title': 'Neon Rabbit',
+        'image_file': 'rabbit_08.png',
+        'attribute_emoji': '💫',
+        'attribute_label': 'SPEED',
+      },
+      {
+        'card_title': 'Pixel Dragon',
+        'image_file': 'dragon_09.png',
+        'attribute_emoji': '🐉',
+        'attribute_label': 'DRAGON',
+      },
+    ];
+
+    final List<Map<String, dynamic>> tags = <Map<String, dynamic>>[];
+    final DateTime start = DateTime(2026, 4, 20, 10, 30);
+
+    String hexByte(int value) => value.toRadixString(16).padLeft(2, '0').toUpperCase();
+
+    for (int i = 0; i < 100; i++) {
+      final int index = i + 1;
+      final Map<String, String> base = baseCards[i % baseCards.length];
+      final int a = (index * 37) % 256;
+      final int b = (index * 59) % 256;
+      final int c = (index * 83) % 256;
+      final int d = (index * 97) % 256;
+      final int e = (index * 13) % 256;
+      final int f = (index * 7) % 256;
+
+      tags.add({
+        'uid': '04:${hexByte(a)}:${hexByte(b)}:${hexByte(c)}:${hexByte(d)}:${hexByte(e)}:${hexByte(f)}',
+        'owner': 'test_user_456',
+        'name': 'Card_${index.toString().padLeft(3, '0')}',
+        'card_title': '${base['card_title']} ${index.toString().padLeft(2, '0')}',
+        'image_file': base['image_file'],
+        'attribute_emoji': base['attribute_emoji'],
+        'attribute_label': base['attribute_label'],
+        'link': 'https://hitcon.org',
+        'collected_at': start.add(Duration(hours: i * 3)).toIso8601String(),
+      });
+    }
+
+    return tags;
+  }
 
   /// 釘選的贊助商與社群攤位
   static const List<Map<String, String>> featuredBooths = <Map<String, String>>[
@@ -224,6 +258,10 @@ class MockApiService {
           'emoji_icon': _mockUsers[tag['owner']]?['emoji_icon'] ?? '❓',
           'collected_at': tag['collected_at'] ?? DateTime.now().toIso8601String(),
           'tag_name': tag['name'],
+          'card_title': tag['card_title'],
+          'image_file': tag['image_file'],
+          'attribute_emoji': tag['attribute_emoji'],
+          'attribute_label': tag['attribute_label'],
           'physical_uid': tag['uid'],
         })
         .toList();
@@ -318,54 +356,63 @@ class MockApiService {
         'uid': '04:1A:2B:3C:4D:5E:6F',
         'owner': 'test_user_456',
         'name': 'Card_001',
+        'link': 'https://hitcon.org',
         'collected_at': '2026-04-20T10:30:00Z'
       },
       {
         'uid': '04:2B:3C:4D:5E:6F:7G',
         'owner': 'test_user_456',
         'name': 'Card_002',
+        'link': 'https://hitcon.org',
         'collected_at': '2026-04-21T14:15:00Z'
       },
       {
         'uid': '04:3C:4D:5E:6F:7G:8H',
         'owner': 'test_user_456',
         'name': 'Card_003',
+        'link': 'https://hitcon.org',
         'collected_at': '2026-04-22T09:45:00Z'
       },
       {
         'uid': '04:4D:5E:6F:7G:8H:9I',
         'owner': 'test_user_456',
         'name': 'Card_004',
+        'link': 'https://hitcon.org',
         'collected_at': '2026-04-22T10:10:00Z'
       },
       {
         'uid': '04:5E:6F:7G:8H:9I:0J',
         'owner': 'test_user_456',
         'name': 'Card_005',
+        'link': 'https://hitcon.org',
         'collected_at': '2026-04-22T11:05:00Z'
       },
       {
         'uid': '04:6F:7G:8H:9I:0J:1K',
         'owner': 'test_user_456',
         'name': 'Card_006',
+        'link': 'https://hitcon.org',
         'collected_at': '2026-04-22T12:30:00Z'
       },
       {
         'uid': '04:7G:8H:9I:0J:1K:2L',
         'owner': 'test_user_456',
         'name': 'Card_007',
+        'link': 'https://hitcon.org',
         'collected_at': '2026-04-22T13:45:00Z'
       },
       {
         'uid': '04:8H:9I:0J:1K:2L:3M',
         'owner': 'test_user_456',
         'name': 'Card_008',
+        'link': 'https://hitcon.org',
         'collected_at': '2026-04-22T15:20:00Z'
       },
       {
         'uid': '04:9I:0J:1K:2L:3M:4N',
         'owner': 'test_user_456',
         'name': 'Card_009',
+        'link': 'https://hitcon.org',
         'collected_at': '2026-04-22T16:50:00Z'
       },
     ]);

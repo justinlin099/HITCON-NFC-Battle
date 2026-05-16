@@ -7,18 +7,44 @@ import 'package:flutter/material.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 import 'config/app_config.dart';
 import 'pages/user/card_collection_page.dart';
+import 'pages/user/card_detail_page.dart';
 import 'pages/debug/test_login_page.dart';
+import 'services/auth_service.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  late final _AutoNtagScanner _autoScanner;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoScanner = _AutoNtagScanner(navigatorKey: _navigatorKey);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _autoScanner.start();
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoScanner.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'HITCON NFC Battle',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
@@ -31,6 +57,163 @@ class MyApp extends StatelessWidget {
         '/collection': (context) => const CardCollectionPage(),
       },
     );
+  }
+}
+
+class _AutoNtagScanner {
+  _AutoNtagScanner({required this.navigatorKey});
+
+  final GlobalKey<NavigatorState> navigatorKey;
+  bool _isScanning = false;
+  bool _isHandling = false;
+  String _lastTagId = '';
+  DateTime _lastReadTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Future<void> start() async {
+    if (_isScanning) {
+      return;
+    }
+
+    final bool isAvailable = await NfcManager.instance.isAvailable();
+    if (!isAvailable) {
+      return;
+    }
+
+    _isScanning = true;
+    await NfcManager.instance.startSession(
+      onDiscovered: (NfcTag tag) async {
+        if (_isHandling) {
+          return;
+        }
+
+        final String uid = _readTagId(tag);
+        final DateTime now = DateTime.now();
+        final bool isDuplicate = uid.isNotEmpty &&
+            uid == _lastTagId &&
+            now.difference(_lastReadTime).inMilliseconds < 1200;
+        if (isDuplicate) {
+          return;
+        }
+
+        _lastTagId = uid;
+        _lastReadTime = now;
+        _isHandling = true;
+
+        await NfcManager.instance.stopSession();
+        _isScanning = false;
+
+        await _handleScan(uid);
+        _isHandling = false;
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        await start();
+      },
+      onError: (_) async {
+        await NfcManager.instance.stopSession();
+        _isScanning = false;
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        await start();
+      },
+    );
+  }
+
+  Future<void> _handleScan(String uid) async {
+    if (uid.isEmpty) {
+      return;
+    }
+
+    final AuthService auth = AuthService();
+    if (!auth.isLoggedIn) {
+      return;
+    }
+
+    await auth.pairNfcTag(uid);
+    final Map<String, dynamic>? collection = await auth.fetchCollectionRecords();
+    if (collection == null) {
+      return;
+    }
+
+    final List<dynamic> raw = collection['collection'] as List<dynamic>? ?? <dynamic>[];
+    final List<Map<String, dynamic>> cards = raw.whereType<Map<String, dynamic>>().toList();
+    final int index = cards.indexWhere((card) => card['physical_uid'] == uid);
+    if (index == -1) {
+      return;
+    }
+
+    final Map<String, dynamic> card = cards[index];
+    final String heroTag = 'scan-$uid';
+    final Color cardColor = _colorForIndex(index);
+    final String title = card['card_title'] as String? ?? card['tag_name'] as String? ?? 'Unknown';
+    final String attributeEmoji = card['attribute_emoji'] as String? ?? '❓';
+    final String attributeLabel = card['attribute_label'] as String? ?? 'UNKNOWN';
+    final String rawLink = card['link'] as String? ?? '';
+    final String link = rawLink.trim().isEmpty ? 'https://hitcon.org' : rawLink;
+    final String collectedAt = card['collected_at'] as String? ?? '';
+
+    final NavigatorState? navigator = navigatorKey.currentState;
+    if (navigator == null) {
+      return;
+    }
+
+    await navigator.push(
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierColor: Colors.transparent,
+        transitionDuration: const Duration(milliseconds: 450),
+        reverseTransitionDuration: const Duration(milliseconds: 300),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return CardDetailPage(
+            heroTag: heroTag,
+            title: title,
+            attributeEmoji: attributeEmoji,
+            attributeLabel: attributeLabel,
+            link: link,
+            uid: card['physical_uid'] as String? ?? uid,
+            collectedAt: collectedAt,
+            cardColor: cardColor,
+          );
+        },
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final Animation<double> curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return FadeTransition(
+            opacity: curved,
+            child: child,
+          );
+        },
+      ),
+    );
+  }
+
+  String _readTagId(NfcTag tag) {
+    final Map<String, dynamic> data = tag.data;
+    final dynamic idBytes = data['nfca']?['identifier'] ??
+        data['mifareclassic']?['identifier'] ??
+        data['mifareultralight']?['identifier'];
+
+    if (idBytes is! List) {
+      return '';
+    }
+    final Iterable<int> values = idBytes.whereType<int>();
+    return values.map((int b) => b.toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
+  }
+
+  Color _colorForIndex(int seed) {
+    const List<Color> colors = <Color>[
+      Color(0xFF00AAFF),
+      Color(0xFFFFAA00),
+      Color(0xFFFF0099),
+      Color(0xFF00FF00),
+      Color(0xFFFFFF00),
+      Color(0xFF9900FF),
+    ];
+    return colors[seed % colors.length];
+  }
+
+  void dispose() {
+    NfcManager.instance.stopSession();
   }
 }
 
