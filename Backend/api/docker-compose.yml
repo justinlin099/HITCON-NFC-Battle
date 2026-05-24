@@ -1,24 +1,19 @@
 # Local dev — `docker compose up` from Backend/api/.
 #
 # - Code is bind-mounted, so edits hot-reload via wrangler dev.
-# - node_modules and .wrangler/ live in named volumes (faster on Linux,
-#   and isolates Linux-container artefacts from a host install).
-# - The container runs as the host user (UID/GID) so files it writes
-#   (e.g. drizzle-generated migrations) don't end up root-owned.
-#
-# Override the user with: `UID=$(id -u) GID=$(id -g) docker compose up`
-# (compose v2 picks these up automatically from the shell env).
+# - node_modules / .wrangler / .docker-home live in named volumes (faster on
+#   Linux, and isolates Linux-container artefacts from a host install).
+# - The entrypoint (docker-entrypoint.sh) chowns those volume mounts to the
+#   host project owner and drops privileges via su-exec, so generated files
+#   (drizzle migrations, .wrangler state) match host ownership.
 
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    user: "${UID:-1000}:${GID:-1000}"
     working_dir: /app
     environment:
-      # Wrangler caches workerd / pnpm caches under HOME — make sure the
-      # non-root user has a writable home inside the named volumes.
       HOME: /app/.docker-home
     volumes:
       - .:/app
