@@ -52,33 +52,65 @@ wrangler.toml           # Worker + D1 binding config
 drizzle.config.ts       # Drizzle Kit config
 ```
 
-## Local dev
+## Local dev — Docker (recommended; no host toolchain needed)
 
 ```sh
-pnpm install
+cd Backend/api
+cp .dev.vars.example .dev.vars     # fill in SSO_* values (any non-empty
+                                   # strings are fine for boot-only test)
 
-# 1. Create a local D1 (no Cloudflare account required for --local).
-pnpm exec wrangler d1 create hitcon_nfc_battle   # only needed once for remote
-# Paste the returned database_id into wrangler.toml.
-
-# 2. Generate + apply migrations locally.
-pnpm db:generate
-pnpm db:migrate:local
-
-# 3. Configure dev secrets.
-cp .dev.vars.example .dev.vars
-# Edit .dev.vars: SSO_JWKS_URL, SSO_ISSUER, SSO_AUDIENCE.
-
-# 4. Run.
-pnpm dev
+# First run will build the image, install deps, and apply migrations.
+UID=$(id -u) GID=$(id -g) docker compose up
 # → http://localhost:8787
 ```
 
-Quick smoke test (requires a valid SSO JWT):
+Smoke test the unauthenticated endpoints (no JWT needed):
 
 ```sh
-curl -H "Authorization: Bearer $JWT" http://localhost:8787/v1/users/me
+curl http://localhost:8787/healthz
+# {"status":"ok"}
 ```
+
+Anything under `/v1/*` requires a valid SSO JWT — see "Testing authenticated
+endpoints" below.
+
+Useful commands:
+
+```sh
+# Tear down (keeps the named volumes — D1 data + node_modules persist)
+docker compose down
+
+# Nuke everything including the local D1 database
+docker compose down -v
+
+# Run an arbitrary command in the same env (e.g. regenerate migrations)
+docker compose run --rm api pnpm db:generate
+```
+
+## Local dev — host toolchain (alternative)
+
+If you'd rather run pnpm/wrangler on the host (Node 22+, pnpm 9+):
+
+```sh
+pnpm install
+cp .dev.vars.example .dev.vars
+pnpm db:generate
+pnpm db:migrate:local
+pnpm dev    # → http://localhost:8787
+```
+
+## Testing authenticated endpoints
+
+There is no test-JWT helper checked in yet — minting one needs decisions on
+the SSO `iss`/`aud` + the signing key. Options once those are decided:
+
+- Point `SSO_JWKS_URL` at a local key-server (e.g. `mkjwk` + `http-server`)
+  and mint short-lived tokens with `jose` from a script.
+- Add a `DEV_BYPASS_AUTH=1` env-gated escape hatch in `requireAuth` (only
+  honoured when `ENVIRONMENT=development`). Cheap, but a footgun — only do
+  this if we accept the risk of accidentally shipping it.
+
+This is tracked alongside the other open questions in [DECISIONS.md](DECISIONS.md).
 
 ## Deploy
 

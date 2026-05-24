@@ -1,0 +1,9 @@
+# Development-only image. Wrangler downloads workerd at runtime; we just
+# provide Node + pnpm + git (corepack needs git for some prepares).
+FROM node:22-alpine
+
+RUN apk add --no-cache git \
+ && corepack enable
+
+WORKDIR /app
+EXPOSE 8787
