@@ -21,6 +21,20 @@ function getJwks(url: string) {
 }
 
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
+  // Dev-only auth bypass. Requires BOTH gates to avoid accidental enablement
+  // in production: ENVIRONMENT must be "development" (set in wrangler.toml,
+  // not a secret) AND DEV_BYPASS_AUTH must be "1" (per-developer toggle in
+  // .dev.vars). Prod sets ENVIRONMENT="production", so this branch is
+  // structurally unreachable on the deployed Worker.
+  if (c.env.ENVIRONMENT === "development" && c.env.DEV_BYPASS_AUTH === "1") {
+    const sub = c.env.DEV_BYPASS_SUB || "dev_user_001";
+    const role = c.env.DEV_BYPASS_ROLE === "STAFF" ? "STAFF" : "ATTENDEE";
+    console.warn(`[auth] DEV_BYPASS_AUTH active — sub=${sub} role=${role}`);
+    c.set("claims", { sub, role } as AuthClaims);
+    await next();
+    return;
+  }
+
   const header = c.req.header("authorization") ?? "";
   const match = /^Bearer\s+(.+)$/i.exec(header);
   if (!match) {

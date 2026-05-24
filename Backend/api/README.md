@@ -101,16 +101,36 @@ pnpm dev    # → http://localhost:8787
 
 ## Testing authenticated endpoints
 
-There is no test-JWT helper checked in yet — minting one needs decisions on
-the SSO `iss`/`aud` + the signing key. Options once those are decided:
+### Dev bypass (default in `.dev.vars.example`)
 
-- Point `SSO_JWKS_URL` at a local key-server (e.g. `mkjwk` + `http-server`)
-  and mint short-lived tokens with `jose` from a script.
-- Add a `DEV_BYPASS_AUTH=1` env-gated escape hatch in `requireAuth` (only
-  honoured when `ENVIRONMENT=development`). Cheap, but a footgun — only do
-  this if we accept the risk of accidentally shipping it.
+For local development without a real SSO, the auth middleware honours an
+escape hatch:
 
-This is tracked alongside the other open questions in [DECISIONS.md](DECISIONS.md).
+```sh
+# in .dev.vars
+DEV_BYPASS_AUTH="1"
+DEV_BYPASS_SUB="dev_user_001"
+DEV_BYPASS_ROLE="ATTENDEE"     # or "STAFF" for /v1/staff/* testing
+```
+
+Both conditions must hold for the bypass to fire:
+
+1. `ENVIRONMENT=development` (set in `wrangler.toml [vars]`; **prod sets it
+   to `"production"`**, so the bypass is structurally unreachable on deploy).
+2. `DEV_BYPASS_AUTH=1`.
+
+When active, the middleware logs `[auth] DEV_BYPASS_AUTH active — sub=… role=…`
+on every request and injects `{ sub, role }` as the JWT claims. Real
+`Authorization` headers are ignored while it's on.
+
+To simulate two users, edit `DEV_BYPASS_SUB` in `.dev.vars` and run
+`docker compose restart` (no rebuild needed).
+
+### Real JWT (when SSO is wired up)
+
+Either point `SSO_JWKS_URL` at a local key-server (e.g. `mkjwk` + `http-server`)
+and mint short-lived tokens with `jose`, or wait for the real SSO endpoint
+to be available. There is no checked-in mint helper yet.
 
 ## Deploy
 
