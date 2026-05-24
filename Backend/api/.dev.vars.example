@@ -1,0 +1,6 @@
+# Copy to `.dev.vars` (gitignored) and fill in real values for `wrangler dev`.
+# In production these are set with `wrangler secret put <NAME>`.
+
+SSO_JWKS_URL="https://sso.hitcon2026.online/.well-known/jwks.json"
+SSO_ISSUER="https://sso.hitcon2026.online"
+SSO_AUDIENCE="hitcon-nfc-tag-game-api"
