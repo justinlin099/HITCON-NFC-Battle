@@ -42,8 +42,10 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     });
 
     try {
-      final List<Map<String, String>> boothResult = await MockApiService.getFeaturedBooths();
-      final Map<String, dynamic>? collectionResult = await _authService.fetchCollectionRecords();
+      final List<Map<String, String>> boothResult =
+          await MockApiService.getFeaturedBooths();
+      final Map<String, dynamic>? collectionResult = await _authService
+          .fetchCollectionRecords();
 
       if (!mounted) {
         return;
@@ -70,7 +72,8 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     return <Map<String, dynamic>>[];
   }
 
-  int get _totalCollected => _collectionData?['total_collected'] as int? ?? _cards.length;
+  int get _totalCollected =>
+      _collectionData?['total_collected'] as int? ?? _cards.length;
 
   bool get _isComplete => _totalCollected >= _prizeRequirement;
 
@@ -85,7 +88,9 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
 
     final ThemeData pixelTheme = Theme.of(context).copyWith(
       textTheme: Theme.of(context).textTheme.apply(fontFamily: 'Unifont'),
-      primaryTextTheme: Theme.of(context).primaryTextTheme.apply(fontFamily: 'Unifont'),
+      primaryTextTheme: Theme.of(
+        context,
+      ).primaryTextTheme.apply(fontFamily: 'Unifont'),
     );
 
     return Theme(
@@ -129,11 +134,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                 },
               ),
               if (_selectedTabIndex == 0)
-                _PixelButton(
-                  onPressed: _loadData,
-                  label: '↻',
-                  tooltip: '重新整理',
-                ),
+                _PixelButton(onPressed: _loadData, label: '↻', tooltip: '重新整理'),
             ],
           ),
           body: IndexedStack(
@@ -147,11 +148,17 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
           bottomNavigationBar: NavigationBarTheme(
             data: NavigationBarThemeData(
               backgroundColor: PixelTheme.bgMid,
-              indicatorColor: PixelTheme.accent,
-              labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((Set<WidgetState> states) {
+              indicatorColor: Colors.transparent,
+              indicatorShape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.zero,
+              ),
+              overlayColor: WidgetStateProperty.all<Color>(Colors.transparent),
+              labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
+                Set<WidgetState> states,
+              ) {
                 if (states.contains(WidgetState.selected)) {
                   return TextStyle(
-                    color: PixelTheme.bgDark,
+                    color: PixelTheme.accent,
                     fontFamily: 'Unifont',
                     fontWeight: FontWeight.w900,
                   );
@@ -162,11 +169,13 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                   fontWeight: FontWeight.w700,
                 );
               }),
-              iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((Set<WidgetState> states) {
+              iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((
+                Set<WidgetState> states,
+              ) {
                 if (states.contains(WidgetState.selected)) {
-                  return IconThemeData(color: PixelTheme.bgDark);
+                  return IconThemeData(color: PixelTheme.accent);
                 }
-                return IconThemeData(color: PixelTheme.textWhite);
+                return IconThemeData(color: PixelTheme.textGray);
               }),
             ),
             child: NavigationBar(
@@ -176,17 +185,35 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                   _selectedTabIndex = index;
                 });
               },
-              destinations: const [
+              destinations: [
                 NavigationDestination(
-                  icon: Icon(Icons.collections_rounded),
+                  icon: _PixelNavIcon(
+                    type: _PixelNavIconType.collection,
+                    color: PixelTheme.textGray,
+                  ),
+                  selectedIcon: _PixelNavSelectedIcon(
+                    type: _PixelNavIconType.collection,
+                  ),
                   label: '收集卡牌',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.edit_rounded),
+                  icon: _PixelNavIcon(
+                    type: _PixelNavIconType.edit,
+                    color: PixelTheme.textGray,
+                  ),
+                  selectedIcon: _PixelNavSelectedIcon(
+                    type: _PixelNavIconType.edit,
+                  ),
                   label: '我的卡片',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.emoji_events_rounded),
+                  icon: _PixelNavIcon(
+                    type: _PixelNavIconType.trophy,
+                    color: PixelTheme.textGray,
+                  ),
+                  selectedIcon: _PixelNavSelectedIcon(
+                    type: _PixelNavIconType.trophy,
+                  ),
                   label: 'Score Board',
                 ),
               ],
@@ -228,9 +255,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
           SliverPersistentHeader(
             pinned: true,
             delegate: _PinnedBoothHeaderDelegate(
-              child: _PinnedBoothStrip(
-                booths: _featuredBooths,
-              ),
+              child: _PinnedBoothStrip(booths: _featuredBooths),
             ),
           ),
           SliverPadding(
@@ -240,40 +265,49 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                 crossAxisCount: 3,
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 10,
-                childAspectRatio: 0.72,
+                childAspectRatio: 53.98 / 85.60,
               ),
-              delegate: SliverChildBuilderDelegate(
-                (BuildContext context, int index) {
-                  final Map<String, dynamic> card = _cards[index];
-                  final String title = card['card_title'] as String? ?? card['tag_name'] as String? ?? 'Unknown';
-                  final String attributeEmoji = card['attribute_emoji'] as String? ?? '❓';
-                  final String attributeLabel = card['attribute_label'] as String? ?? 'UNKNOWN';
-                  final String rawLink = card['link'] as String? ?? '';
-                  final String link = rawLink.trim().isEmpty ? 'https://hitcon.org' : rawLink;
-                  final Color cardColor = _PixelCard.colorForIndex(index);
-                  final String heroTag = 'card-$index';
-                  return _PixelCard(
+              delegate: SliverChildBuilderDelegate((
+                BuildContext context,
+                int index,
+              ) {
+                final Map<String, dynamic> card = _cards[index];
+                final String title =
+                    card['card_title'] as String? ??
+                    card['tag_name'] as String? ??
+                    'Unknown';
+                final String attributeEmoji =
+                    card['attribute_emoji'] as String? ?? '❓';
+                final String attributeLabel =
+                    card['attribute_label'] as String? ?? 'UNKNOWN';
+                final String rawLink = card['link'] as String? ?? '';
+                final String link = rawLink.trim().isEmpty
+                    ? 'https://hitcon.org'
+                    : rawLink;
+                final Color cardColor = _PixelCard.colorForIndex(index);
+                final String imageAsset = _PixelCard.imageAssetForIndex(index);
+                final String heroTag = 'card-$index';
+                return _PixelCard(
+                  title: title,
+                  uid: card['physical_uid'] as String? ?? '',
+                  collectedAt: card['collected_at'] as String? ?? '',
+                  index: index,
+                  attributeEmoji: attributeEmoji,
+                  attributeLabel: attributeLabel,
+                  heroTag: heroTag,
+                  onTap: () async => _openCardDetail(
+                    heroTag: heroTag,
                     title: title,
-                    uid: card['physical_uid'] as String? ?? '',
-                    collectedAt: card['collected_at'] as String? ?? '',
-                    index: index,
                     attributeEmoji: attributeEmoji,
                     attributeLabel: attributeLabel,
-                    heroTag: heroTag,
-                    onTap: () async => _openCardDetail(
-                      heroTag: heroTag,
-                      title: title,
-                      attributeEmoji: attributeEmoji,
-                      attributeLabel: attributeLabel,
-                      link: link,
-                      uid: card['physical_uid'] as String? ?? '',
-                      collectedAt: card['collected_at'] as String? ?? '',
-                      cardColor: cardColor,
-                    ),
-                  );
-                },
-                childCount: _cards.length,
-              ),
+                    link: link,
+                    uid: card['physical_uid'] as String? ?? '',
+                    collectedAt: card['collected_at'] as String? ?? '',
+                    cardColor: cardColor,
+                    imageAsset: imageAsset,
+                  ),
+                );
+              }, childCount: _cards.length),
             ),
           ),
           SliverToBoxAdapter(
@@ -301,6 +335,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     required String uid,
     required String collectedAt,
     required Color cardColor,
+    required String imageAsset,
   }) {
     return Navigator.of(context).push(
       PageRouteBuilder<void>(
@@ -318,6 +353,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
             uid: uid,
             collectedAt: collectedAt,
             cardColor: cardColor,
+            imageAsset: imageAsset,
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -326,18 +362,164 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
             curve: Curves.easeOutCubic,
             reverseCurve: Curves.easeInCubic,
           );
-          return FadeTransition(
-            opacity: curved,
-            child: child,
-          );
+          return FadeTransition(opacity: curved, child: child);
         },
       ),
     );
   }
+}
 
+Widget _wrapShuttle({
+  required Widget rawShuttle,
+  required ThemeData shuttleTheme,
+  required Size shuttleSize,
+}) {
+  return Theme(
+    data: shuttleTheme.copyWith(
+      textTheme: shuttleTheme.textTheme.apply(fontFamily: 'Unifont'),
+      primaryTextTheme: shuttleTheme.primaryTextTheme.apply(
+        fontFamily: 'Unifont',
+      ),
+    ),
+    child: DefaultTextStyle.merge(
+      style: const TextStyle(fontFamily: 'Unifont'),
+      child: FittedBox(
+        fit: BoxFit.fill,
+        child: SizedBox(
+          width: shuttleSize.width,
+          height: shuttleSize.height,
+          child: rawShuttle,
+        ),
+      ),
+    ),
+  );
 }
 
 /// 英雄區塊 - 顯示進度和統計
+enum _PixelNavIconType { collection, edit, trophy }
+
+class _PixelNavIcon extends StatelessWidget {
+  const _PixelNavIcon({required this.type, required this.color});
+
+  final _PixelNavIconType type;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 24,
+      child: CustomPaint(
+        painter: _PixelNavIconPainter(type: type, color: color),
+      ),
+    );
+  }
+}
+
+class _PixelNavSelectedIcon extends StatelessWidget {
+  const _PixelNavSelectedIcon({required this.type});
+
+  final _PixelNavIconType type;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.translate(
+      offset: const Offset(-2, -2),
+      child: Container(
+        width: 38,
+        height: 34,
+        decoration: BoxDecoration(
+          color: PixelTheme.bgDark,
+          border: Border.all(color: PixelTheme.accent, width: 2),
+          boxShadow: const [
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
+          ],
+        ),
+        alignment: Alignment.center,
+        child: _PixelNavIcon(type: type, color: PixelTheme.accent),
+      ),
+    );
+  }
+}
+
+class _PixelNavIconPainter extends CustomPainter {
+  const _PixelNavIconPainter({required this.type, required this.color});
+
+  final _PixelNavIconType type;
+  final Color color;
+
+  static const Map<_PixelNavIconType, List<String>> _patterns =
+      <_PixelNavIconType, List<String>>{
+        _PixelNavIconType.collection: <String>[
+          '01110000',
+          '01000000',
+          '01011100',
+          '01010000',
+          '00010111',
+          '00010101',
+          '00000101',
+          '00000111',
+        ],
+        _PixelNavIconType.edit: <String>[
+          '00111100',
+          '01111110',
+          '01000010',
+          '01011010',
+          '01011010',
+          '01000010',
+          '01111110',
+          '00111100',
+        ],
+        _PixelNavIconType.trophy: <String>[
+          '00111100',
+          '11111111',
+          '10111101',
+          '10111101',
+          '01111110',
+          '00111100',
+          '00011000',
+          '00111100',
+        ],
+      };
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    final List<String> pattern = _patterns[type]!;
+    final int columns = pattern.first.length;
+    final int rows = pattern.length;
+    final double cell = size.shortestSide / columns;
+    final double top = (size.height - rows * cell) / 2;
+    final double left = (size.width - columns * cell) / 2;
+
+    for (int y = 0; y < pattern.length; y += 1) {
+      for (int x = 0; x < pattern[y].length; x += 1) {
+        if (pattern[y][x] != '1') {
+          continue;
+        }
+        canvas.drawRect(
+          Rect.fromLTWH(left + x * cell, top + y * cell, cell, cell),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PixelNavIconPainter oldDelegate) {
+    return oldDelegate.type != type || oldDelegate.color != color;
+  }
+}
+
+Size _largerCardSize(Size a, Size b) {
+  return a.width * a.height >= b.width * b.height ? a : b;
+}
+
+Size _smallerCardSize(Size a, Size b) {
+  return a.width * a.height <= b.width * b.height ? a : b;
+}
+
 class _HeroHeader extends StatelessWidget {
   const _HeroHeader({
     required this.totalCollected,
@@ -375,7 +557,11 @@ class _HeroHeader extends StatelessWidget {
                   color: PixelTheme.accent,
                   border: Border.all(color: PixelTheme.bgDark, width: 2),
                   boxShadow: const [
-                    BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(2, 2)),
+                    BoxShadow(
+                      color: Colors.black,
+                      blurRadius: 0,
+                      offset: Offset(2, 2),
+                    ),
                   ],
                 ),
                 alignment: Alignment.center,
@@ -403,7 +589,9 @@ class _HeroHeader extends StatelessWidget {
                     Text(
                       isComplete ? 'COMPLETE !' : 'IN PROGRESS',
                       style: TextStyle(
-                        color: isComplete ? PixelTheme.success : PixelTheme.accentBlue,
+                        color: isComplete
+                            ? PixelTheme.success
+                            : PixelTheme.accentBlue,
                         fontFamily: 'Unifont',
                         fontWeight: FontWeight.w900,
                         fontSize: 11,
@@ -426,7 +614,10 @@ class _HeroHeader extends StatelessWidget {
               children: [
                 _StatItem(label: 'CARDS', value: '$totalCollected'),
                 _StatItem(label: 'NEED', value: '$prizeRequirement'),
-                _StatItem(label: 'REMAIN', value: '${(prizeRequirement - totalCollected).clamp(0, 999)}'),
+                _StatItem(
+                  label: 'REMAIN',
+                  value: '${(prizeRequirement - totalCollected).clamp(0, 999)}',
+                ),
               ],
             ),
           ),
@@ -443,7 +634,9 @@ class _HeroHeader extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            isComplete ? '✓ 達成兌換條件' : '還需 ${prizeRequirement - totalCollected} 張',
+            isComplete
+                ? '✓ 達成兌換條件'
+                : '還需 ${prizeRequirement - totalCollected} 張',
             style: TextStyle(
               color: isComplete ? PixelTheme.success : PixelTheme.accentBlue,
               fontSize: 11,
@@ -505,7 +698,11 @@ class _PinnedBoothHeaderDelegate extends SliverPersistentHeaderDelegate {
   double get maxExtent => 110;
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
     return Container(
       color: PixelTheme.bgDark,
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -580,7 +777,11 @@ class _PinnedBoothStrip extends StatelessWidget {
                   color: PixelTheme.bgMid,
                   border: Border.all(color: boothColor, width: 2),
                   boxShadow: const [
-                    BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(3, 3)),
+                    BoxShadow(
+                      color: Colors.black,
+                      blurRadius: 0,
+                      offset: Offset(3, 3),
+                    ),
                   ],
                 ),
                 padding: const EdgeInsets.all(8),
@@ -677,6 +878,20 @@ class _PixelCard extends StatefulWidget {
     return colors[seed % colors.length];
   }
 
+  static String imageAssetForIndex(int seed) {
+    const List<String> assets = <String>[
+      'assets/images/mock_card_circuit.png',
+      'assets/images/mock_card_chip.png',
+      'assets/images/mock_card_portal.png',
+      'assets/images/mock_card_lock.png',
+      'assets/images/mock_card_satellite.png',
+      'assets/images/mock_card_skull.png',
+      'assets/images/mock_card_terminal.png',
+      'assets/images/mock_card_badge.png',
+    ];
+    return assets[seed % assets.length];
+  }
+
   @override
   State<_PixelCard> createState() => _PixelCardState();
 }
@@ -704,14 +919,20 @@ class _PixelCardState extends State<_PixelCard> {
   @override
   Widget build(BuildContext context) {
     final Color cardColor = _PixelCard.colorForIndex(widget.index);
+    final String imageAsset = _PixelCard.imageAssetForIndex(widget.index);
     final Widget cardBody = PixelCardFace(
       title: widget.title,
       attributeEmoji: widget.attributeEmoji,
       attributeLabel: widget.attributeLabel,
       cardColor: cardColor,
       showText: _showText,
+      titleFontSize: 11,
+      titleFontWeight: FontWeight.w900,
+      attributeMaxLines: 3,
+      stackAttributePairs: true,
+      watermarkScale: 1.6,
       image: Image.asset(
-        'assets/images/mock_card_48.png',
+        imageAsset,
         fit: BoxFit.cover,
         filterQuality: FilterQuality.none,
       ),
@@ -721,58 +942,76 @@ class _PixelCardState extends State<_PixelCard> {
       onTap: _handleTap,
       child: Hero(
         tag: widget.heroTag,
-        flightShuttleBuilder: (context, animation, direction, fromContext, toContext) {
-          final Hero fromHero = fromContext.widget as Hero;
-          final Hero toHero = toContext.widget as Hero;
-            final Widget rawShuttle = direction == HeroFlightDirection.push
-              ? fromHero.child
-              : toHero.child;
-          final ThemeData shuttleTheme = Theme.of(fromContext);
-          final Widget shuttle = Theme(
-            data: shuttleTheme.copyWith(
-              textTheme: shuttleTheme.textTheme.apply(fontFamily: 'Unifont'),
-              primaryTextTheme: shuttleTheme.primaryTextTheme.apply(fontFamily: 'Unifont'),
-            ),
-            child: DefaultTextStyle.merge(
-              style: const TextStyle(fontFamily: 'Unifont'),
-              child: rawShuttle,
-            ),
-          );
-          final Animation<double> curved = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-
-          return AnimatedBuilder(
-            animation: curved,
-            child: shuttle,
-            builder: (context, child) {
-              final double rotation = (1 - curved.value) * math.pi * 2;
-              final Widget clippedChild = ClipRect(
-                child: MediaQuery.withNoTextScaling(
-                  child: RepaintBoundary(child: child ?? const SizedBox.shrink()),
-                ),
+        flightShuttleBuilder:
+            (context, animation, direction, fromContext, toContext) {
+              final RenderBox fromBox =
+                  fromContext.findRenderObject()! as RenderBox;
+              final RenderBox toBox =
+                  toContext.findRenderObject()! as RenderBox;
+              final bool isPush = direction == HeroFlightDirection.push;
+              final Size shuttleSize = isPush
+                  ? _largerCardSize(fromBox.size, toBox.size)
+                  : _smallerCardSize(fromBox.size, toBox.size);
+              final ThemeData shuttleTheme = Theme.of(fromContext);
+              final Animation<double> curved = CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+                reverseCurve: Curves.easeInCubic,
               );
-              return Transform(
-                alignment: Alignment.center,
-                transform: Matrix4.identity()
-                  ..setEntry(3, 2, 0.001)
-                  ..rotateY(rotation),
-                child: clippedChild,
+
+              return AnimatedBuilder(
+                animation: curved,
+                builder: (context, child) {
+                  final double rotation = (1 - curved.value) * math.pi * 2;
+                  final Widget rawShuttle = SizedBox(
+                    width: shuttleSize.width,
+                    height: shuttleSize.height,
+                    child: PixelCardFace(
+                      title: widget.title,
+                      attributeEmoji: widget.attributeEmoji,
+                      attributeLabel: widget.attributeLabel,
+                      cardColor: cardColor,
+                      showText: false,
+                      titleFontSize: 22,
+                      titleFontWeight: FontWeight.w900,
+                      attributeFontSize: 12,
+                      emojiFontSize: 16,
+                      titleMaxLines: 2,
+                      watermarkScale: 1.6,
+                      imageToTitleSpacing: 8,
+                      extraContentSpacing: 8,
+                      image: Image.asset(
+                        imageAsset,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.none,
+                      ),
+                    ),
+                  );
+                  final Widget shuttle = _wrapShuttle(
+                    rawShuttle: rawShuttle,
+                    shuttleTheme: shuttleTheme,
+                    shuttleSize: shuttleSize,
+                  );
+                  final Widget clippedChild = ClipRect(
+                    child: MediaQuery.withNoTextScaling(
+                      child: RepaintBoundary(child: shuttle),
+                    ),
+                  );
+                  return Transform(
+                    alignment: Alignment.center,
+                    transform: Matrix4.identity()
+                      ..setEntry(3, 2, 0.001)
+                      ..rotateY(rotation),
+                    child: clippedChild,
+                  );
+                },
               );
             },
-          );
-        },
-        child: Material(
-          color: Colors.transparent,
-          child: cardBody,
-        ),
+        child: Material(color: Colors.transparent, child: cardBody),
       ),
     );
   }
 }
-
 
 /// 獎品面板
 class _PrizePanel extends StatelessWidget {
@@ -881,8 +1120,9 @@ class _PixelButtonState extends State<_PixelButton> {
     final Color color = enabled
         ? (widget.label == 'REDEEM' ? PixelTheme.success : PixelTheme.accent)
         : PixelTheme.textGray;
-    final Color bgColor =
-        enabled ? PixelTheme.bgDark : PixelTheme.bgMid.withValues(alpha: 0.5);
+    final Color bgColor = enabled
+        ? PixelTheme.bgDark
+        : PixelTheme.bgMid.withValues(alpha: 0.5);
 
     return GestureDetector(
       onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
@@ -904,9 +1144,17 @@ class _PixelButtonState extends State<_PixelButton> {
             border: Border.all(color: color, width: 2),
             boxShadow: [
               if (_pressed && enabled)
-                const BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(1, 1))
+                const BoxShadow(
+                  color: Colors.black,
+                  blurRadius: 0,
+                  offset: Offset(1, 1),
+                )
               else if (enabled)
-                const BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(3, 3)),
+                const BoxShadow(
+                  color: Colors.black,
+                  blurRadius: 0,
+                  offset: Offset(3, 3),
+                ),
             ],
           ),
           alignment: Alignment.center,
@@ -928,10 +1176,7 @@ class _PixelButtonState extends State<_PixelButton> {
 
 /// 像素風浮動按鈕
 class _PixelFloatingButton extends StatefulWidget {
-  const _PixelFloatingButton({
-    required this.onPressed,
-    required this.label,
-  });
+  const _PixelFloatingButton({required this.onPressed, required this.label});
 
   final VoidCallback? onPressed;
   final String label;
@@ -964,9 +1209,17 @@ class _PixelFloatingButtonState extends State<_PixelFloatingButton> {
           border: Border.all(color: PixelTheme.bgDark, width: 3),
           boxShadow: [
             if (_pressed && enabled)
-              const BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(1, 1))
+              const BoxShadow(
+                color: Colors.black,
+                blurRadius: 0,
+                offset: Offset(1, 1),
+              )
             else if (enabled)
-              const BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+              const BoxShadow(
+                color: Colors.black,
+                blurRadius: 0,
+                offset: Offset(6, 6),
+              ),
           ],
         ),
         alignment: Alignment.center,

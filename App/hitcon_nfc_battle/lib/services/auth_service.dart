@@ -6,10 +6,10 @@ import 'mock_api_service.dart';
 
 /// 用戶角色枚舉
 enum UserRole {
-  admin,      // 管理者 - NFC 寫入工具
-  user,       // 普通用戶 - 遊戲/集卡主介面
+  admin, // 管理者 - NFC 寫入工具
+  user, // 普通用戶 - 遊戲/集卡主介面
   eventStaff, // 活動管理人員 - 獎品發放
-  unknown     // 未知
+  unknown, // 未知
 }
 
 /// 認證服務 - 管理用戶登入狀態和權限
@@ -45,10 +45,14 @@ class AuthService {
 
         // 從 Mock 服務獲取用戶資料
         if (_currentUserId != null) {
-          final profileResult = await MockApiService.getUserProfile(_currentUserId!);
+          final profileResult = await MockApiService.getUserProfile(
+            _currentUserId!,
+          );
           if (profileResult['status'] == 'success') {
             _userProfile = profileResult['data'];
-            _log('✅ Login successful - User: $_currentUserId, Role: $_currentRole');
+            _log(
+              '✅ Login successful - User: $_currentUserId, Role: $_currentRole',
+            );
             return true;
           }
         }
@@ -120,7 +124,10 @@ class AuthService {
 
     try {
       if (AppConfig.useMockServices) {
-        final result = await MockApiService.updateUserProfile(_currentUserId!, updates);
+        final result = await MockApiService.updateUserProfile(
+          _currentUserId!,
+          updates,
+        );
         if (result['status'] == 'success') {
           // 重新獲取更新後的資料
           await fetchUserProfile();
@@ -173,9 +180,13 @@ class AuthService {
 
     try {
       if (AppConfig.useMockServices) {
-        final result = await MockApiService.getCollectionRecords(_currentUserId!);
+        final result = await MockApiService.getCollectionRecords(
+          _currentUserId!,
+        );
         if (result['status'] == 'success') {
-          _log('📚 Collection records fetched: ${result['data']['total_collected']} cards');
+          _log(
+            '📚 Collection records fetched: ${result['data']['total_collected']} cards',
+          );
           return result['data'];
         }
       } else {
@@ -208,6 +219,35 @@ class AuthService {
   }
 
   /// 內部：根據字符串設定角色
+  Future<Map<String, dynamic>?> submitCardPrintOrder({
+    required Uint8List artworkPng,
+    required Map<String, dynamic> metadata,
+  }) async {
+    if (_currentUserId == null) {
+      _log('??  No user logged in');
+      return null;
+    }
+
+    try {
+      if (AppConfig.useMockServices) {
+        final result = await MockApiService.submitCardPrintOrder(
+          userId: _currentUserId!,
+          artworkPng: artworkPng,
+          metadata: metadata,
+        );
+        if (result['status'] == 'success') {
+          return result['data'] as Map<String, dynamic>;
+        }
+      } else {
+        // TODO: POST PNG multipart to /card-print-orders.
+      }
+    } catch (e) {
+      _log('??Error submitting card print order: $e');
+    }
+
+    return null;
+  }
+
   void _setRoleFromString(String roleStr) {
     switch (roleStr) {
       case 'ADMIN':

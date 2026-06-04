@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'pixel_theme.dart';
 import 'pixel_card_face.dart';
+import 'pixel_link_dialog.dart';
 
 class CardDetailPage extends StatefulWidget {
   const CardDetailPage({
@@ -15,6 +15,7 @@ class CardDetailPage extends StatefulWidget {
     required this.uid,
     required this.collectedAt,
     required this.cardColor,
+    required this.imageAsset,
   });
 
   final String heroTag;
@@ -25,6 +26,7 @@ class CardDetailPage extends StatefulWidget {
   final String uid;
   final String collectedAt;
   final Color cardColor;
+  final String imageAsset;
 
   @override
   State<CardDetailPage> createState() => _CardDetailPageState();
@@ -32,7 +34,7 @@ class CardDetailPage extends StatefulWidget {
 
 class _CardDetailPageState extends State<CardDetailPage> {
   static const Duration _textDelay = Duration(milliseconds: 450);
-  static const Duration _textFade = Duration(milliseconds: 220);
+  static const double _dismissVelocity = 350;
 
   bool _showText = false;
 
@@ -73,7 +75,8 @@ class _CardDetailPageState extends State<CardDetailPage> {
             SafeArea(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  const double ratio = 0.72; // match preview card ratio
+                  const double ratio =
+                      53.98 / 85.60; // portrait credit-card ratio
                   final double maxWidth = constraints.maxWidth - 24;
                   final double maxHeight = constraints.maxHeight - 24;
                   double cardWidth = maxWidth;
@@ -85,68 +88,71 @@ class _CardDetailPageState extends State<CardDetailPage> {
                   }
 
                   final double contentPad = (cardWidth * 0.06).clamp(6.0, 16.0);
+                  final double scale = (cardWidth / 320).clamp(0.85, 1.1);
+                  double s(double value) => value * scale;
 
                   return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Hero(
-                          tag: widget.heroTag,
-                          child: Material(
-                            color: Colors.transparent,
-                            child: SizedBox(
-                              width: cardWidth,
-                              height: cardHeight,
-                              child: PixelCardFace(
-                                title: widget.title,
-                                attributeEmoji: widget.attributeEmoji,
-                                attributeLabel: widget.attributeLabel,
-                                cardColor: widget.cardColor,
-                                showText: _showText,
-                                titleFontSize: 22,
-                                titleFontWeight: FontWeight.w900,
-                                attributeFontSize: 12,
-                                emojiFontSize: 16,
-                                titleMaxLines: 2,
-                                imageToTitleSpacing: 6,
-                                extraContentSpacing: 4,
-                                image: Image.asset(
-                                  'assets/images/mock_card_48.png',
-                                  fit: BoxFit.cover,
-                                  filterQuality: FilterQuality.none,
-                                ),
-                                extraContent: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const SizedBox(height: 6),
-                                    _LinkRow(
-                                      link: widget.link,
-                                      onTap: () => _openLink(widget.link),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Hero(
+                            tag: widget.heroTag,
+                            child: Material(
+                              color: Colors.transparent,
+                              child: _TiltableDetailCard(
+                                width: cardWidth,
+                                height: cardHeight,
+                                dismissVelocity: _dismissVelocity,
+                                onDismiss: () =>
+                                    Navigator.of(context).maybePop(),
+                                child: PixelCardFace(
+                                  title: widget.title,
+                                  attributeEmoji: widget.attributeEmoji,
+                                  attributeLabel: widget.attributeLabel,
+                                  cardColor: widget.cardColor,
+                                  showText: _showText,
+                                  titleFontSize: s(22),
+                                  titleFontWeight: FontWeight.w900,
+                                  attributeFontSize: s(12),
+                                  emojiFontSize: s(16),
+                                  titleMaxLines: 2,
+                                  watermarkScale: 1.6,
+                                  imageToTitleSpacing: s(8),
+                                  extraContentSpacing: s(8),
+                                  image: Image.asset(
+                                    widget.imageAsset,
+                                    fit: BoxFit.cover,
+                                    filterQuality: FilterQuality.none,
+                                  ),
+                                  fixedContent: _LinkRow(
+                                    link: widget.link,
+                                    fontSize: s(10),
+                                    onTap: () => confirmAndOpenLink(
+                                      context,
+                                      widget.link,
                                     ),
-                                    const SizedBox(height: 4),
-                                    Container(
-                                      height: 1,
-                                      width: double.infinity,
-                                      color: PixelTheme.textWhite,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    const _CardDescription(),
-                                  ],
+                                  ),
+                                  extraContent: _CardDescription(
+                                    fontSize: s(13),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          width: cardWidth,
-                          child: _InfoCard(
-                            uid: widget.uid,
-                            collectedAt: _formatDate(widget.collectedAt),
-                            padding: EdgeInsets.all(contentPad),
+                          SizedBox(height: s(10)),
+                          SizedBox(
+                            width: cardWidth,
+                            child: _InfoCard(
+                              uid: widget.uid,
+                              collectedAt: _formatDate(widget.collectedAt),
+                              padding: EdgeInsets.all(contentPad),
+                              fontSize: s(12),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   );
                 },
@@ -164,19 +170,135 @@ class _CardDetailPageState extends State<CardDetailPage> {
     }
     return raw.length >= 10 ? raw.substring(0, 10) : raw;
   }
+}
 
-  Future<void> _openLink(String link) async {
-    final String effectiveLink = link.trim().isEmpty ? 'https://hitcon.org' : link;
-    final Uri? uri = Uri.tryParse(effectiveLink);
-    if (uri == null) {
+class _TiltableDetailCard extends StatefulWidget {
+  const _TiltableDetailCard({
+    required this.width,
+    required this.height,
+    required this.dismissVelocity,
+    required this.onDismiss,
+    required this.child,
+  });
+
+  final double width;
+  final double height;
+  final double dismissVelocity;
+  final VoidCallback onDismiss;
+  final Widget child;
+
+  @override
+  State<_TiltableDetailCard> createState() => _TiltableDetailCardState();
+}
+
+class _TiltableDetailCardState extends State<_TiltableDetailCard>
+    with SingleTickerProviderStateMixin {
+  double _tiltX = 0;
+  double _tiltY = 0;
+  Offset? _dragStart;
+  double _startTiltX = 0;
+  double _startTiltY = 0;
+  late final AnimationController _returnController;
+  late Animation<double> _returnX;
+  late Animation<double> _returnY;
+
+  @override
+  void initState() {
+    super.initState();
+    _returnController =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 420),
+        )..addListener(() {
+          setState(() {
+            _tiltX = _returnX.value;
+            _tiltY = _returnY.value;
+          });
+        });
+    _returnX = const AlwaysStoppedAnimation<double>(0);
+    _returnY = const AlwaysStoppedAnimation<double>(0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onPanDown: (DragDownDetails details) =>
+          _startTilt(details.globalPosition),
+      onPanUpdate: (DragUpdateDetails details) =>
+          _updateTilt(details.globalPosition),
+      onPanEnd: _handlePanEnd,
+      onPanCancel: _resetTilt,
+      child: Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.identity()
+          ..setEntry(3, 2, 0.0018)
+          ..rotateX(_tiltX)
+          ..rotateY(_tiltY),
+        child: SizedBox(
+          width: widget.width,
+          height: widget.height,
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+
+  void _startTilt(Offset globalPosition) {
+    _returnController.stop();
+    setState(() {
+      _dragStart = globalPosition;
+      _startTiltX = _tiltX;
+      _startTiltY = _tiltY;
+    });
+  }
+
+  void _updateTilt(Offset globalPosition) {
+    final Offset start = _dragStart ?? globalPosition;
+    final Offset delta = globalPosition - start;
+    final double dx = (delta.dx / widget.width).clamp(-1.0, 1.0);
+    final double dy = (delta.dy / widget.height).clamp(-1.0, 1.0);
+
+    setState(() {
+      _tiltY = (_startTiltY - dx * 0.62).clamp(-0.44, 0.44);
+      _tiltX = (_startTiltX + dy * 0.62).clamp(-0.44, 0.44);
+    });
+  }
+
+  void _resetTilt() {
+    setState(() {
+      _dragStart = null;
+    });
+    _returnX = Tween<double>(begin: _tiltX, end: 0).animate(
+      CurvedAnimation(parent: _returnController, curve: Curves.easeOutCubic),
+    );
+    _returnY = Tween<double>(begin: _tiltY, end: 0).animate(
+      CurvedAnimation(parent: _returnController, curve: Curves.easeOutCubic),
+    );
+    _returnController.forward(from: 0);
+  }
+
+  void _handlePanEnd(DragEndDetails details) {
+    final double velocity = details.velocity.pixelsPerSecond.dx;
+    if (velocity.abs() >= widget.dismissVelocity) {
+      widget.onDismiss();
       return;
     }
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    _resetTilt();
+  }
+
+  @override
+  void dispose() {
+    _returnController.dispose();
+    super.dispose();
   }
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value, this.fontSize = 12});
+  const _InfoRow({
+    required this.label,
+    required this.value,
+    this.fontSize = 12,
+  });
 
   final String label;
   final String value;
@@ -199,10 +321,7 @@ class _InfoRow extends StatelessWidget {
         Expanded(
           child: Text(
             value,
-            style: TextStyle(
-              color: PixelTheme.textWhite,
-              fontSize: fontSize,
-            ),
+            style: TextStyle(color: PixelTheme.textWhite, fontSize: fontSize),
           ),
         ),
       ],
@@ -211,14 +330,17 @@ class _InfoRow extends StatelessWidget {
 }
 
 class _LinkRow extends StatelessWidget {
-  const _LinkRow({required this.link, this.onTap});
+  const _LinkRow({required this.link, required this.fontSize, this.onTap});
 
   final String link;
+  final double fontSize;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final String displayLink = link.trim().isEmpty ? 'https://hitcon.org' : link;
+    final String displayLink = link.trim().isEmpty
+        ? 'https://hitcon.org'
+        : link;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -234,7 +356,7 @@ class _LinkRow extends StatelessWidget {
               '🔗',
               style: TextStyle(
                 color: PixelTheme.textWhite,
-                fontSize: 9,
+                fontSize: fontSize,
                 fontWeight: FontWeight.w900,
                 fontFamily: 'Unifont',
               ),
@@ -248,7 +370,7 @@ class _LinkRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: PixelTheme.textWhite,
-                fontSize: 9,
+                fontSize: fontSize,
                 fontFamily: 'Unifont',
               ),
             ),
@@ -260,34 +382,36 @@ class _LinkRow extends StatelessWidget {
 }
 
 class _CardDescription extends StatelessWidget {
-  const _CardDescription();
+  const _CardDescription({required this.fontSize});
+
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 29.3,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.only(right: 4),
-        child: Text(
-          '我是來自像素維度的漫遊者，喜歡收集閃閃發亮的故事與徽章，遇到新朋友會立刻打招呼。',
-          style: TextStyle(
-            color: PixelTheme.textWhite,
-            fontSize: 13,
-            height: 1.25,
-            fontFamily: 'Unifont',
-          ),
-        ),
+    return Text(
+      '我是來自像素維度的漫遊者，喜歡收集閃閃發亮的故事與徽章，遇到新朋友會立刻打招呼。',
+      style: TextStyle(
+        color: PixelTheme.textWhite,
+        fontSize: fontSize,
+        height: 1.25,
+        fontFamily: 'Unifont',
       ),
     );
   }
 }
 
 class _InfoCard extends StatelessWidget {
-  const _InfoCard({required this.uid, required this.collectedAt, required this.padding});
+  const _InfoCard({
+    required this.uid,
+    required this.collectedAt,
+    required this.padding,
+    required this.fontSize,
+  });
 
   final String uid;
   final String collectedAt;
   final EdgeInsets padding;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -301,9 +425,9 @@ class _InfoCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _InfoRow(label: 'UID', value: uid, fontSize: 12),
+          _InfoRow(label: 'UID', value: uid, fontSize: fontSize),
           const SizedBox(height: 4),
-          _InfoRow(label: '收藏時間', value: collectedAt, fontSize: 12),
+          _InfoRow(label: '收藏時間', value: collectedAt, fontSize: fontSize),
         ],
       ),
     );

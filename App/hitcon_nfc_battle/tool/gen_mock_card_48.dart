@@ -6,13 +6,13 @@ void main() {
   const int size = 48;
   final img.Image image = img.Image(width: size, height: size);
 
-  final int sky = img.ColorUint8.rgb(0x35, 0x5C, 0x7D);
-  final int skyAccent = img.ColorUint8.rgb(0x6C, 0x8E, 0xBF);
-  final int sun = img.ColorUint8.rgb(0xFF, 0xD5, 0x4F);
-  final int backMountain = img.ColorUint8.rgb(0x3E, 0x4C, 0x59);
-  final int frontMountain = img.ColorUint8.rgb(0x2D, 0x6A, 0x4F);
-  final int ground = img.ColorUint8.rgb(0x1B, 0x43, 0x32);
-  final int highlight = img.ColorUint8.rgb(0xFF, 0xAA, 0x00);
+  final img.Color sky = img.ColorUint8.rgb(0x35, 0x5C, 0x7D);
+  final img.Color skyAccent = img.ColorUint8.rgb(0x6C, 0x8E, 0xBF);
+  final img.Color sun = img.ColorUint8.rgb(0xFF, 0xD5, 0x4F);
+  final img.Color backMountain = img.ColorUint8.rgb(0x3E, 0x4C, 0x59);
+  final img.Color frontMountain = img.ColorUint8.rgb(0x2D, 0x6A, 0x4F);
+  final img.Color ground = img.ColorUint8.rgb(0x1B, 0x43, 0x32);
+  final img.Color highlight = img.ColorUint8.rgb(0xFF, 0xAA, 0x00);
 
   for (int y = 0; y < 28; y++) {
     for (int x = 0; x < size; x++) {

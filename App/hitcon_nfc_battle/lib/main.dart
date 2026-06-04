@@ -50,8 +50,8 @@ class _MyAppState extends State<MyApp> {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
       ),
       home: AppConfig.useMockServices
-          ? const TestLoginPage()  // 測試模式：顯示角色選擇頁面
-          : const NTagReaderPage(),  // 生產模式：直接進入主應用
+          ? const TestLoginPage() // 測試模式：顯示角色選擇頁面
+          : const NTagReaderPage(), // 生產模式：直接進入主應用
       routes: {
         '/home': (context) => const NTagReaderPage(),
         '/collection': (context) => const CardCollectionPage(),
@@ -88,7 +88,8 @@ class _AutoNtagScanner {
 
         final String uid = _readTagId(tag);
         final DateTime now = DateTime.now();
-        final bool isDuplicate = uid.isNotEmpty &&
+        final bool isDuplicate =
+            uid.isNotEmpty &&
             uid == _lastTagId &&
             now.difference(_lastReadTime).inMilliseconds < 1200;
         if (isDuplicate) {
@@ -127,13 +128,17 @@ class _AutoNtagScanner {
     }
 
     await auth.pairNfcTag(uid);
-    final Map<String, dynamic>? collection = await auth.fetchCollectionRecords();
+    final Map<String, dynamic>? collection = await auth
+        .fetchCollectionRecords();
     if (collection == null) {
       return;
     }
 
-    final List<dynamic> raw = collection['collection'] as List<dynamic>? ?? <dynamic>[];
-    final List<Map<String, dynamic>> cards = raw.whereType<Map<String, dynamic>>().toList();
+    final List<dynamic> raw =
+        collection['collection'] as List<dynamic>? ?? <dynamic>[];
+    final List<Map<String, dynamic>> cards = raw
+        .whereType<Map<String, dynamic>>()
+        .toList();
     final int index = cards.indexWhere((card) => card['physical_uid'] == uid);
     if (index == -1) {
       return;
@@ -142,9 +147,14 @@ class _AutoNtagScanner {
     final Map<String, dynamic> card = cards[index];
     final String heroTag = 'scan-$uid';
     final Color cardColor = _colorForIndex(index);
-    final String title = card['card_title'] as String? ?? card['tag_name'] as String? ?? 'Unknown';
+    final String imageAsset = _imageAssetForIndex(index);
+    final String title =
+        card['card_title'] as String? ??
+        card['tag_name'] as String? ??
+        'Unknown';
     final String attributeEmoji = card['attribute_emoji'] as String? ?? '❓';
-    final String attributeLabel = card['attribute_label'] as String? ?? 'UNKNOWN';
+    final String attributeLabel =
+        card['attribute_label'] as String? ?? 'UNKNOWN';
     final String rawLink = card['link'] as String? ?? '';
     final String link = rawLink.trim().isEmpty ? 'https://hitcon.org' : rawLink;
     final String collectedAt = card['collected_at'] as String? ?? '';
@@ -170,6 +180,7 @@ class _AutoNtagScanner {
             uid: card['physical_uid'] as String? ?? uid,
             collectedAt: collectedAt,
             cardColor: cardColor,
+            imageAsset: imageAsset,
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -178,10 +189,7 @@ class _AutoNtagScanner {
             curve: Curves.easeOutCubic,
             reverseCurve: Curves.easeInCubic,
           );
-          return FadeTransition(
-            opacity: curved,
-            child: child,
-          );
+          return FadeTransition(opacity: curved, child: child);
         },
       ),
     );
@@ -189,7 +197,8 @@ class _AutoNtagScanner {
 
   String _readTagId(NfcTag tag) {
     final Map<String, dynamic> data = tag.data;
-    final dynamic idBytes = data['nfca']?['identifier'] ??
+    final dynamic idBytes =
+        data['nfca']?['identifier'] ??
         data['mifareclassic']?['identifier'] ??
         data['mifareultralight']?['identifier'];
 
@@ -197,7 +206,10 @@ class _AutoNtagScanner {
       return '';
     }
     final Iterable<int> values = idBytes.whereType<int>();
-    return values.map((int b) => b.toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
+    return values
+        .map((int b) => b.toRadixString(16).padLeft(2, '0'))
+        .join(':')
+        .toUpperCase();
   }
 
   Color _colorForIndex(int seed) {
@@ -210,6 +222,20 @@ class _AutoNtagScanner {
       Color(0xFF9900FF),
     ];
     return colors[seed % colors.length];
+  }
+
+  String _imageAssetForIndex(int seed) {
+    const List<String> assets = <String>[
+      'assets/images/mock_card_circuit.png',
+      'assets/images/mock_card_chip.png',
+      'assets/images/mock_card_portal.png',
+      'assets/images/mock_card_lock.png',
+      'assets/images/mock_card_satellite.png',
+      'assets/images/mock_card_skull.png',
+      'assets/images/mock_card_terminal.png',
+      'assets/images/mock_card_badge.png',
+    ];
+    return assets[seed % assets.length];
   }
 
   void dispose() {
@@ -276,7 +302,8 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
   void _consumeIncomingUri(Uri uri) {
     final bool hostMatches = uri.host.toLowerCase() == _targetHost;
-    final bool pathMatches = uri.path == _targetPath || uri.path == '$_targetPath/';
+    final bool pathMatches =
+        uri.path == _targetPath || uri.path == '$_targetPath/';
     if (!hostMatches || !pathMatches) {
       return;
     }
@@ -314,17 +341,15 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
   Future<bool> _writeUriToTag(NfcTag tag, String uri) async {
     final String secretKey = _secretKeyController.text.trim();
-    
+
     // 建立多個 NDEF 記錄：URI + Secret（如果存在）
-    final List<NdefRecord> records = <NdefRecord>[
-      _buildUriRecord(uri),
-    ];
-    
+    final List<NdefRecord> records = <NdefRecord>[_buildUriRecord(uri)];
+
     // 如果有 secret，額外寫入文本記錄
     if (secretKey.isNotEmpty) {
       records.add(_buildTextRecord('secret_key', secretKey));
     }
-    
+
     final NdefMessage message = NdefMessage(records);
     final Ndef? ndef = Ndef.from(tag);
 
@@ -372,7 +397,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
     final List<int> encodedText = utf8.encode(text);
     final List<int> identifierBytes = utf8.encode(identifier);
     final List<int> languageCode = utf8.encode('en'); // 語言代碼 "en"
-    
+
     // Payload 結構：
     // Byte 0-5: 狀態碼 (0x65 = UTF-8, 語言碼長度為 2)
     // Bytes 1-2: 語言碼 ('en')
@@ -415,7 +440,8 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
     await NfcManager.instance.startSession(
       onDiscovered: (NfcTag tag) async {
         final Map<String, dynamic> data = tag.data;
-        final dynamic idBytes = data['nfca']?['identifier'] ??
+        final dynamic idBytes =
+            data['nfca']?['identifier'] ??
             data['mifareclassic']?['identifier'] ??
             data['mifareultralight']?['identifier'];
 
@@ -457,7 +483,8 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
           final bool uriMatches = parsedRecords.contains(targetUri);
           final bool secretMatches = targetSecret.isEmpty
               ? existingSecrets.isEmpty
-              : existingSecrets.length == 1 && existingSecrets.first == targetSecret;
+              : existingSecrets.length == 1 &&
+                    existingSecrets.first == targetSecret;
 
           if (uriMatches && secretMatches) {
             writeMessage = targetSecret.isEmpty
@@ -496,7 +523,10 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
       return '';
     }
     final Iterable<int> values = bytes.whereType<int>();
-    return values.map((int b) => b.toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
+    return values
+        .map((int b) => b.toRadixString(16).padLeft(2, '0'))
+        .join(':')
+        .toUpperCase();
   }
 
   String _parseRecord(NdefRecord record) {
@@ -539,7 +569,10 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
       return null;
     }
 
-    final String identifier = utf8.decode(record.identifier, allowMalformed: true);
+    final String identifier = utf8.decode(
+      record.identifier,
+      allowMalformed: true,
+    );
     if (identifier != 'secret_key') {
       return null;
     }
@@ -574,10 +607,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(
-              '狀態：$_status',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            Text('狀態：$_status', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             Text('Tag ID: $_tagId'),
             const SizedBox(height: 8),

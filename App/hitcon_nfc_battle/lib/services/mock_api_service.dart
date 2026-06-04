@@ -18,8 +18,9 @@ class MockApiService {
       'user_type': 'ADMIN',
       'emoji_icon': '🔧',
       'bio': 'Test Admin Account',
-      'pixel_avatar_base64': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-      'stats': {'score': 1000, 'cards_collected': 50}
+      'pixel_avatar_base64':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'stats': {'score': 1000, 'cards_collected': 50},
     },
     'test_user_456': {
       'user_id': 'test_user_456',
@@ -27,8 +28,9 @@ class MockApiService {
       'user_type': 'USER',
       'emoji_icon': '🎮',
       'bio': 'Test Player Account',
-      'pixel_avatar_base64': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-      'stats': {'score': 250, 'cards_collected': 15}
+      'pixel_avatar_base64':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'stats': {'score': 250, 'cards_collected': 15},
     },
     'test_user_789': {
       'user_id': 'test_user_789',
@@ -36,8 +38,9 @@ class MockApiService {
       'user_type': 'EVENT_STAFF',
       'emoji_icon': '🎯',
       'bio': 'Test Staff Account',
-      'pixel_avatar_base64': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-      'stats': {'score': 100, 'cards_collected': 5}
+      'pixel_avatar_base64':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'stats': {'score': 100, 'cards_collected': 5},
     },
   };
 
@@ -105,11 +108,16 @@ class MockApiService {
     final List<Map<String, dynamic>> tags = <Map<String, dynamic>>[];
     final DateTime start = DateTime(2026, 4, 20, 10, 30);
 
-    String hexByte(int value) => value.toRadixString(16).padLeft(2, '0').toUpperCase();
+    String hexByte(int value) =>
+        value.toRadixString(16).padLeft(2, '0').toUpperCase();
 
     for (int i = 0; i < 100; i++) {
       final int index = i + 1;
       final Map<String, String> base = baseCards[i % baseCards.length];
+      final List<Map<String, String>> attributes = _pickMockAttributes(
+        baseCards,
+        i,
+      );
       final int a = (index * 37) % 256;
       final int b = (index * 59) % 256;
       final int c = (index * 83) % 256;
@@ -118,13 +126,19 @@ class MockApiService {
       final int f = (index * 7) % 256;
 
       tags.add({
-        'uid': '04:${hexByte(a)}:${hexByte(b)}:${hexByte(c)}:${hexByte(d)}:${hexByte(e)}:${hexByte(f)}',
+        'uid':
+            '04:${hexByte(a)}:${hexByte(b)}:${hexByte(c)}:${hexByte(d)}:${hexByte(e)}:${hexByte(f)}',
         'owner': 'test_user_456',
         'name': 'Card_${index.toString().padLeft(3, '0')}',
-        'card_title': '${base['card_title']} ${index.toString().padLeft(2, '0')}',
+        'card_title':
+            '${base['card_title']} ${index.toString().padLeft(2, '0')}',
         'image_file': base['image_file'],
-        'attribute_emoji': base['attribute_emoji'],
-        'attribute_label': base['attribute_label'],
+        'attribute_emoji': attributes
+            .map((item) => item['attribute_emoji'] ?? '')
+            .join(),
+        'attribute_label': attributes
+            .map((item) => item['attribute_label'] ?? '')
+            .join(' / '),
         'link': 'https://hitcon.org',
         'collected_at': start.add(Duration(hours: i * 3)).toIso8601String(),
       });
@@ -133,51 +147,43 @@ class MockApiService {
     return tags;
   }
 
+  static List<Map<String, String>> _pickMockAttributes(
+    List<Map<String, String>> baseCards,
+    int seed,
+  ) {
+    return List<Map<String, String>>.generate(3, (int offset) {
+      final int index = (seed * 7 + offset * 3) % baseCards.length;
+      return baseCards[index];
+    }, growable: false);
+  }
+
   /// 釘選的贊助商與社群攤位
   static const List<Map<String, String>> featuredBooths = <Map<String, String>>[
-    {
-      'name': 'HITCON 贊助商 A',
-      'tag': 'SPONSOR',
-      'icon': '★',
-      'accent': 'amber',
-    },
+    {'name': 'HITCON 贊助商 A', 'tag': 'SPONSOR', 'icon': '★', 'accent': 'amber'},
     {
       'name': '社群攤位 / DEFCON',
       'tag': 'COMMUNITY',
       'icon': '☍',
       'accent': 'cyan',
     },
-    {
-      'name': '硬體實驗室',
-      'tag': 'LAB',
-      'icon': '✦',
-      'accent': 'green',
-    },
-    {
-      'name': 'CTF 攤位',
-      'tag': 'GAME',
-      'icon': '⬢',
-      'accent': 'pink',
-    },
+    {'name': '硬體實驗室', 'tag': 'LAB', 'icon': '✦', 'accent': 'green'},
+    {'name': 'CTF 攤位', 'tag': 'GAME', 'icon': '⬢', 'accent': 'pink'},
   ];
 
   /// 獲取用戶個人資料
   static Future<Map<String, dynamic>> getUserProfile(String userId) async {
     _log('📋 Mock: GET /users/me for userId: $userId');
-    
+
     await Future.delayed(Duration(milliseconds: AppConfig.mockNetworkDelay));
 
     if (_mockUsers.containsKey(userId)) {
-      return {
-        'status': 'success',
-        'data': _mockUsers[userId]
-      };
+      return {'status': 'success', 'data': _mockUsers[userId]};
     }
 
     return {
       'status': 'error',
       'code': 'USER_NOT_FOUND',
-      'message': 'User not found'
+      'message': 'User not found',
     };
   }
 
@@ -187,83 +193,86 @@ class MockApiService {
     Map<String, dynamic> updates,
   ) async {
     _log('📋 Mock: PATCH /users/me with updates: $updates');
-    
+
     await Future.delayed(Duration(milliseconds: AppConfig.mockNetworkDelay));
 
     if (_mockUsers.containsKey(userId)) {
       _mockUsers[userId]!.addAll(updates);
-      return {
-        'status': 'success',
-        'message': 'Profile updated'
-      };
+      return {'status': 'success', 'message': 'Profile updated'};
     }
 
     return {
       'status': 'error',
       'code': 'USER_NOT_FOUND',
-      'message': 'User not found'
+      'message': 'User not found',
     };
   }
 
   /// 綁定 NFC 標籤（現場報到）
-  static Future<Map<String, dynamic>> pairTag(
-    String userId,
-    String uid,
-  ) async {
+  static Future<Map<String, dynamic>> pairTag(String userId, String uid) async {
     _log('🏷️  Mock: POST /tags/pair for uid: $uid');
-    
-    await Future.delayed(Duration(milliseconds: AppConfig.mockNetworkDelay + 300));
+
+    await Future.delayed(
+      Duration(milliseconds: AppConfig.mockNetworkDelay + 300),
+    );
 
     // 檢查標籤是否已被使用
     final existingTagIndex = _mockTags.indexWhere((tag) => tag['uid'] == uid);
 
-    if (existingTagIndex != -1 && _mockTags[existingTagIndex]['owner'] != null) {
+    if (existingTagIndex != -1 &&
+        _mockTags[existingTagIndex]['owner'] != null) {
       return {
         'status': 'error',
         'code': 'TAG_ALREADY_IN_USE',
-        'message': 'This NFC tag is already bound to another user.'
+        'message': 'This NFC tag is already bound to another user.',
       };
     }
 
     // 新增或更新標籤
     if (existingTagIndex != -1) {
       _mockTags[existingTagIndex]['owner'] = userId;
-      _mockTags[existingTagIndex]['collected_at'] = DateTime.now().toIso8601String();
+      _mockTags[existingTagIndex]['collected_at'] = DateTime.now()
+          .toIso8601String();
     } else {
       _mockTags.add({
         'uid': uid,
         'owner': userId,
         'name': 'Card_${_mockTags.length + 1}',
-        'collected_at': DateTime.now().toIso8601String()
+        'collected_at': DateTime.now().toIso8601String(),
       });
     }
 
-    return {
-      'status': 'success',
-      'message': 'Tag paired successfully'
-    };
+    return {'status': 'success', 'message': 'Tag paired successfully'};
   }
 
   /// 獲取集卡記錄
-  static Future<Map<String, dynamic>> getCollectionRecords(String userId) async {
+  static Future<Map<String, dynamic>> getCollectionRecords(
+    String userId,
+  ) async {
     _log('📚 Mock: GET /users/$userId/collection');
-    
-    await Future.delayed(Duration(milliseconds: AppConfig.mockNetworkDelay + 100));
+
+    await Future.delayed(
+      Duration(milliseconds: AppConfig.mockNetworkDelay + 100),
+    );
 
     final userRecords = _mockTags
         .where((tag) => tag['owner'] == userId)
-        .map((tag) => {
-          'user_id': tag['owner'],
-          'display_name': _mockUsers[tag['owner']]?['display_name'] ?? 'Unknown',
-          'emoji_icon': _mockUsers[tag['owner']]?['emoji_icon'] ?? '❓',
-          'collected_at': tag['collected_at'] ?? DateTime.now().toIso8601String(),
-          'tag_name': tag['name'],
-          'card_title': tag['card_title'],
-          'image_file': tag['image_file'],
-          'attribute_emoji': tag['attribute_emoji'],
-          'attribute_label': tag['attribute_label'],
-          'physical_uid': tag['uid'],
-        })
+        .map(
+          (tag) => {
+            'user_id': tag['owner'],
+            'display_name':
+                _mockUsers[tag['owner']]?['display_name'] ?? 'Unknown',
+            'emoji_icon': _mockUsers[tag['owner']]?['emoji_icon'] ?? '❓',
+            'collected_at':
+                tag['collected_at'] ?? DateTime.now().toIso8601String(),
+            'tag_name': tag['name'],
+            'card_title': tag['card_title'],
+            'image_file': tag['image_file'],
+            'attribute_emoji': tag['attribute_emoji'],
+            'attribute_label': tag['attribute_label'],
+            'physical_uid': tag['uid'],
+          },
+        )
         .toList();
 
     return {
@@ -271,22 +280,28 @@ class MockApiService {
       'data': {
         'owner_display_name': _mockUsers[userId]?['display_name'] ?? 'Unknown',
         'total_collected': userRecords.length,
-        'collection': userRecords
-      }
+        'collection': userRecords,
+      },
     };
   }
 
   /// 其他用戶的集卡記錄（查看他人集卡）
-  static Future<Map<String, dynamic>> getUserCollection(String targetUserId) async {
-    _log('👤 Mock: GET /users/$targetUserId/collection (view other\'s collection)');
-    
-    await Future.delayed(Duration(milliseconds: AppConfig.mockNetworkDelay + 150));
+  static Future<Map<String, dynamic>> getUserCollection(
+    String targetUserId,
+  ) async {
+    _log(
+      '👤 Mock: GET /users/$targetUserId/collection (view other\'s collection)',
+    );
+
+    await Future.delayed(
+      Duration(milliseconds: AppConfig.mockNetworkDelay + 150),
+    );
 
     if (!_mockUsers.containsKey(targetUserId)) {
       return {
         'status': 'error',
         'code': 'USER_NOT_FOUND',
-        'message': 'User not found'
+        'message': 'User not found',
       };
     }
 
@@ -297,17 +312,18 @@ class MockApiService {
     return {
       'status': 'success',
       'data': {
-        'owner_display_name': _mockUsers[targetUserId]?['display_name'] ?? 'Unknown',
+        'owner_display_name':
+            _mockUsers[targetUserId]?['display_name'] ?? 'Unknown',
         'total_collected': userRecords.length,
-        'collection': userRecords
-      }
+        'collection': userRecords,
+      },
     };
   }
 
   /// 保存測試 JWT（模擬登入）
   static Future<void> saveTestJwt(String userType) async {
     _log('🔐 Mock: Saving test JWT for userType: $userType');
-    
+
     final prefs = await SharedPreferences.getInstance();
 
     // 根據角色選擇對應的測試用戶
@@ -325,18 +341,18 @@ class MockApiService {
 
     await prefs.setString('test_jwt_token', _testJwt);
     await prefs.setString('test_user_id', testUserId);
-    
+
     _log('✅ Test JWT saved for userId: $testUserId');
   }
 
   /// 清除測試數據
   static Future<void> clearTestData() async {
     _log('🗑️  Mock: Clearing test data');
-    
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('test_jwt_token');
     await prefs.remove('test_user_id');
-    
+
     _log('✅ Test data cleared');
   }
 
@@ -357,63 +373,63 @@ class MockApiService {
         'owner': 'test_user_456',
         'name': 'Card_001',
         'link': 'https://hitcon.org',
-        'collected_at': '2026-04-20T10:30:00Z'
+        'collected_at': '2026-04-20T10:30:00Z',
       },
       {
         'uid': '04:2B:3C:4D:5E:6F:7G',
         'owner': 'test_user_456',
         'name': 'Card_002',
         'link': 'https://hitcon.org',
-        'collected_at': '2026-04-21T14:15:00Z'
+        'collected_at': '2026-04-21T14:15:00Z',
       },
       {
         'uid': '04:3C:4D:5E:6F:7G:8H',
         'owner': 'test_user_456',
         'name': 'Card_003',
         'link': 'https://hitcon.org',
-        'collected_at': '2026-04-22T09:45:00Z'
+        'collected_at': '2026-04-22T09:45:00Z',
       },
       {
         'uid': '04:4D:5E:6F:7G:8H:9I',
         'owner': 'test_user_456',
         'name': 'Card_004',
         'link': 'https://hitcon.org',
-        'collected_at': '2026-04-22T10:10:00Z'
+        'collected_at': '2026-04-22T10:10:00Z',
       },
       {
         'uid': '04:5E:6F:7G:8H:9I:0J',
         'owner': 'test_user_456',
         'name': 'Card_005',
         'link': 'https://hitcon.org',
-        'collected_at': '2026-04-22T11:05:00Z'
+        'collected_at': '2026-04-22T11:05:00Z',
       },
       {
         'uid': '04:6F:7G:8H:9I:0J:1K',
         'owner': 'test_user_456',
         'name': 'Card_006',
         'link': 'https://hitcon.org',
-        'collected_at': '2026-04-22T12:30:00Z'
+        'collected_at': '2026-04-22T12:30:00Z',
       },
       {
         'uid': '04:7G:8H:9I:0J:1K:2L',
         'owner': 'test_user_456',
         'name': 'Card_007',
         'link': 'https://hitcon.org',
-        'collected_at': '2026-04-22T13:45:00Z'
+        'collected_at': '2026-04-22T13:45:00Z',
       },
       {
         'uid': '04:8H:9I:0J:1K:2L:3M',
         'owner': 'test_user_456',
         'name': 'Card_008',
         'link': 'https://hitcon.org',
-        'collected_at': '2026-04-22T15:20:00Z'
+        'collected_at': '2026-04-22T15:20:00Z',
       },
       {
         'uid': '04:9I:0J:1K:2L:3M:4N',
         'owner': 'test_user_456',
         'name': 'Card_009',
         'link': 'https://hitcon.org',
-        'collected_at': '2026-04-22T16:50:00Z'
+        'collected_at': '2026-04-22T16:50:00Z',
       },
     ]);
   }
@@ -423,5 +439,38 @@ class MockApiService {
     _log('📌 Mock: GET /featured/booths');
     await Future.delayed(Duration(milliseconds: AppConfig.mockNetworkDelay));
     return featuredBooths;
+  }
+
+  static Future<Map<String, dynamic>> submitCardPrintOrder({
+    required String userId,
+    required Uint8List artworkPng,
+    required Map<String, dynamic> metadata,
+  }) async {
+    _log(
+      '?? Mock: POST /card-print-orders user=$userId bytes=${artworkPng.length}',
+    );
+    await Future.delayed(
+      Duration(milliseconds: AppConfig.mockNetworkDelay + 350),
+    );
+
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final String serial = now.toRadixString(36).toUpperCase();
+    final String orderId = 'HITCON26-$serial';
+
+    return {
+      'status': 'success',
+      'data': {
+        'order_id': orderId,
+        'barcode_value': 'PRINT:$orderId',
+        'file_name': 'card-print-$orderId.png',
+        'format': metadata['format'] ?? 'EVOLIS_PRIMACY_CR80_300DPI_PNG',
+        'width_px': metadata['width_px'],
+        'height_px': metadata['height_px'],
+        'dpi': metadata['dpi'],
+        'card_size': metadata['card_size'],
+        'printer': metadata['printer'],
+        'bytes': artworkPng.length,
+      },
+    };
   }
 }
