@@ -1,136 +1,82 @@
 openapi: 3.0.3
 info:
-  title: HITCON 2026 NFC Tag Game API
+  title: HITCON 2026 NFC Battle API
   version: 1.0.0
   description: |
-    OpenAPI specification for the HITCON 2026 NFC Tag Game.
+    OpenAPI specification for the HITCON 2026 NFC Battle backend.
 
-    This file is intended to be the canonical backend API contract. It captures
-    the API surface, authentication model, NFC trust model, error semantics,
-    request/response examples, and staff-only validation flow.
+    `Backend/game-flow.md` is the source of truth for product behavior. This
+    file mirrors that flow as a machine-readable API contract.
 
-    Authentication and identity rules:
-    - Every authenticated request must send the conference SSO JWT in the
-      `Authorization: Bearer <SSO_JWT_Token>` header.
-    - Backend identity key is always JWT claim `sub`, usually a hash of the
-      KKTIX ID.
-    - Frontend-provided user IDs are never trusted for caller identity.
+    User roles:
+    - `ATTENDEE`
+    - `STAFF`
+    - `SPONSOR`
+    - `COMMUNITY`
 
-    Required JWT claims:
-    - `sub` is required. Requests without `sub` must be rejected as 401.
-    - `exp` is required. Expired tokens must be rejected.
-    - `iss` is required and must match the configured SSO issuer.
-    - `aud` is required and must match this API's configured audience.
-    - `role` is required for staff-only APIs and must be `STAFF`.
+    Authenticated app APIs use the conference JWT:
+    `Authorization: Bearer <JWT>`. The backend derives caller identity from the
+    JWT subject, which is the hashed KKTIX user ID.
 
-    NFC tag URL and redirect entry:
-    - Physical tags store URLs like `https://game.hitcon2026.online/b?u={user_id}`.
-    - `/b` is a redirect entry for the scan flow and is outside the authenticated
-      `/v1` API surface.
-    - The `u` query parameter is untrusted input from the physical tag. It must
-      be verified against the scanned physical UID during `POST /collections/scan`.
+    Physical NFC tag IDs are predictable, so scan requests must include both the
+    parsed user ID from the tag URL and the physical ID read from the tag. The
+    server must verify that the physical ID belongs to the parsed user ID before
+    adding the target user to the scanner's collection.
 
-    Unified error handling:
-    Frontend applications should handle 401, 403, 404, and 409 responses in an
-    API interceptor and present UI based on the returned `code`.
+    Staff scoreboard freeze/resume APIs use `STAFF_DANGER_TOKEN`.
+    Freeze calculates and stores a per-user prize snapshot. Prize lookups read
+    that stored snapshot instead of recalculating results on every request.
+    Resume invalidates the current freeze snapshot and reopens scoring.
 
-    Design philosophy:
-    - Identity source: Backend identity is derived only from JWT `sub`;
-      client-supplied user IDs are untrusted for caller identity.
-    - NFC trust model: Tag URL `u` values are untrusted and must be verified
-      against the physical NFC UID on scan.
-    - Anti-forgery: A mismatch between target user id and physical UID is
-      treated as a replay attack or cloned tag.
-    - Lazy profile creation: `GET /users/me` creates a default profile
-      automatically when the authenticated JWT subject is new.
-    - Client storage: Scan responses provide enough target data for the app to
-      update local app storage after server-side verification.
+    Current provisional scoring formula:
+    `score = 10 * num_of_collection`. This formula may be finalized or changed
+    in the future.
 
-    Example JWT payload:
-
-    ```json
-    {
-      "sub": "kktix_hash_abc123",
-      "iss": "https://sso.hitcon2026.online",
-      "aud": "hitcon-nfc-tag-game-api",
-      "exp": 1786242000,
-      "role": "ATTENDEE"
-    }
-    ```
+    A scoreboard can stay in `FREEZING` only until the configured
+    `freeze_timeout`. After that, the freeze is stale and staff may recover it
+    with `POST /staff/resume_scoreboard`.
 servers:
-  - url: https://game.hitcon2026.online/v1
-    description: Production
   - url: https://{devHost}/v1
-    description: Development
+    description: Development API
     variables:
       devHost:
         default: localhost
-        description: ngrok or local development domain
 security:
   - bearerAuth: []
 tags:
-  - name: Redirect
-    description: Redirect entry outside authenticated /v1 API surface
   - name: Users
   - name: Tags
-  - name: Collections
+  - name: Collection
   - name: Missions
   - name: Scoreboard
   - name: Staff
 paths:
-  /b:
-    get:
-      tags: [Redirect]
-      summary: Redirect entry for scanned NFC tag URL
-      description: |
-        Redirect flow entry for links like `https://game.hitcon2026.online/b?u={user_id}`.
-        This endpoint is outside authenticated `/v1` APIs.
-      servers:
-        - url: https://game.hitcon2026.online
-          description: Production redirect host
-        - url: https://{devHost}
-          description: Development redirect host
-          variables:
-            devHost:
-              default: localhost
-              description: ngrok or local development domain
-      security: []
-      parameters:
-        - in: query
-          name: u
-          required: true
-          schema:
-            type: string
-          description: Target user id encoded in NFC tag URL (untrusted input)
-          example: U_9V8W7X
-      responses:
-        '302':
-          description: Redirect to app route
-        '400':
-          description: Invalid query parameter
   /users/me:
     get:
       tags: [Users]
-      summary: Initialize or get my profile
+      summary: Lazy initialize or get my profile
       description: |
-        Lazy initialization endpoint. If `sub` from the JWT does not exist in
-        the database, the backend creates a default profile automatically.
+        Creates a default profile when the authenticated JWT subject is new,
+        then returns the authenticated user's complete data.
       responses:
         '200':
-          description: Profile loaded
+          description: Profile loaded.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetMyProfileResponse'
               examples:
                 profile:
-                  $ref: '#/components/examples/GetMyProfile'
+                  $ref: '#/components/examples/GetMyProfileResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
     patch:
       tags: [Users]
       summary: Update my profile
-      description: Updates the authenticated user's profile. All request fields are optional.
+      description: |
+        Partially updates the authenticated user's profile. The user may send
+        only the fields they want to change. Updatable fields are
+        `display_name`, `emoji_icon`, `bio`, and `pixel_avatar_base64`.
       requestBody:
         required: true
         content:
@@ -142,54 +88,89 @@ paths:
                 $ref: '#/components/examples/UpdateMyProfileRequest'
       responses:
         '200':
-          description: Profile updated
+          description: Profile updated.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessMessageResponse'
+                $ref: '#/components/schemas/GetMyProfileResponse'
               examples:
-                updated:
-                  value:
-                    status: success
-                    message: Profile updated.
+                profile:
+                  $ref: '#/components/examples/GetMyProfileResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
-  /users/{target_id}/collection:
+  /users/me/prize:
     get:
       tags: [Users]
-      summary: View another user's collection
-      description: Returns another user's public collection by target user id.
+      summary: Get my prize result
+      description: |
+        Returns the authenticated user's prize result after the scoreboard is
+        frozen and prize calculation has run. Prize results are read from the
+        stored freeze snapshot.
+      responses:
+        '200':
+          description: Prize result loaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetMyPrizeResponse'
+              examples:
+                prize:
+                  $ref: '#/components/examples/GetMyPrizeResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          $ref: '#/components/responses/ScoreboardNotFrozenError'
+  /users/{user_id}:
+    get:
+      tags: [Users]
+      summary: Get another user's profile
+      description: |
+        Returns another user's public profile. If the caller also provides the
+        queried user's NFC physical ID as a query parameter, the server returns
+        all profile data. Otherwise, it only returns `display_name` and
+        `emoji_icon`, allowing the mobile app to show a locked character state.
       parameters:
         - in: path
-          name: target_id
+          name: user_id
           required: true
           schema:
             type: string
-          example: U_1X2Y3Z
+          description: Target user's hashed KKTIX user ID.
+          example: kktix_hash_abc123
+        - in: query
+          name: physical_id
+          required: false
+          schema:
+            type: string
+          description: Physical ID read from the queried user's NFC tag.
+          example: '04:1A:2B:3C:4D:5E:6F'
       responses:
         '200':
-          description: Collection loaded
+          description: Profile loaded.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetUserCollectionResponse'
+                $ref: '#/components/schemas/GetUserProfileResponse'
               examples:
-                collection:
-                  $ref: '#/components/examples/GetUserCollection'
+                locked:
+                  $ref: '#/components/examples/GetLockedUserProfileResponse'
+                unlocked:
+                  $ref: '#/components/examples/GetUnlockedUserProfileResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '404':
-          $ref: '#/components/responses/UidNotFoundError'
+          $ref: '#/components/responses/UserNotFoundError'
   /tags/pair:
     post:
       tags: [Tags]
-      summary: Pair physical NFC tag
+      summary: Pair a physical NFC tag to my profile
       description: |
-        Pair a physical NFC UID to the current attendee account.
-
-        This endpoint is used when the conference starts and an attendee arrives
-        at the reception table. Staff or the attendee app reads the physical NFC
-        UID and calls this endpoint to bind the UID to the attendee account.
+        Called at the reception desk after the user picks up a tag and scans it
+        with the app. The app also writes
+        `https://game.hitcon2026.online/b?u={user_id}` to the tag, then locks
+        the tag so it is read-only and cannot be accidentally overwritten.
       requestBody:
         required: true
         content:
@@ -201,41 +182,33 @@ paths:
                 $ref: '#/components/examples/PairTagRequest'
       responses:
         '200':
-          description: Tag paired
+          description: Tag paired.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessMessageResponse'
+                $ref: '#/components/schemas/SuccessResponse'
               examples:
                 paired:
                   value:
                     status: success
                     message: Tag paired successfully.
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '409':
-          $ref: '#/components/responses/TagAlreadyInUseError'
-  /collections/scan:
+          $ref: '#/components/responses/TagAlreadyPairedError'
+  /collection/scan:
     post:
-      tags: [Collections]
-      summary: Physical scan collection
+      tags: [Collection]
+      summary: Scan another NFC tag
       description: |
-        NFC tag exchange and stamp collection endpoint.
+        Called after the app opens from a scanned tag URL, reads the tag's
+        physical ID, and extracts `user_id` from the URL.
 
-        Flow:
-        - An attendee scans another attendee tag, sponsor stand tag, or community
-          stand tag.
-        - The scanned URL opens `https://game.hitcon2026.online/b?u={user_id}`.
-        - The app is redirected by the service, reads the physical NFC UID, and
-          posts both `target_user_id` and `scanned_nfc_uid` to this endpoint.
-        - The server verifies the scan, determines the target type, records the
-          collection or stamp, and returns the scanned tag information.
-        - The app uses the response data to update local app storage.
-
-        Security requirement:
-        The backend must strictly verify `target_user_id` against
-        `scanned_nfc_uid` to prevent tag cloning or tampering with the `u` query
-        value in the tag URL.
+        The server verifies that `physical_id` belongs to `user_id`, adds the
+        target user ID to the scanner's collection, and inserts a collection
+        record if this is the first time the scanner collected this tag.
       requestBody:
         required: true
         content:
@@ -247,31 +220,31 @@ paths:
                 $ref: '#/components/examples/ScanCollectionRequest'
       responses:
         '200':
-          description: Scan handled successfully
+          description: Scan accepted.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScanCollectionResponse'
               examples:
-                attendee:
-                  $ref: '#/components/examples/ScanAttendeeResponse'
-                sponsorStand:
-                  $ref: '#/components/examples/ScanSponsorStandResponse'
-                communityStand:
-                  $ref: '#/components/examples/ScanCommunityStandResponse'
+                scan:
+                  $ref: '#/components/examples/ScanCollectionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
-          $ref: '#/components/responses/SecurityVerificationFailedError'
+          $ref: '#/components/responses/PhysicalIdMismatchError'
         '404':
-          $ref: '#/components/responses/UidNotFoundError'
+          $ref: '#/components/responses/UserNotFoundError'
   /collections/phishing:
     post:
-      tags: [Collections]
-      summary: Trigger phishing easter egg
+      tags: [Collection]
+      summary: Record a clicked-link phishing event
       description: |
-        Triggered when the app is opened via a clicked link and no physical NFC
-        signal is detected. This is a social engineering trap state.
+        Called when the app is opened by clicking a URL instead of scanning a
+        physical NFC tag, so the app cannot detect a physical ID. The server
+        records `victim` and `attacker`, then applies the score penalty to the
+        victim after the scoreboard is frozen.
       requestBody:
         required: true
         content:
@@ -283,56 +256,55 @@ paths:
                 $ref: '#/components/examples/PhishingRequest'
       responses:
         '200':
-          description: Phishing state returned
+          description: Phishing event recorded.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PhishingResponse'
+                $ref: '#/components/schemas/SuccessResponse'
               examples:
-                phished:
-                  $ref: '#/components/examples/PhishingResponse'
+                recorded:
+                  value:
+                    status: success
+                    message: Phishing event recorded.
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
-  /missions/sponsor-stands:
+  /missions/stamp:
     get:
       tags: [Missions]
-      summary: Get sponsor stand stamp progress
-      description: Returns the authenticated user's sponsor stand stamp progress and prize threshold.
+      summary: Get stamp mission progress
+      description: |
+        Returns `stamp_threshold` and the authenticated user's progress toward
+        the sponsor plus community stamp prize.
       responses:
         '200':
-          description: Sponsor stand mission progress
+          description: Stamp mission progress loaded.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SponsorMissionsResponse'
+                $ref: '#/components/schemas/GetStampMissionResponse'
               examples:
-                sponsorStands:
-                  $ref: '#/components/examples/SponsorMissionsResponse'
+                stamp:
+                  $ref: '#/components/examples/GetStampMissionResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
-  /missions/community-stands:
-    get:
-      tags: [Missions]
-      summary: Get community stand stamp progress
-      description: Returns the authenticated user's community stand stamp progress and prize threshold.
-      responses:
-        '200':
-          description: Community stand mission progress
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CommunityMissionsResponse'
-              examples:
-                communityStands:
-                  $ref: '#/components/examples/CommunityMissionsResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-  /scoreboard/global:
+  /scoreboard:
     get:
       tags: [Scoreboard]
       summary: Get global scoreboard
-      description: Returns the global ranking list.
+      description: |
+        Returns the global scoreboard using offset/limit pagination. Scores use
+        the current provisional formula: `score = 10 * num_of_collection`.
       parameters:
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          example: 0
         - in: query
           name: limit
           required: false
@@ -344,82 +316,105 @@ paths:
           example: 50
       responses:
         '200':
-          description: Global ranking list
+          description: Scoreboard loaded.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GlobalScoreboardResponse'
+                $ref: '#/components/schemas/GetScoreboardResponse'
               examples:
-                global:
-                  $ref: '#/components/examples/GlobalScoreboardResponse'
+                scoreboard:
+                  $ref: '#/components/examples/GetScoreboardResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
-  /staff/identify/{nfc_uid}:
+  /staff/scoreboard_status:
     get:
       tags: [Staff]
-      summary: Verify identity by physical NFC scan
+      summary: Get scoreboard freeze status
       description: |
-        Staff-only API. Requires JWT payload `role: "STAFF"`.
-
-        Staff can scan an attendee's physical NFC tag with a phone to retrieve
-        identity and prize eligibility.
-      parameters:
-        - in: path
-          name: nfc_uid
-          required: true
-          schema:
-            type: string
-          example: '04:1A:2B:3C:4D:5E:6F'
+        Staff-only status endpoint for inspecting the scoreboard state before
+        freeze or resume operations. Returns the current state, current
+        `freeze_id`, freeze timestamps, configured freeze timeout, and whether a
+        `FREEZING` state is stale.
+      security:
+        - staffDangerToken: []
       responses:
         '200':
-          description: Identity and eligibility returned
+          description: Scoreboard status loaded.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StaffIdentifyResponse'
+                $ref: '#/components/schemas/GetScoreboardStatusResponse'
               examples:
-                identity:
-                  $ref: '#/components/examples/StaffIdentifyResponse'
+                status:
+                  $ref: '#/components/examples/GetScoreboardStatusResponse'
         '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/SecurityVerificationFailedError'
-        '404':
-          $ref: '#/components/responses/UidNotFoundError'
-  /staff/redeem:
+          $ref: '#/components/responses/StaffDangerTokenError'
+  /staff/freeze_scoreboard:
     post:
       tags: [Staff]
-      summary: Confirm prize redemption
+      summary: Freeze scoreboard and calculate prizes
       description: |
-        Staff-only API. Requires JWT payload `role: "STAFF"`.
+        Freezes the scoreboard near the end of the conference. The server should
+        atomically transition the scoreboard from `OPEN` to `FREEZING`, calculate
+        final scores and stored prize results for a new `freeze_id`, then
+        transition to `FROZEN`.
 
-        Confirms redemption for a sponsor stand, community stand, or scoreboard
-        prize category.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StaffRedeemRequest'
-            examples:
-              redeem:
-                $ref: '#/components/examples/StaffRedeemRequest'
+        A scoreboard that remains in `FREEZING` longer than `freeze_timeout` is
+        stale. Stale partial results for that `freeze_id` must not be visible to
+        users.
+
+        Current provisional scoring formula:
+        `score = 10 * num_of_collection`. This formula may be finalized or
+        changed in the future.
+
+        Prize results are snapshot data and should not be recalculated on every
+        `GET /users/me/prize` request.
+      security:
+        - staffDangerToken: []
       responses:
         '200':
-          description: Prize redeemed
+          description: Scoreboard frozen and prizes calculated.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessMessageResponse'
+                $ref: '#/components/schemas/FreezeScoreboardResponse'
               examples:
-                redeemed:
+                frozen:
+                  $ref: '#/components/examples/FreezeScoreboardResponse'
+        '401':
+          $ref: '#/components/responses/StaffDangerTokenError'
+        '409':
+          $ref: '#/components/responses/ScoreboardAlreadyFrozenError'
+  /staff/resume_scoreboard:
+    post:
+      tags: [Staff]
+      summary: Resume an accidentally frozen scoreboard
+      description: |
+        Resumes the scoreboard after an accidental freeze. The server should
+        transition `FROZEN` back to `OPEN` and invalidate the stored result
+        snapshot for the current `freeze_id`.
+
+        This endpoint may also recover a stale `FREEZING` state by changing it
+        back to `OPEN` and invalidating partial results for the stale
+        `freeze_id`.
+      security:
+        - staffDangerToken: []
+      responses:
+        '200':
+          description: Scoreboard resumed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              examples:
+                resumed:
                   value:
                     status: success
-                    message: Prize redeemed successfully.
+                    message: Scoreboard resumed.
         '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/SecurityVerificationFailedError'
+          $ref: '#/components/responses/StaffDangerTokenError'
+        '409':
+          $ref: '#/components/responses/ScoreboardNotFrozenError'
 
 components:
   securitySchemes:
@@ -427,14 +422,26 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: 'Conference SSO JWT sent as `Authorization: Bearer <SSO_JWT_Token>`.'
+      description: 'Conference JWT sent as `Authorization: Bearer <JWT>`.'
+    staffDangerToken:
+      type: apiKey
+      in: header
+      name: STAFF_DANGER_TOKEN
+      description: Staff danger token for freeze/resume operations.
 
   responses:
+    BadRequestError:
+      description: Invalid request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: BAD_REQUEST
+            message: Invalid request body or query parameter.
     UnauthorizedError:
-      description: |
-        Authentication failed.
-
-        Trigger: token is expired, invalid, or missing.
+      description: Missing or invalid JWT.
       content:
         application/json:
           schema:
@@ -442,54 +449,71 @@ components:
           example:
             status: error
             code: UNAUTHORIZED
-            message: Invalid or expired JWT token.
-    SecurityVerificationFailedError:
-      description: |
-        Forbidden because of insufficient permission or anti-forgery verification failure.
-
-        Triggers:
-        - A normal attendee calls a staff-only API.
-        - During `POST /collections/scan`, the target user id does not match the
-          scanned physical NFC UID. This is treated as a replay attack or cloned tag.
+            message: Missing or invalid JWT.
+    StaffDangerTokenError:
+      description: Missing or invalid `STAFF_DANGER_TOKEN`.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             status: error
-            code: SECURITY_VERIFICATION_FAILED
-            message: UID mismatch or insufficient permissions.
-    UidNotFoundError:
-      description: |
-        Resource does not exist.
-
-        Trigger: scanning an unpaired blank NFC tag or requesting a non-existent user.
+            code: STAFF_DANGER_TOKEN_INVALID
+            message: Missing or invalid staff danger token.
+    UserNotFoundError:
+      description: User not found.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             status: error
-            code: UID_NOT_FOUND
-            message: User or physical tag does not exist.
-    TagAlreadyInUseError:
-      description: |
-        Resource conflict.
-
-        Trigger: trying to pair an NFC tag that is already paired to another user.
+            code: USER_NOT_FOUND
+            message: User not found.
+    PhysicalIdMismatchError:
+      description: Physical tag ID does not belong to the parsed user ID.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             status: error
-            code: TAG_ALREADY_IN_USE
-            message: This NFC tag is already bound to another user.
+            code: PHYSICAL_ID_MISMATCH
+            message: Physical tag ID does not match user ID.
+    TagAlreadyPairedError:
+      description: NFC tag is already paired.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: TAG_ALREADY_PAIRED
+            message: This NFC tag is already paired.
+    ScoreboardAlreadyFrozenError:
+      description: Scoreboard is already frozen.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: SCOREBOARD_ALREADY_FROZEN
+            message: Scoreboard is already frozen.
+    ScoreboardNotFrozenError:
+      description: Scoreboard is not frozen yet.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: SCOREBOARD_NOT_FROZEN
+            message: Scoreboard is not frozen yet.
 
   schemas:
     ErrorResponse:
       type: object
-      description: Unified error response. Frontends should branch on `code`.
       required: [status, code, message]
       properties:
         status:
@@ -498,14 +522,18 @@ components:
         code:
           type: string
           enum:
+            - BAD_REQUEST
             - UNAUTHORIZED
-            - SECURITY_VERIFICATION_FAILED
-            - UID_NOT_FOUND
-            - TAG_ALREADY_IN_USE
+            - STAFF_DANGER_TOKEN_INVALID
+            - USER_NOT_FOUND
+            - PHYSICAL_ID_MISMATCH
+            - TAG_ALREADY_PAIRED
+            - SCOREBOARD_ALREADY_FROZEN
+            - SCOREBOARD_NOT_FROZEN
         message:
           type: string
 
-    SuccessMessageResponse:
+    SuccessResponse:
       type: object
       required: [status, message]
       properties:
@@ -515,49 +543,64 @@ components:
         message:
           type: string
 
-    UserStats:
-      type: object
-      required: [score, tags_collected]
-      properties:
-        score:
-          type: integer
-        tags_collected:
-          type: integer
+    UserRole:
+      type: string
+      enum: [ATTENDEE, STAFF, SPONSOR, COMMUNITY]
 
-    UserProfile:
+    UserProfileFull:
       type: object
-      description: Public profile for the authenticated user.
       required:
         - user_id
         - display_name
-        - user_type
+        - role
         - emoji_icon
         - bio
         - pixel_avatar_base64
-        - stats
+        - physical_id
+        - collection
       properties:
         user_id:
           type: string
-          description: Stable backend user id from JWT `sub`.
-          example: sub_hash_from_jwt
+          description: Hashed KKTIX user ID.
+          example: kktix_hash_abc123
         display_name:
           type: string
           example: Hacker_Aries
-        user_type:
-          type: string
-          example: CAT
+        role:
+          $ref: '#/components/schemas/UserRole'
         emoji_icon:
           type: string
-          example: cat
+          description: Emoji character shown as the user's icon.
+          example: 🐱
         bio:
           type: string
           example: I love reverse engineering.
         pixel_avatar_base64:
           type: string
-          description: Base64-encoded image data
+          description: Base64-encoded pixel avatar image.
           example: iVBORw0KGgoAAAANSU...
-        stats:
-          $ref: '#/components/schemas/UserStats'
+        physical_id:
+          type: string
+          nullable: true
+          description: Paired NFC tag physical ID, or null before pairing.
+          example: '04:1A:2B:3C:4D:5E:6F'
+        collection:
+          type: array
+          description: User IDs this user has previously scanned.
+          items:
+            type: string
+          example: [kktix_hash_def456]
+
+    UserProfileLocked:
+      type: object
+      required: [user_id, display_name, emoji_icon]
+      properties:
+        user_id:
+          type: string
+        display_name:
+          type: string
+        emoji_icon:
+          type: string
 
     GetMyProfileResponse:
       type: object
@@ -567,18 +610,22 @@ components:
           type: string
           enum: [success]
         data:
-          $ref: '#/components/schemas/UserProfile'
+          $ref: '#/components/schemas/UserProfileFull'
 
     UpdateMyProfileRequest:
       type: object
+      description: |
+        Partial profile update. Only `display_name`, `emoji_icon`, `bio`, and
+        `pixel_avatar_base64` are updatable.
       additionalProperties: false
       properties:
         display_name:
           type: string
           example: Aries_The_Great
-        user_type:
+        emoji_icon:
           type: string
-          example: TECH
+          description: Emoji character shown as the user's icon.
+          example: 🚀
         bio:
           type: string
           example: Updated bio.
@@ -586,34 +633,12 @@ components:
           type: string
           example: iVBORw0KGgo...
 
-    CollectionItem:
-      type: object
-      required: [user_id, display_name, emoji_icon, collected_at]
-      properties:
-        user_id:
-          type: string
-        display_name:
-          type: string
-        emoji_icon:
-          type: string
-        collected_at:
-          type: string
-          format: date-time
+    GetUserProfileResponse:
+      oneOf:
+        - $ref: '#/components/schemas/GetLockedUserProfileResponse'
+        - $ref: '#/components/schemas/GetUnlockedUserProfileResponse'
 
-    UserCollectionData:
-      type: object
-      required: [owner_display_name, total_collected, collection]
-      properties:
-        owner_display_name:
-          type: string
-        total_collected:
-          type: integer
-        collection:
-          type: array
-          items:
-            $ref: '#/components/schemas/CollectionItem'
-
-    GetUserCollectionResponse:
+    GetLockedUserProfileResponse:
       type: object
       required: [status, data]
       properties:
@@ -621,205 +646,76 @@ components:
           type: string
           enum: [success]
         data:
-          $ref: '#/components/schemas/UserCollectionData'
+          $ref: '#/components/schemas/UserProfileLocked'
+
+    GetUnlockedUserProfileResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          $ref: '#/components/schemas/UserProfileFull'
 
     PairTagRequest:
       type: object
-      required: [physical_uid]
+      required: [physical_id]
       additionalProperties: false
       properties:
-        physical_uid:
+        physical_id:
           type: string
-          description: Physical hardware UID read from NFC hardware.
+          description: Physical ID read from the NFC tag.
           example: '04:1A:2B:3C:4D:5E:6F'
 
     ScanCollectionRequest:
       type: object
-      required: [target_user_id, scanned_nfc_uid]
+      required: [user_id, physical_id]
       additionalProperties: false
       properties:
-        target_user_id:
+        user_id:
           type: string
-          description: Parsed from query parameter `u` in scanned tag URL
-          example: U_9V8W7X
-        scanned_nfc_uid:
+          description: User ID parsed from the scanned tag URL.
+          example: kktix_hash_def456
+        physical_id:
           type: string
-          description: UID read from NFC hardware
+          description: Physical ID read from the scanned NFC tag.
           example: '04:99:88:77:66:55:44'
 
-    ScanAttendeeTargetInfo:
-      type: object
-      required: [user_type, emoji_icon, total_tags]
-      properties:
-        user_type:
-          type: string
-        emoji_icon:
-          type: string
-        total_tags:
-          type: integer
-
-    ScanAttendeeData:
-      type: object
-      required: [target_info, ciphertext, pixel_avatar_base64]
-      properties:
-        target_info:
-          $ref: '#/components/schemas/ScanAttendeeTargetInfo'
-        ciphertext:
-          type: string
-          description: Ciphertext for client-side decryption
-          example: U2FsdGVkX1+xxyz...
-        pixel_avatar_base64:
-          type: string
-          example: iVBORw0KGgo...
-
-    ScanAttendeeResponse:
-      type: object
-      required: [status, type, data]
-      properties:
-        status:
-          type: string
-          enum: [success]
-        type:
-          type: string
-          enum: [ATTENDEE]
-        data:
-          $ref: '#/components/schemas/ScanAttendeeData'
-
-    ScanSponsorStandData:
-      type: object
-      required:
-        - sponsor_stand_id
-        - sponsor_stand_name
-        - sponsor_stand_message
-        - current_stamps
-        - required_for_prize
-      properties:
-        sponsor_stand_id:
-          type: string
-        sponsor_stand_name:
-          type: string
-        sponsor_stand_message:
-          type: string
-        current_stamps:
-          type: integer
-        required_for_prize:
-          type: integer
-
-    ScanSponsorStandResponse:
-      type: object
-      required: [status, type, data]
-      properties:
-        status:
-          type: string
-          enum: [success]
-        type:
-          type: string
-          enum: [SPONSOR_STAND]
-        data:
-          $ref: '#/components/schemas/ScanSponsorStandData'
-
-    ScanCommunityStandData:
-      type: object
-      required:
-        - community_stand_id
-        - community_stand_name
-        - community_stand_message
-        - current_stamps
-        - required_for_prize
-      properties:
-        community_stand_id:
-          type: string
-        community_stand_name:
-          type: string
-        community_stand_message:
-          type: string
-        current_stamps:
-          type: integer
-        required_for_prize:
-          type: integer
-
-    ScanCommunityStandResponse:
-      type: object
-      required: [status, type, data]
-      properties:
-        status:
-          type: string
-          enum: [success]
-        type:
-          type: string
-          enum: [COMMUNITY_STAND]
-        data:
-          $ref: '#/components/schemas/ScanCommunityStandData'
-
     ScanCollectionResponse:
-      oneOf:
-        - $ref: '#/components/schemas/ScanAttendeeResponse'
-        - $ref: '#/components/schemas/ScanSponsorStandResponse'
-        - $ref: '#/components/schemas/ScanCommunityStandResponse'
-      discriminator:
-        propertyName: type
-        mapping:
-          ATTENDEE: '#/components/schemas/ScanAttendeeResponse'
-          SPONSOR_STAND: '#/components/schemas/ScanSponsorStandResponse'
-          COMMUNITY_STAND: '#/components/schemas/ScanCommunityStandResponse'
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: object
+          required: [collected_user_id, first_time_collected]
+          properties:
+            collected_user_id:
+              type: string
+              example: kktix_hash_def456
+            first_time_collected:
+              type: boolean
+              description: Whether this scan inserted a new collection record.
+              example: true
 
     PhishingRequest:
       type: object
-      required: [target_user_id]
+      required: [victim, attacker]
       additionalProperties: false
       properties:
-        target_user_id:
+        victim:
           type: string
-          example: U_9V8W7X
+          description: User ID of the authenticated app user who clicked the link.
+          example: kktix_hash_victim
+        attacker:
+          type: string
+          description: User ID parsed from the clicked phishing URL.
+          example: kktix_hash_attacker
 
-    PhishingData:
-      type: object
-      required: [alert_title, alert_message, score_penalty]
-      properties:
-        alert_title:
-          type: string
-        alert_message:
-          type: string
-        score_penalty:
-          type: integer
-          example: -20
-
-    PhishingResponse:
-      type: object
-      required: [status, data]
-      properties:
-        status:
-          type: string
-          enum: [phished]
-        data:
-          $ref: '#/components/schemas/PhishingData'
-
-    MissionItem:
-      type: object
-      required: [id, name, status]
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        status:
-          type: string
-          enum: [collected, pending]
-
-    SponsorMissionsData:
-      type: object
-      required: [collected_count, required_for_prize, sponsor_stands]
-      properties:
-        collected_count:
-          type: integer
-        required_for_prize:
-          type: integer
-        sponsor_stands:
-          type: array
-          items:
-            $ref: '#/components/schemas/MissionItem'
-
-    SponsorMissionsResponse:
+    GetStampMissionResponse:
       type: object
       required: [status, data]
       properties:
@@ -827,57 +723,49 @@ components:
           type: string
           enum: [success]
         data:
-          $ref: '#/components/schemas/SponsorMissionsData'
-
-    CommunityMissionsData:
-      type: object
-      required: [collected_count, required_for_prize, community_stands]
-      properties:
-        collected_count:
-          type: integer
-        required_for_prize:
-          type: integer
-        community_stands:
-          type: array
-          items:
-            $ref: '#/components/schemas/MissionItem'
-
-    CommunityMissionsResponse:
-      type: object
-      required: [status, data]
-      properties:
-        status:
-          type: string
-          enum: [success]
-        data:
-          $ref: '#/components/schemas/CommunityMissionsData'
+          type: object
+          required:
+            - stamp_threshold
+            - sponsor_count
+            - community_count
+            - eligible_for_stamp_prize
+          properties:
+            stamp_threshold:
+              type: integer
+              description: Configurable threshold for sponsor plus community stamps.
+              example: 10
+            sponsor_count:
+              type: integer
+              example: 6
+            community_count:
+              type: integer
+              example: 5
+            eligible_for_stamp_prize:
+              type: boolean
+              example: true
 
     ScoreboardItem:
       type: object
-      required: [rank, display_name, score, emoji_icon]
+      required: [rank, user_id, display_name, emoji_icon, score]
       properties:
         rank:
           type: integer
+          example: 1
+        user_id:
+          type: string
+          example: kktix_hash_abc123
         display_name:
           type: string
-        score:
-          type: integer
+          example: Root_User
         emoji_icon:
           type: string
+          description: Emoji character shown as the user's icon.
+          example: 💻
+        score:
+          type: integer
+          example: 2500
 
-    GlobalScoreboardData:
-      type: object
-      required: [last_updated, rankings]
-      properties:
-        last_updated:
-          type: string
-          format: date-time
-        rankings:
-          type: array
-          items:
-            $ref: '#/components/schemas/ScoreboardItem'
-
-    GlobalScoreboardResponse:
+    GetScoreboardResponse:
       type: object
       required: [status, data]
       properties:
@@ -885,44 +773,28 @@ components:
           type: string
           enum: [success]
         data:
-          $ref: '#/components/schemas/GlobalScoreboardData'
+          type: object
+          required: [offset, limit, rank_threshold, frozen, rankings]
+          properties:
+            offset:
+              type: integer
+              example: 0
+            limit:
+              type: integer
+              example: 50
+            rank_threshold:
+              type: integer
+              description: Configurable top-rank threshold for rank prizes.
+              example: 10
+            frozen:
+              type: boolean
+              example: false
+            rankings:
+              type: array
+              items:
+                $ref: '#/components/schemas/ScoreboardItem'
 
-    RedeemEligibilityEntry:
-      type: object
-      required: [can_redeem]
-      properties:
-        can_redeem:
-          type: boolean
-        already_redeemed:
-          type: boolean
-        reason:
-          type: string
-
-    StaffEligibility:
-      type: object
-      required: [sponsor_stand_prize, community_stand_prize, scoreboard_prize]
-      properties:
-        sponsor_stand_prize:
-          $ref: '#/components/schemas/RedeemEligibilityEntry'
-        community_stand_prize:
-          $ref: '#/components/schemas/RedeemEligibilityEntry'
-        scoreboard_prize:
-          $ref: '#/components/schemas/RedeemEligibilityEntry'
-
-    StaffIdentifyData:
-      type: object
-      required: [user_id, display_name, pixel_avatar_base64, eligibility]
-      properties:
-        user_id:
-          type: string
-        display_name:
-          type: string
-        pixel_avatar_base64:
-          type: string
-        eligibility:
-          $ref: '#/components/schemas/StaffEligibility'
-
-    StaffIdentifyResponse:
+    GetMyPrizeResponse:
       type: object
       required: [status, data]
       properties:
@@ -930,170 +802,213 @@ components:
           type: string
           enum: [success]
         data:
-          $ref: '#/components/schemas/StaffIdentifyData'
+          type: object
+          required: [scoreboard_frozen, stamp_prize, rank_prize]
+          properties:
+            scoreboard_frozen:
+              type: boolean
+              enum: [true]
+            stamp_prize:
+              type: boolean
+              description: Whether the user won the stamp prize.
+              example: true
+            rank_prize:
+              type: boolean
+              description: Whether the user won the rank prize.
+              example: true
+            rank:
+              type: integer
+              nullable: true
+              example: 7
 
-    StaffRedeemRequest:
+    ScoreboardFreezeState:
+      type: string
+      enum: [OPEN, FREEZING, FROZEN]
+
+    GetScoreboardStatusResponse:
       type: object
-      required: [user_id, prize_category]
-      additionalProperties: false
+      required: [status, data]
       properties:
-        user_id:
+        status:
           type: string
-        prize_category:
+          enum: [success]
+        data:
+          type: object
+          required:
+            - state
+            - freeze_id
+            - freeze_started_at
+            - frozen_at
+            - freeze_timeout_seconds
+            - freezing_stale
+          properties:
+            state:
+              $ref: '#/components/schemas/ScoreboardFreezeState'
+            freeze_id:
+              type: string
+              nullable: true
+              description: Current freeze snapshot ID, or null when scoring is open.
+              example: freeze_20260412_01
+            freeze_started_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Time the current freeze calculation started.
+              example: '2026-04-12T15:00:00Z'
+            frozen_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Time the scoreboard reached FROZEN state.
+              example: '2026-04-12T15:01:12Z'
+            freeze_timeout_seconds:
+              type: integer
+              description: Configured timeout before FREEZING is considered stale.
+              example: 300
+            freezing_stale:
+              type: boolean
+              description: Whether the current FREEZING state has exceeded the timeout.
+              example: false
+
+    FreezeScoreboardResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
           type: string
-          enum: [SPONSOR_STAND, COMMUNITY_STAND, SCOREBOARD]
+          enum: [success]
+        data:
+          type: object
+          required: [frozen, stamp_threshold, rank_threshold]
+          properties:
+            frozen:
+              type: boolean
+              enum: [true]
+            stamp_threshold:
+              type: integer
+              example: 10
+            rank_threshold:
+              type: integer
+              example: 10
 
   examples:
-    GetMyProfile:
+    GetMyProfileResponse:
       value:
         status: success
         data:
-          user_id: sub_hash_from_jwt
+          user_id: kktix_hash_abc123
           display_name: Hacker_Aries
-          user_type: CAT
-          emoji_icon: cat
+          role: ATTENDEE
+          emoji_icon: 🐱
           bio: I love reverse engineering.
           pixel_avatar_base64: iVBORw0KGgoAAAANSU...
-          stats:
-            score: 450
-            tags_collected: 45
+          physical_id: '04:1A:2B:3C:4D:5E:6F'
+          collection:
+            - kktix_hash_def456
 
     UpdateMyProfileRequest:
       value:
         display_name: Aries_The_Great
-        user_type: TECH
+        emoji_icon: 🚀
         bio: Updated bio.
         pixel_avatar_base64: iVBORw0KGgo...
 
-    GetUserCollection:
+    GetLockedUserProfileResponse:
       value:
         status: success
         data:
-          owner_display_name: Cool_Doggy
-          total_collected: 12
+          user_id: kktix_hash_def456
+          display_name: Alice
+          emoji_icon: 😉
+
+    GetUnlockedUserProfileResponse:
+      value:
+        status: success
+        data:
+          user_id: kktix_hash_def456
+          display_name: Plant_Lover
+          role: COMMUNITY
+          emoji_icon: 🌱
+          bio: Ask me about community projects.
+          pixel_avatar_base64: iVBORw0KGgoAAAANSU...
+          physical_id: '04:99:88:77:66:55:44'
           collection:
-            - user_id: U_1X2Y3Z
-              display_name: Plant_Lover
-              emoji_icon: plant
-              collected_at: '2026-04-12T10:30:00Z'
+            - kktix_hash_abc123
 
     PairTagRequest:
       value:
-        physical_uid: '04:1A:2B:3C:4D:5E:6F'
+        physical_id: '04:1A:2B:3C:4D:5E:6F'
 
     ScanCollectionRequest:
       value:
-        target_user_id: U_9V8W7X
-        scanned_nfc_uid: '04:99:88:77:66:55:44'
+        user_id: kktix_hash_def456
+        physical_id: '04:99:88:77:66:55:44'
 
-    ScanAttendeeResponse:
+    ScanCollectionResponse:
       value:
         status: success
-        type: ATTENDEE
         data:
-          target_info:
-            user_type: CAT
-            emoji_icon: cat
-            total_tags: 45
-          ciphertext: U2FsdGVkX1+xxyz...
-          pixel_avatar_base64: iVBORw0KGgo...
-
-    ScanSponsorStandResponse:
-      value:
-        status: success
-        type: SPONSOR_STAND
-        data:
-          sponsor_stand_id: sp_01
-          sponsor_stand_name: Google
-          sponsor_stand_message: Welcome to Google! We are hiring.
-          current_stamps: 9
-          required_for_prize: 10
-
-    ScanCommunityStandResponse:
-      value:
-        status: success
-        type: COMMUNITY_STAND
-        data:
-          community_stand_id: cs_01
-          community_stand_name: g0v
-          community_stand_message: Don't ask why nobody does. You are the nobody.
-          current_stamps: 9
-          required_for_prize: 10
+          collected_user_id: kktix_hash_def456
+          first_time_collected: true
 
     PhishingRequest:
       value:
-        target_user_id: U_9V8W7X
+        victim: kktix_hash_victim
+        attacker: kktix_hash_attacker
 
-    PhishingResponse:
-      value:
-        status: phished
-        data:
-          alert_title: Social Engineering Alert!
-          alert_message: You clicked an untrusted link. Return to the real world and tap the physical NFC tag.
-          score_penalty: -20
-
-    SponsorMissionsResponse:
+    GetStampMissionResponse:
       value:
         status: success
         data:
-          collected_count: 8
-          required_for_prize: 10
-          sponsor_stands:
-            - id: sp_01
-              name: Google
-              status: collected
-            - id: sp_02
-              name: Microsoft
-              status: pending
+          stamp_threshold: 10
+          sponsor_count: 6
+          community_count: 5
+          eligible_for_stamp_prize: true
 
-    CommunityMissionsResponse:
+    GetScoreboardResponse:
       value:
         status: success
         data:
-          collected_count: 4
-          required_for_prize: 10
-          community_stands:
-            - id: cs_01
-              name: g0v
-              status: collected
-            - id: cs_02
-              name: OWASP Taiwan
-              status: pending
-
-    GlobalScoreboardResponse:
-      value:
-        status: success
-        data:
-          last_updated: '2026-04-12T15:00:00Z'
+          offset: 0
+          limit: 50
+          rank_threshold: 10
+          frozen: false
           rankings:
             - rank: 1
+              user_id: kktix_hash_root
               display_name: Root_User
+              emoji_icon: 💻
               score: 2500
-              emoji_icon: laptop
             - rank: 2
+              user_id: kktix_hash_ctf
               display_name: CTF_Player
+              emoji_icon: 🐱
               score: 2480
-              emoji_icon: cat
 
-    StaffIdentifyResponse:
+    GetMyPrizeResponse:
       value:
         status: success
         data:
-          user_id: sub_hash_from_jwt
-          display_name: Hacker_Aries
-          pixel_avatar_base64: iVBORw0K...
-          eligibility:
-            sponsor_stand_prize:
-              can_redeem: true
-              already_redeemed: false
-            community_stand_prize:
-              can_redeem: true
-              already_redeemed: false
-            scoreboard_prize:
-              can_redeem: false
-              reason: 'Ranked #87 (Not in Top 10)'
+          scoreboard_frozen: true
+          stamp_prize: true
+          rank_prize: true
+          rank: 7
 
-    StaffRedeemRequest:
+    GetScoreboardStatusResponse:
       value:
-        user_id: sub_hash_from_jwt
-        prize_category: SPONSOR_STAND
+        status: success
+        data:
+          state: FROZEN
+          freeze_id: freeze_20260412_01
+          freeze_started_at: '2026-04-12T15:00:00Z'
+          frozen_at: '2026-04-12T15:01:12Z'
+          freeze_timeout_seconds: 300
+          freezing_stale: false
+
+    FreezeScoreboardResponse:
+      value:
+        status: success
+        data:
+          frozen: true
+          stamp_threshold: 10
+          rank_threshold: 10
