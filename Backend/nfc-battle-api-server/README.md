@@ -62,6 +62,21 @@ npm run cf-typegen
 npx wrangler d1 migrations apply nfc-battle-api-server --remote
 ```
 
+## GitHub Deploy
+
+The manual **Backend Deploy** workflow expects these GitHub Actions secrets:
+
+```txt
+CLOUDFLARE_ACCOUNT_ID
+CLOUDFLARE_API_TOKEN
+JWT_SECRET
+STAFF_DANGER_TOKEN
+```
+
+Before running it, replace the placeholder `database_id` in
+[`wrangler.jsonc`](./wrangler.jsonc) with the real D1 database ID. The workflow
+runs tests, typecheck, remote D1 migrations, Worker secret sync, and deploy.
+
 [For generating/synchronizing types based on your Worker configuration run](https://developers.cloudflare.com/workers/wrangler/commands/#types):
 
 ```txt
