@@ -3,6 +3,7 @@ import { requireAuth } from "./auth";
 import { success } from "./responses";
 import { requireStaffDangerToken } from "./staff";
 import type { AppEnv } from "./types";
+import users from "./users";
 
 const app = new Hono<AppEnv>();
 
@@ -24,5 +25,7 @@ app.get("/health/staff", requireStaffDangerToken, (c) => {
     ok: true,
   });
 });
+
+app.route("/users", users);
 
 export default app;
