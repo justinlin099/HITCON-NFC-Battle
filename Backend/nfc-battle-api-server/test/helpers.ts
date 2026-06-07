@@ -125,6 +125,39 @@ export async function readJson(response: Response) {
   return response.json() as Promise<unknown>;
 }
 
+export async function initializeUser(
+  server: TestServer,
+  userId: string,
+  role: UserRole = "ATTENDEE",
+) {
+  const headers = await authHeaders(userId, role);
+  const response = await server.request("/users/me", { headers });
+  return { headers, response };
+}
+
+export async function pairTag(
+  server: TestServer,
+  headers: Record<string, string>,
+  physicalId: string,
+) {
+  return server.request(
+    "/tags/pair",
+    await jsonRequest("POST", { physical_id: physicalId }, headers),
+  );
+}
+
+export async function scanTag(
+  server: TestServer,
+  headers: Record<string, string>,
+  userId: string,
+  physicalId: string,
+) {
+  return server.request(
+    "/collection/scan",
+    await jsonRequest("POST", { user_id: userId, physical_id: physicalId }, headers),
+  );
+}
+
 export async function signJwt(
   userId: string,
   role: UserRole = "ATTENDEE",

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { authHeaders, createTestServer, jsonRequest, readJson, staffHeaders } from "./helpers";
+import {
+  authHeaders,
+  createTestServer,
+  jsonRequest,
+  pairTag,
+  readJson,
+  scanTag,
+  staffHeaders,
+} from "./helpers";
 
 describe("NFC Battle API flow", () => {
   it("supports profile, tag pairing, scan, missions, scoreboard, freeze, prize, and resume", async () => {
@@ -32,9 +40,12 @@ describe("NFC Battle API flow", () => {
       },
     });
 
-    await expect(pairTag(server, aliceAuth, "tag-alice")).resolves.toBe(200);
-    await expect(pairTag(server, sponsorAuth, "tag-sponsor")).resolves.toBe(200);
-    await expect(pairTag(server, communityAuth, "tag-community")).resolves.toBe(200);
+    await expect(pairTag(server, aliceAuth, "tag-alice")).resolves.toHaveProperty("status", 200);
+    await expect(pairTag(server, sponsorAuth, "tag-sponsor")).resolves.toHaveProperty("status", 200);
+    await expect(pairTag(server, communityAuth, "tag-community")).resolves.toHaveProperty(
+      "status",
+      200,
+    );
 
     const duplicatePair = await server.request(
       "/tags/pair",
@@ -189,27 +200,3 @@ describe("NFC Battle API flow", () => {
     expect(prizeAfterResume.status).toBe(409);
   });
 });
-
-async function pairTag(
-  server: Awaited<ReturnType<typeof createTestServer>>,
-  headers: Record<string, string>,
-  physicalId: string,
-) {
-  const response = await server.request(
-    "/tags/pair",
-    await jsonRequest("POST", { physical_id: physicalId }, headers),
-  );
-  return response.status;
-}
-
-async function scanTag(
-  server: Awaited<ReturnType<typeof createTestServer>>,
-  headers: Record<string, string>,
-  userId: string,
-  physicalId: string,
-) {
-  return server.request(
-    "/collection/scan",
-    await jsonRequest("POST", { user_id: userId, physical_id: physicalId }, headers),
-  );
-}
