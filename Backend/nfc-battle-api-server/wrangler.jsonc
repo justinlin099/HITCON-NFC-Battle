@@ -17,7 +17,18 @@
 	"upload_source_maps": true,
 	"compatibility_flags": [
 		"nodejs_compat"
-	]
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "nfc-battle-api-server",
+			"database_id": "00000000-0000-0000-0000-000000000000"
+		}
+	],
+	"vars": {
+		"JWT_ISSUER": "hitcon-2026",
+		"JWT_AUDIENCE": "nfc-battle-api-server"
+	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
@@ -35,7 +46,7 @@
 	 * Note: Use secrets to store sensitive data.
 	 * https://developers.cloudflare.com/workers/configuration/secrets/
 	 */
-	// "vars": {  "MY_VARIABLE": "production_value" }
+	// Secrets required: JWT_SECRET, STAFF_DANGER_TOKEN
 	/**
 	 * Service Bindings (communicate between multiple Workers)
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings

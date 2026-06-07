@@ -3,6 +3,12 @@ npm install
 npm run dev
 ```
 
+Copy local secrets before running the Worker:
+
+```txt
+cp .dev.vars.example .dev.vars
+```
+
 ```txt
 npm run deploy
 ```
@@ -12,6 +18,26 @@ npm run deploy
 Initial D1 schema lives in [`migrations/0001_initial_schema.sql`](./migrations/0001_initial_schema.sql).
 It defines only the stable backbone tables; add new migrations incrementally as
 API implementation clarifies more details.
+
+For local development and tests, the placeholder `database_id` in
+[`wrangler.jsonc`](./wrangler.jsonc) is enough. Apply migrations to Wrangler's
+local D1 database:
+
+```txt
+npx wrangler d1 migrations apply nfc-battle-api-server --local
+```
+
+Wrangler stores local D1 state under its local state directory, so it is not
+committed with the repo.
+
+For deploys, create a real D1 database, replace the placeholder `database_id`,
+regenerate types, and apply migrations remotely:
+
+```txt
+npx wrangler d1 create nfc-battle-api-server
+npm run cf-typegen
+npx wrangler d1 migrations apply nfc-battle-api-server --remote
+```
 
 [For generating/synchronizing types based on your Worker configuration run](https://developers.cloudflare.com/workers/wrangler/commands/#types):
 
