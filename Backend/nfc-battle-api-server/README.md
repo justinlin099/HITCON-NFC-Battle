@@ -20,6 +20,22 @@ npm test
 npm run typecheck
 ```
 
+## Local Smoke
+
+Use a workspace-local Wrangler config directory if your environment cannot write
+to `~/.config`:
+
+```txt
+XDG_CONFIG_HOME="$PWD/.wrangler-config" npx wrangler d1 migrations apply nfc-battle-api-server --local
+XDG_CONFIG_HOME="$PWD/.wrangler-config" npm run dev -- --port 8797
+```
+
+Then verify the Worker and local D1 binding:
+
+```txt
+curl http://127.0.0.1:8797/health
+```
+
 ## Database
 
 Initial D1 schema lives in [`migrations/0001_initial_schema.sql`](./migrations/0001_initial_schema.sql).
