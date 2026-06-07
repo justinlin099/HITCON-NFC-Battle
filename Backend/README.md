@@ -19,6 +19,9 @@ Use Swagger UI to view and explore the API contract:
 Before the conference, the mobile app obtains the user's JWT and calls
 `GET /users/me`, which lazily initializes the user's profile. Users can update
 their display name, emoji icon, bio, and pixel avatar with `PATCH /users/me`.
+The backend verifies JWTs with a shared secret and HMAC. JWTs must contain
+`sub`, `exp`, `iss`, `aud`, and `role`; `sub` is the user ID and `role` is used
+for fast role lookup without querying the database.
 
 At reception, users scan their assigned NFC tag and call `POST /tags/pair` to
 bind their profile to the tag's physical ID. The app also writes

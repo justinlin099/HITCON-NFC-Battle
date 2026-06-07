@@ -26,6 +26,8 @@ The current score calculation formula is `score = 10 * num_of_collection`. This 
 
 The `freeze_timeout` should be a configurable variable or a constant, indicating how long a scoreboard can stay in `FREEZING` before it is considered stale.
 
+JWT verification is simple: the backend verifies the token with a shared secret and HMAC. The JWT must contain `sub`, `exp`, `iss`, `aud`, and `role`. The JWT subject (`sub`) is the user's ID. The `role` claim is used for fast role lookup, so the backend does not need to query the database just to check the caller's role.
+
 ## Before Conference Starts
 
 The user will receive an email, containing a link like `https://game.hitcon2026.online/b?whatever={whatever_related_to_the_user}`. This is hosted elsewhere, and will redirect to app store to download the mobile app.

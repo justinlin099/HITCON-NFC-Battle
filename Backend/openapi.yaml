@@ -16,7 +16,15 @@ info:
 
     Authenticated app APIs use the conference JWT:
     `Authorization: Bearer <JWT>`. The backend derives caller identity from the
-    JWT subject, which is the hashed KKTIX user ID.
+    JWT subject, which is the hashed KKTIX user ID. JWT verification uses a
+    shared secret and HMAC.
+
+    Required JWT claims:
+    - `sub`: user ID, the hashed KKTIX user ID.
+    - `exp`: expiration time.
+    - `iss`: issuer.
+    - `aud`: audience.
+    - `role`: caller role, used for fast role lookup without querying the DB.
 
     Physical NFC tag IDs are predictable, so scan requests must include both the
     parsed user ID from the tag URL and the physical ID read from the tag. The
@@ -422,7 +430,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: 'Conference JWT sent as `Authorization: Bearer <JWT>`.'
+      description: 'Conference JWT sent as `Authorization: Bearer <JWT>`. Verified with a shared secret and HMAC. Required claims: `sub`, `exp`, `iss`, `aud`, and `role`.'
     staffDangerToken:
       type: apiKey
       in: header
@@ -441,7 +449,7 @@ components:
             code: BAD_REQUEST
             message: Invalid request body or query parameter.
     UnauthorizedError:
-      description: Missing or invalid JWT.
+      description: Missing or invalid HMAC-signed JWT.
       content:
         application/json:
           schema:
