@@ -13,6 +13,13 @@ cp .dev.vars.example .dev.vars
 npm run deploy
 ```
 
+## Checks
+
+```txt
+npm test
+npm run typecheck
+```
+
 ## Database
 
 Initial D1 schema lives in [`migrations/0001_initial_schema.sql`](./migrations/0001_initial_schema.sql).
