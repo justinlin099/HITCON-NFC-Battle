@@ -1,7 +1,9 @@
 import { Hono } from "hono";
+import collection from "./collection";
 import { requireAuth } from "./auth";
 import { success } from "./responses";
 import { requireStaffDangerToken } from "./staff";
+import tags from "./tags";
 import type { AppEnv } from "./types";
 import users from "./users";
 
@@ -27,5 +29,7 @@ app.get("/health/staff", requireStaffDangerToken, (c) => {
 });
 
 app.route("/users", users);
+app.route("/tags", tags);
+app.route("/collection", collection);
 
 export default app;
