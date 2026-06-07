@@ -6,6 +6,7 @@ import missions from "./missions";
 import { success } from "./responses";
 import scoreboard from "./scoreboard";
 import { requireStaffDangerToken } from "./staff";
+import staffRoutes from "./staff-routes";
 import tags from "./tags";
 import type { AppEnv } from "./types";
 import users from "./users";
@@ -37,5 +38,6 @@ app.route("/collection", collection);
 app.route("/collections", collections);
 app.route("/missions", missions);
 app.route("/scoreboard", scoreboard);
+app.route("/staff", staffRoutes);
 
 export default app;

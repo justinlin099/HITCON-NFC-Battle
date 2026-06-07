@@ -3,8 +3,15 @@ import { requireAuth } from "./auth";
 import { nowIso } from "./ids";
 import { hasOnlyKeys, isPlainObject, readJson } from "./request";
 import { errorResponse, success } from "./responses";
+import { getGameState } from "./game-state";
 import type { AppEnv } from "./types";
 import { getFullProfile, getUserRow, lazyInitializeUser, profileFromRow } from "./user-store";
+
+interface PrizeResultRow {
+  stamp_prize: number;
+  rank_prize: number;
+  rank: number | null;
+}
 
 interface ProfileUpdate {
   display_name?: string;
@@ -54,6 +61,23 @@ users.patch("/me", async (c) => {
   }
 
   return success(c, profile);
+});
+
+users.get("/me/prize", async (c) => {
+  const authUser = c.get("authUser");
+  const state = await getGameState(c.env.DB);
+  if (state.state !== "FROZEN" || !state.freeze_id) {
+    return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
+  }
+
+  const result = await getPrizeResult(c.env.DB, state.freeze_id, authUser.userId);
+
+  return success(c, {
+    scoreboard_frozen: true,
+    stamp_prize: result?.stamp_prize === 1,
+    rank_prize: result?.rank_prize === 1,
+    rank: result?.rank ?? null,
+  });
 });
 
 users.get("/:user_id", async (c) => {
@@ -106,6 +130,22 @@ async function updateMyProfile(db: D1Database, userId: string, update: ProfileUp
       nowIso(),
     )
     .run();
+}
+
+async function getPrizeResult(db: D1Database, freezeId: string, userId: string) {
+  return db
+    .prepare(
+      `
+      SELECT
+        stamp_prize,
+        rank_prize,
+        rank
+      FROM prize_results
+      WHERE freeze_id = ?1 AND user_id = ?2
+      `,
+    )
+    .bind(freezeId, userId)
+    .first<PrizeResultRow>();
 }
 
 function validateProfileUpdate(value: unknown): ProfileUpdate | null {

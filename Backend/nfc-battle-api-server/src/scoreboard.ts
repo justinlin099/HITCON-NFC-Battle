@@ -1,14 +1,11 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import { RANK_THRESHOLD } from "./game-config";
+import { getGameState } from "./game-state";
 import { calculateScore } from "./scoring";
 import { errorResponse, success } from "./responses";
 import type { AppEnv } from "./types";
 import { lazyInitializeUser } from "./user-store";
-
-interface ScoreboardStateRow {
-  state: "OPEN" | "FREEZING" | "FROZEN";
-}
 
 interface ScoreboardRow {
   rank: number;
@@ -35,7 +32,7 @@ scoreboard.get("/", async (c) => {
   }
 
   const [state, rankings] = await Promise.all([
-    getScoreboardState(c.env.DB),
+    getGameState(c.env.DB),
     getRankings(c.env.DB, pagination.offset, pagination.limit),
   ]);
 
@@ -55,18 +52,6 @@ scoreboard.get("/", async (c) => {
 });
 
 export default scoreboard;
-
-async function getScoreboardState(db: D1Database) {
-  return db
-    .prepare(
-      `
-      SELECT state
-      FROM game_state
-      WHERE id = 1
-      `,
-    )
-    .first<ScoreboardStateRow>();
-}
 
 async function getRankings(db: D1Database, offset: number, limit: number) {
   const { results } = await db
