@@ -51,6 +51,7 @@ staffRoutes.post("/freeze_scoreboard", async (c) => {
     await transitionToFrozen(c.env.DB, freezeId);
   } catch (error) {
     console.error("Failed to freeze scoreboard.", error);
+    await rollbackFailedFreeze(c.env.DB, freezeId);
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
@@ -214,6 +215,39 @@ async function markPhishingEventsApplied(db: D1Database, freezeId: string) {
       `,
     )
     .bind(freezeId)
+    .run();
+}
+
+async function rollbackFailedFreeze(db: D1Database, freezeId: string) {
+  const timestamp = nowIso();
+  await db
+    .prepare("DELETE FROM prize_results WHERE freeze_id = ?1")
+    .bind(freezeId)
+    .run();
+  await db
+    .prepare(
+      `
+      UPDATE phishing_events
+      SET applied_freeze_id = NULL
+      WHERE applied_freeze_id = ?1
+      `,
+    )
+    .bind(freezeId)
+    .run();
+  await db
+    .prepare(
+      `
+      UPDATE game_state
+      SET
+        state = 'OPEN',
+        freeze_id = NULL,
+        freeze_started_at = NULL,
+        frozen_at = NULL,
+        updated_at = ?2
+      WHERE id = 1 AND state = 'FREEZING' AND freeze_id = ?1
+      `,
+    )
+    .bind(freezeId, timestamp)
     .run();
 }
 

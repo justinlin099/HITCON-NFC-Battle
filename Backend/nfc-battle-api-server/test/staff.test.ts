@@ -96,6 +96,45 @@ describe("staff scoreboard edge cases", () => {
     });
   });
 
+  it("rolls back FREEZING state when freeze calculation fails", async () => {
+    const server = await createTestServer();
+    await server.request("/users/me", { headers: await authHeaders("alice") });
+
+    await server.db.exec(
+      `
+      CREATE TRIGGER fail_freeze_snapshot
+      BEFORE INSERT ON prize_results
+      BEGIN
+        SELECT RAISE(ABORT, 'forced freeze failure');
+      END;
+      `,
+    );
+
+    const failedFreeze = await server.request("/staff/freeze_scoreboard", {
+      method: "POST",
+      headers: staffHeaders(),
+    });
+    expect(failedFreeze.status).toBe(400);
+
+    await expect(
+      server.db.prepare("SELECT state, freeze_id FROM game_state WHERE id = 1").first(),
+    ).resolves.toEqual({
+      state: "OPEN",
+      freeze_id: null,
+    });
+    await expect(
+      server.db.prepare("SELECT COUNT(*) AS count FROM prize_results").first<{ count: number }>(),
+    ).resolves.toEqual({ count: 0 });
+
+    await server.db.exec("DROP TRIGGER fail_freeze_snapshot");
+
+    const retryFreeze = await server.request("/staff/freeze_scoreboard", {
+      method: "POST",
+      headers: staffHeaders(),
+    });
+    expect(retryFreeze.status).toBe(200);
+  });
+
   it("recovers stale FREEZING state and clears partial snapshot data", async () => {
     const server = await createTestServer();
     await server.request("/users/me", { headers: await authHeaders("alice") });
