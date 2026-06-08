@@ -17,7 +17,7 @@ node_modules/
 
 # env
 .env
-.env.production
+.env.*
 .dev.vars
 
 # logs
@@ -34,4 +34,3 @@ lerna-debug.log*
 
 .dev.vars*
 !.dev.vars.example
-!.env.example

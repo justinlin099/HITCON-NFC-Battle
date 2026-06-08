@@ -28,6 +28,42 @@
 	"vars": {
 		"JWT_ISSUER": "hitcon-2026",
 		"JWT_AUDIENCE": "nfc-battle-api-server"
+	},
+	"env": {
+		"staging": {
+			"name": "nfc-battle-api-server-staging",
+			"routes": [
+				{
+					"pattern": "nfc-battle-staging.hitcon2026.online",
+					"custom_domain": true
+				}
+			],
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "nfc-battle-api-server-staging",
+					"database_id": "40de2dc1-acc7-4540-8dc7-bb74bace4977"
+				}
+			],
+			"vars": {
+				"JWT_ISSUER": "hitcon-2026-staging",
+				"JWT_AUDIENCE": "nfc-battle-api-server-staging"
+			}
+		},
+		"production": {
+			"name": "nfc-battle-api-server",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "nfc-battle-api-server",
+					"database_id": "00000000-0000-0000-0000-000000000000"
+				}
+			],
+			"vars": {
+				"JWT_ISSUER": "hitcon-2026",
+				"JWT_AUDIENCE": "nfc-battle-api-server"
+			}
+		}
 	}
 	/**
 	 * Smart Placement

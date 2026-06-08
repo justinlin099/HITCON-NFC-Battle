@@ -2,11 +2,21 @@ name: Backend Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Target Cloudflare Worker environment
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
 
 jobs:
   deploy:
-    name: Deploy Worker backend
+    name: Deploy Worker backend (${{ inputs.environment }})
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
 
     defaults:
       run:
@@ -37,13 +47,13 @@ jobs:
         run: npm run typecheck
 
       - name: Apply remote D1 migrations
-        run: npx wrangler d1 migrations apply nfc-battle-api-server --remote
+        run: npm run db:migrate:${{ inputs.environment }}
 
       - name: Sync JWT secret
-        run: printf '%s' "${{ secrets.JWT_SECRET }}" | npx wrangler secret put JWT_SECRET
+        run: printf '%s' "${{ secrets.JWT_SECRET }}" | npx wrangler secret put JWT_SECRET --env ${{ inputs.environment }}
 
       - name: Sync staff danger token
-        run: printf '%s' "${{ secrets.STAFF_DANGER_TOKEN }}" | npx wrangler secret put STAFF_DANGER_TOKEN
+        run: printf '%s' "${{ secrets.STAFF_DANGER_TOKEN }}" | npx wrangler secret put STAFF_DANGER_TOKEN --env ${{ inputs.environment }}
 
       - name: Deploy Worker
-        run: npm run deploy
+        run: npm run deploy:${{ inputs.environment }}

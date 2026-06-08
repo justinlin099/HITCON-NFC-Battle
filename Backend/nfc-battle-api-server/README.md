@@ -9,9 +9,8 @@ Copy local secrets before running the Worker:
 cp .dev.vars.example .dev.vars
 ```
 
-```txt
-npm run deploy
-```
+Use `.dev.vars` only for local Worker runtime secrets such as `JWT_SECRET` and
+`STAFF_DANGER_TOKEN`.
 
 ## Checks
 
@@ -53,27 +52,93 @@ npx wrangler d1 migrations apply nfc-battle-api-server --local
 Wrangler stores local D1 state under its local state directory, so it is not
 committed with the repo.
 
-For deploys, create a real D1 database, replace the placeholder `database_id`,
-regenerate types, and apply migrations remotely:
+## Manual Staging Deploy
+
+Create the staging D1 database:
+
+```txt
+npx wrangler d1 create nfc-battle-api-server-staging
+```
+
+Replace the staging placeholder `database_id` in
+[`wrangler.jsonc`](./wrangler.jsonc), then regenerate types and apply remote
+migrations:
+
+```txt
+npm run cf-typegen
+npm run db:migrate:staging
+```
+
+Set staging runtime secrets in Cloudflare. Store these values in a password
+manager because Cloudflare will not show them again after upload.
+
+```txt
+npx wrangler secret put JWT_SECRET --env staging
+npx wrangler secret put STAFF_DANGER_TOKEN --env staging
+```
+
+Deploy staging:
+
+```txt
+npm run deploy:staging
+```
+
+Smoke test staging:
+
+```txt
+curl https://nfc-battle-staging.hitcon2026.online/health
+```
+
+## Manual Production Deploy
+
+Production uses a separate Worker environment and D1 database. Create the
+production D1 database:
 
 ```txt
 npx wrangler d1 create nfc-battle-api-server
+```
+
+Replace the production placeholder `database_id` in
+[`wrangler.jsonc`](./wrangler.jsonc), then regenerate types and apply remote
+migrations:
+
+```txt
 npm run cf-typegen
-npx wrangler d1 migrations apply nfc-battle-api-server --remote
+npm run db:migrate:production
+```
+
+Set production runtime secrets in Cloudflare:
+
+```txt
+npx wrangler secret put JWT_SECRET --env production
+npx wrangler secret put STAFF_DANGER_TOKEN --env production
+```
+
+Deploy production:
+
+```txt
+npm run deploy:production
 ```
 
 ## GitHub Deploy
 
-The manual **Backend Deploy** workflow expects these GitHub Actions secrets:
+The manual **Backend Deploy** workflow can deploy either `staging` or
+`production`. It expects these repository-level GitHub Actions secrets:
 
 ```txt
 CLOUDFLARE_ACCOUNT_ID
 CLOUDFLARE_API_TOKEN
+```
+
+Create GitHub Environments named `staging` and `production`, then add these
+secrets to each environment:
+
+```txt
 JWT_SECRET
 STAFF_DANGER_TOKEN
 ```
 
-Before running it, replace the placeholder `database_id` in
+Before running it, replace the target environment's placeholder `database_id` in
 [`wrangler.jsonc`](./wrangler.jsonc) with the real D1 database ID. The workflow
 runs tests, typecheck, remote D1 migrations, Worker secret sync, and deploy.
 

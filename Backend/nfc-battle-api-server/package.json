@@ -4,6 +4,10 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
+    "deploy:staging": "wrangler deploy --env staging --minify",
+    "deploy:production": "wrangler deploy --env production --minify",
+    "db:migrate:staging": "wrangler d1 migrations apply nfc-battle-api-server-staging --remote --env staging",
+    "db:migrate:production": "wrangler d1 migrations apply nfc-battle-api-server --remote --env production",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
