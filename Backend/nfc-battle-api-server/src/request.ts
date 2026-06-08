@@ -24,5 +24,5 @@ export function requiredString(value: Record<string, unknown>, key: string) {
   }
 
   const trimmed = fieldValue.trim();
-  return trimmed === "" ? null : fieldValue;
+  return trimmed === "" ? null : trimmed;
 }

@@ -112,4 +112,34 @@ describe("collection scan edge cases", () => {
       },
     });
   });
+
+  it("normalizes string request fields before storing and comparing IDs", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    const bobAuth = await authHeaders("bob");
+
+    const pairResponse = await server.request(
+      "/tags/pair",
+      await jsonRequest("POST", { physical_id: " tag-bob " }, bobAuth),
+    );
+    expect(pairResponse.status).toBe(200);
+
+    const scanResponse = await server.request(
+      "/collection/scan",
+      await jsonRequest("POST", { user_id: " bob ", physical_id: " tag-bob " }, aliceAuth),
+    );
+    expect(scanResponse.status).toBe(200);
+    await expect(readJson(scanResponse)).resolves.toMatchObject({
+      data: {
+        collected_user_id: "bob",
+        first_time_collected: true,
+      },
+    });
+
+    await expect(
+      server.db
+        .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'bob'")
+        .first<{ physical_id: string }>(),
+    ).resolves.toEqual({ physical_id: "tag-bob" });
+  });
 });
