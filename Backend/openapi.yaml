@@ -332,6 +332,8 @@ paths:
               examples:
                 scoreboard:
                   $ref: '#/components/examples/GetScoreboardResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
   /staff/scoreboard_status:

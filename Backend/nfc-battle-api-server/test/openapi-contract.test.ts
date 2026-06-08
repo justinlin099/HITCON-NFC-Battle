@@ -38,6 +38,10 @@ describe("OpenAPI contract drift", () => {
     expect(readOpenApiPaths()).toEqual(CONTRACT_PATHS);
   });
 
+  it("documents scoreboard invalid pagination as a bad request", () => {
+    expect(readOpenApiOperationResponses("/scoreboard", "get")).toContain("400");
+  });
+
   it("has mounted routes for every documented operation", async () => {
     const server = await createTestServer();
 
@@ -59,6 +63,32 @@ function readOpenApiPaths() {
   const pathMatches = openApi.matchAll(/^  (\/[^:]+):$/gm);
 
   return [...pathMatches].map((match) => match[1]);
+}
+
+function readOpenApiOperationResponses(path: string, method: string) {
+  const openApi = readOpenApi();
+  const pathIndex = openApi.indexOf(`  ${path}:`);
+  expect(pathIndex).toBeGreaterThanOrEqual(0);
+
+  const nextPathIndex = openApi.indexOf("\n  /", pathIndex + 1);
+  const pathBlock = openApi.slice(pathIndex, nextPathIndex === -1 ? undefined : nextPathIndex);
+  const methodIndex = pathBlock.indexOf(`    ${method}:`);
+  expect(methodIndex).toBeGreaterThanOrEqual(0);
+
+  const nextMethodMatch = pathBlock.slice(methodIndex + 1).match(/\n    [a-z]+:/);
+  const operationBlock = pathBlock.slice(
+    methodIndex,
+    nextMethodMatch ? methodIndex + 1 + nextMethodMatch.index! : undefined,
+  );
+  const responseMatches = operationBlock.matchAll(/^        '(\d{3})':$/gm);
+
+  return [...responseMatches].map((match) => match[1]);
+}
+
+function readOpenApi() {
+  const testDir = dirname(fileURLToPath(import.meta.url));
+  const openApiPath = join(testDir, "../../openapi.yaml");
+  return readFileSync(openApiPath, "utf8");
 }
 
 async function requestWithoutCredentials(method: string) {
