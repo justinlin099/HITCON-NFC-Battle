@@ -14,5 +14,5 @@
         "./worker-configuration.d.ts",
         "node"
     ]
-  },
+  }
 }
