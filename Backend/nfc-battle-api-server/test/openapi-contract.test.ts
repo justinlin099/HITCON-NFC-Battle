@@ -7,7 +7,10 @@ import { createTestServer, jsonRequest } from "./helpers";
 const CONTRACT_PATHS = [
   "/users/me",
   "/users/me/prize",
+  "/users/me/bootstrap",
+  "/users/batch",
   "/users/{user_id}",
+  "/users/{user_id}/collection",
   "/tags/pair",
   "/collection/scan",
   "/collections/phishing",

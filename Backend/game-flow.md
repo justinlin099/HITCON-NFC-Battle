@@ -7,14 +7,19 @@ A valid value for user's role:
 * community (`COMMUNITY`)
 
 A user's data contains:
-* user ID (the hashed KKTIX user ID)
+* user ID (the hashed KKTIX user ID or whatever provided by JWT's issuer)
 * display name
 * user role
 * emoji icon
 * bio
 * pixel_avatar_base64
 * NFC tag's physical ID
-* collection (other user's ID that the user has previously scanned)
+* profile version
+* collection version
+
+The collection table records which user IDs a user has previously scanned. A collection record is also the long-term permission that lets the scanner view the collected user's full profile.
+
+`profile_version` and `collection_version` are integer versions stored on the user row. `profile_version` changes when profile fields change. `collection_version` changes only when that user's own collection changes. For example, when Alice scans Bob, Alice's `collection_version` changes, but Alice's `profile_version`, Bob's `profile_version` and `collection_version` do not change.
 
 The `stamp_threshold` should be a configurable variable or a constant. The user that collects more than `stamp_threshold` sponsor + community stamps can win a prize at the end of the conference.
 
@@ -48,8 +53,6 @@ After the app writes the URL to the tag, it will lock (encrypt) the tag, so it i
 
 The user can still use `PATCH /users/me` to update their profile at any time.
 
-The user can use `GET /users/{user_id}` to view other's profile. If the physical ID of the queried user is provided as the `physical_id` query parameter, our API server will return all data of the user; otherwise, our API server will return only "display name" and "emoji icon". (The mobile app will show a "locked character" indicator if the user's physical ID is not presented)
-
 ### Scanning Other's NFC Tag
 
 Whenever a user use their mobile device to scan other's NFC Tag,
@@ -61,14 +64,41 @@ Whenever a user use their mobile device to scan other's NFC Tag,
 5. Our API server will check whether the physical ID is related to the parsed user ID.
 6. Our API server will add the parsed user ID to the scanner's collection.
 7. Our API server will insert a record if this is the first time of collecting this NFC tag.
-8. Our API server will return success.
-9. The app will use `GET /users/{user_id}` to query the newly collected user's profile, and show it on the page.
+8. If the inserted collection record is new, our API server will increment the scanner's `collection_version`.
+9. Our API server will return success and the scanned user's profile without that user's collection list.
+10. The app can show the scanned user's profile immediately without making another profile request.
 
 Note that the NFC tag's physical ID are serial, so the user can easily predict other tag's physical ID. Therefore, it is necessary to also send the parsed user ID to prevent malicious user from faking a scan.
 
+### Viewing Other's Profile on App
+
+When the app wants to display another user's profile, it calls
+`GET /users/{user_id}` with the viewer's JWT.
+
+If the viewer has collected the queried user, the API server returns the queried user's full profile, `profile_version`, and `collection_version`, but does not include the queried user's collection list in this response.
+
+* If the viewer has not collected the queried user, the API server returns only `user_id`, `display_name` and `emoji_icon`.
+* If the viewer sends both `profile_version` and `collection_version` to `GET /users/{user_id}`, and both match the server's current versions, the API server returns only `user_id` and `unchanged: true`.
+* If either cached version is omitted or stale, `GET /users/{user_id}` returns the user's profile body using the normal visibility rule.
+* If the viewer has collected the queried user, and the app already has a cached full profile but sees that the queried user's `collection_version` is newer than the local cache, the app can call `GET /users/{user_id}/collection` to refresh that queried user's collection list.
+
+`GET /users/{user_id}/collection` returns the queried user's collection only when the viewer has collected the queried user. If the viewer has not collected the queried user, the API server returns a forbidden error. The viewer may send `collection_version`; if it matches the server's current collection version for the queried user, the API server returns only `user_id` and `unchanged: true`. Otherwise, for each user in that collection list, the API server applies the same profile visibility rule from the viewer's point of view. If the viewer has collected that listed user, return that listed user as full profile data. Otherwise, return only `user_id`, `display_name`, and `emoji_icon`.
+
+The app can use `POST /users/batch` to refresh multiple cached user profiles in one request. This endpoint is read-only and uses `POST` only so the app can send a structured request body. The request contains a list of user IDs and optional locally cached `profile_version` and `collection_version` values. For each requested user, the API server applies the same profile visibility rule from the viewer's point of view. If both cached versions are provided and both match the server's current versions, it returns only `user_id` and `unchanged: true`. Otherwise, it returns `unchanged: false` and the requested user's profile using the same response shape as `GET /users/{user_id}`: full profile data when the viewer has collected that user, or only `user_id`, `display_name`, and `emoji_icon` when the viewer has not collected that user. The batch request should have a maximum item count so one request cannot read an unbounded number of user rows.
+
+Example:
+
+* Alice collected Bob.
+* Alice has not collected Carol.
+* Bob collected Carol.
+* Alice opens Bob's collection list via `GET /users/Bob/collection`.
+* Carol appears with only `user_id`, `display_name`, and `emoji_icon`. `GET /users/Carol/collection` should return a forbidden error.
+* Later, Alice collects Carol.
+* When Alice opens Bob's collection list again, Carol appears as full profile data because Alice has now collected Carol.
+
 ### Phishing
 
-If the mobile app is triggered by clicking a link (like `https://game.hitcon2026.online/b?u={user_id}`) instead of scanning a tag, the app will not detect a physical ID. Then, the app will send request to `POST /collections/phishing` with `victim` and `attacker`. Our API server will record this event and apply score penalty to the victim after the scoreboard is frozen.
+If the mobile app is triggered by clicking a link (like `https://game.hitcon2026.online/b?u={user_id}`) instead of scanning a tag, the app will not detect a physical ID. Then, the app will send request to `POST /collections/phishing` with `victim` and `attacker`. Our API server will record this event. The freeze calculation applies the phishing penalty to eligible phishing events in the stored score snapshot.
 
 ### Missions
 
@@ -76,17 +106,32 @@ The user can use `GET /missions/stamp` to see `stamp_threshold` and their progre
 
 ### Scoreboard
 
-The user can use `GET /scoreboard` with `offset` and `limit` to query the global scoreboard.
+The user can use `GET /scoreboard` with `offset` and `limit` to query the global scoreboard. While the scoreboard state is `OPEN`, this endpoint returns live scores. While the scoreboard state is `FREEZING`, this endpoint should be rejected because a consistent snapshot is being calculated. While the scoreboard state is `FROZEN`, this endpoint returns the stored freeze snapshot, so scores do not change even if the app continues to record pairing, scanning, phishing, profile, and collection updates.
+
+### In Case of Someone Lost Their App
+
+If the user somehow resets their app or needs a fresh installation, the app can use `GET /users/me/bootstrap` to restore the local cache in 1 request:
+
+* the full user profile of themselves
+* the user's `profile_version` and `collection_version`
+* the full profile of every previously collected user, without each collected user's collection list
+* each collected user's `profile_version` and `collection_version`
+
+The endpoint is equal to `GET /users/me`, `GET /users/{user_id}`, and `GET /users/{user_id}/collection`. Using this endpoint can reduce the server load by only requiring 1 request.
+
+This endpoint is for app bootstrap and recovery. Normal refresh should still use `GET /users/me`, `GET /users/{user_id}/collection`, and `POST /users/batch` so the app does not repeatedly download all collected profiles.
 
 ## Near the End of the Conference
 
-When the conference is about to end, someone will make a request to `POST /staff/freeze_scoreboard` with a `STAFF_DANGER_TOKEN` to freeze the scoreboard. Then, the server will calculate the stamp prize and scoreboard prize.
+When the conference is about to end, someone will make a request to `POST /staff/freeze_scoreboard` with a `STAFF_DANGER_TOKEN` to freeze the scoreboard. The request may include `scoring_cutoff_at` to specify the latest event timestamp that should count in the score snapshot. If `scoring_cutoff_at` is omitted, the server uses its current time. Then, the server will calculate the stamp prize and scoreboard prize.
 
-The freeze operation should calculate the final scores and prize results once, then store a per-user result snapshot. This snapshot should be used by `GET /users/me/prize`; do not recalculate prize results on every prize lookup.
+The freeze operation should calculate the final scores and prize results once, using only collection records and phishing records whose event timestamps are less than or equal to `scoring_cutoff_at`, then store a per-user result snapshot. This snapshot should be used by `GET /scoreboard` and `GET /users/me/prize` while the scoreboard state is `FROZEN`; do not recalculate scoreboard or prize results on every lookup.
 
 To avoid race conditions and support resume, the scoreboard should use a state machine: `OPEN`, `FREEZING`, and `FROZEN`. `POST /staff/freeze_scoreboard` should atomically change `OPEN` to `FREEZING`, calculate and store results for a new `freeze_id`, then change the state to `FROZEN`. If another freeze request arrives while the state is `FREEZING` or `FROZEN`, the server should reject it.
 
 If the scoreboard stays in `FREEZING` longer than `freeze_timeout`, the freeze is considered stale. Partial results for that `freeze_id` should not be visible to users, because `GET /users/me/prize` only reads a stored snapshot when the scoreboard state is `FROZEN`.
+
+The app should keep working after the scoreboard is frozen. `PATCH /users/me`, `POST /tags/pair`, `POST /collection/scan`, `POST /collections/phishing`, profile lookup, collection lookup, bootstrap, batch refresh, and mission progress continue to use and update live app data after the conference ends. These later live updates must not change the stored score and prize snapshot unless staff explicitly resumes scoring and freezes again.
 
 The API server should provide `GET /staff/scoreboard_status` with a `STAFF_DANGER_TOKEN` so staff can inspect the current scoreboard state, current `freeze_id`, and freeze timestamps.
 
