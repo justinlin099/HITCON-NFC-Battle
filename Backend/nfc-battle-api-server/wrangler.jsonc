@@ -1,0 +1,91 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "nfc-battle-api-server",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-07",
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "./public"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "nfc-battle-api-server",
+			"database_id": "00000000-0000-0000-0000-000000000000"
+		}
+	],
+	"vars": {
+		"JWT_ISSUER": "hitcon-2026",
+		"JWT_AUDIENCE": "nfc-battle-api-server"
+	},
+	"env": {
+		"staging": {
+			"name": "nfc-battle-api-server-staging",
+			"routes": [
+				{
+					"pattern": "nfc-battle-staging.hitcon2026.online",
+					"custom_domain": true
+				}
+			],
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "nfc-battle-api-server-staging",
+					"database_id": "40de2dc1-acc7-4540-8dc7-bb74bace4977"
+				}
+			],
+			"vars": {
+				"JWT_ISSUER": "hitcon-2026-staging",
+				"JWT_AUDIENCE": "nfc-battle-api-server-staging"
+			}
+		},
+		"production": {
+			"name": "nfc-battle-api-server",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "nfc-battle-api-server",
+					"database_id": "00000000-0000-0000-0000-000000000000"
+				}
+			],
+			"vars": {
+				"JWT_ISSUER": "hitcon-2026",
+				"JWT_AUDIENCE": "nfc-battle-api-server"
+			}
+		}
+	}
+	/**
+	 * Smart Placement
+	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
+	 */
+	// "placement": {  "mode": "smart" }
+	/**
+	 * Bindings
+	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+	 * databases, object storage, AI inference, real-time communication and more.
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+	 */
+	/**
+	 * Environment Variables
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+	 * Note: Use secrets to store sensitive data.
+	 * https://developers.cloudflare.com/workers/configuration/secrets/
+	 */
+	// Secrets required: JWT_SECRET, STAFF_DANGER_TOKEN
+	/**
+	 * Service Bindings (communicate between multiple Workers)
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
+	 */
+	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>HITCON NFC Battle API</title>
+	</head>
+	<body>
+		<h1>HITCON NFC Battle API</h1>
+		<p id="status">Checking backend status...</p>
+		<script>
+			fetch('/health')
+				.then((resp) => resp.json())
+				.then((body) => {
+					const status = document.getElementById('status');
+					status.textContent =
+						body.status === 'success' && body.data.database
+							? 'Worker is healthy and D1 is bound.'
+							: 'Worker responded, but D1 is not available.';
+				})
+				.catch(() => {
+					const status = document.getElementById('status');
+					status.textContent = 'Worker health check failed.';
+				});
+		</script>
+	</body>
+</html>

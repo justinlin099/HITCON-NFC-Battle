@@ -1,0 +1,24 @@
+{
+  "name": "nfc-battle-api-server",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --minify",
+    "deploy:staging": "wrangler deploy --env staging --minify",
+    "deploy:production": "wrangler deploy --env production --minify",
+    "db:migrate:staging": "wrangler d1 migrations apply nfc-battle-api-server-staging --remote --env staging",
+    "db:migrate:production": "wrangler d1 migrations apply nfc-battle-api-server --remote --env production",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "hono": "^4.12.23"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8",
+    "wrangler": "^4.98.0"
+  }
+}

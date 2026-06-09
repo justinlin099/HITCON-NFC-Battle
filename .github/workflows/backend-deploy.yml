@@ -1,0 +1,59 @@
+name: Backend Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target Cloudflare Worker environment
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    name: Deploy Worker backend (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    defaults:
+      run:
+        working-directory: Backend/nfc-battle-api-server
+
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: Backend/nfc-battle-api-server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Apply remote D1 migrations
+        run: npm run db:migrate:${{ inputs.environment }}
+
+      - name: Sync JWT secret
+        run: printf '%s' "${{ secrets.JWT_SECRET }}" | npx wrangler secret put JWT_SECRET --env ${{ inputs.environment }}
+
+      - name: Sync staff danger token
+        run: printf '%s' "${{ secrets.STAFF_DANGER_TOKEN }}" | npx wrangler secret put STAFF_DANGER_TOKEN --env ${{ inputs.environment }}
+
+      - name: Deploy Worker
+        run: npm run deploy:${{ inputs.environment }}
