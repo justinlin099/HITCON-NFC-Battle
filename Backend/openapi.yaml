@@ -874,7 +874,7 @@ components:
             freeze_timeout_seconds:
               type: integer
               description: Configured timeout before FREEZING is considered stale.
-              example: 300
+              example: 30
             freezing_stale:
               type: boolean
               description: Whether the current FREEZING state has exceeded the timeout.
@@ -1012,7 +1012,7 @@ components:
           freeze_id: freeze_20260412_01
           freeze_started_at: '2026-04-12T15:00:00Z'
           frozen_at: '2026-04-12T15:01:12Z'
-          freeze_timeout_seconds: 300
+          freeze_timeout_seconds: 30
           freezing_stale: false
 
     FreezeScoreboardResponse:

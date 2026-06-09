@@ -24,7 +24,7 @@ The `phishing_penalty` should be a configurable variable or a constant, indicati
 
 The current score calculation formula is `score = 10 * num_of_collection`. This formula may be finalized or changed in the future.
 
-The `freeze_timeout` should be a configurable variable or a constant, indicating how long a scoreboard can stay in `FREEZING` before it is considered stale.
+The `freeze_timeout` should be a configurable variable or a constant, indicating how long a scoreboard can stay in `FREEZING` before it is considered stale. The default should be 30 seconds.
 
 JWT verification is simple: the backend verifies the token with a shared secret and HMAC. The JWT must contain `sub`, `exp`, `iss`, `aud`, and `role`. The JWT subject (`sub`) is the user's ID. The `role` claim is used for fast role lookup, so the backend does not need to query the database just to check the caller's role.
 

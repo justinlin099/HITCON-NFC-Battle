@@ -70,7 +70,7 @@ describe("staff scoreboard edge cases", () => {
     await expect(readJson(frozenStatus)).resolves.toMatchObject({
       data: {
         state: "FROZEN",
-        freeze_timeout_seconds: 300,
+        freeze_timeout_seconds: 30,
         freezing_stale: false,
       },
     });
