@@ -8,6 +8,8 @@ export interface UserRow {
   emoji_icon: string;
   bio: string;
   pixel_avatar_base64: string;
+  profile_version: number;
+  collection_version: number;
   physical_id: string | null;
 }
 
@@ -57,6 +59,8 @@ export async function getUserRow(db: D1Database, userId: string) {
         users.emoji_icon,
         users.bio,
         users.pixel_avatar_base64,
+        users.profile_version,
+        users.collection_version,
         nfc_tags.physical_id
       FROM users
       LEFT JOIN nfc_tags ON nfc_tags.user_id = users.user_id
@@ -77,12 +81,76 @@ export async function profileFromRow(db: D1Database, row: UserRow) {
     emoji_icon: row.emoji_icon,
     bio: row.bio,
     pixel_avatar_base64: row.pixel_avatar_base64,
+    profile_version: row.profile_version,
+    collection_version: row.collection_version,
     physical_id: row.physical_id,
     collection,
   };
 }
 
-async function getCollection(db: D1Database, userId: string) {
+export function publicFullProfileFromRow(row: UserRow) {
+  return {
+    user_id: row.user_id,
+    display_name: row.display_name,
+    role: row.role,
+    emoji_icon: row.emoji_icon,
+    bio: row.bio,
+    pixel_avatar_base64: row.pixel_avatar_base64,
+    profile_version: row.profile_version,
+    collection_version: row.collection_version,
+  };
+}
+
+export function partialProfileFromRow(row: UserRow) {
+  return {
+    user_id: row.user_id,
+    display_name: row.display_name,
+    emoji_icon: row.emoji_icon,
+  };
+}
+
+export async function getVisibleProfile(db: D1Database, viewerUserId: string, row: UserRow) {
+  if (viewerUserId === row.user_id || (await hasCollected(db, viewerUserId, row.user_id))) {
+    return publicFullProfileFromRow(row);
+  }
+
+  return partialProfileFromRow(row);
+}
+
+export async function hasCollected(db: D1Database, scannerUserId: string, collectedUserId: string) {
+  const row = await db
+    .prepare(
+      `
+      SELECT 1 AS matched
+      FROM collections
+      WHERE scanner_user_id = ?1 AND collected_user_id = ?2
+      `,
+    )
+    .bind(scannerUserId, collectedUserId)
+    .first<{ matched: number }>();
+
+  return row !== null;
+}
+
+export async function getHydratedCollection(db: D1Database, viewerUserId: string, owner: UserRow) {
+  const collection = await getCollection(db, owner.user_id);
+  const users = [];
+
+  for (const collectedUserId of collection) {
+    const row = await getUserRow(db, collectedUserId);
+    if (row) {
+      users.push(await getVisibleProfile(db, viewerUserId, row));
+    }
+  }
+
+  return {
+    user_id: owner.user_id,
+    collection_version: owner.collection_version,
+    users,
+  };
+}
+
+export async function getCollection(db: D1Database, userId: string) {
   const { results } = await db
     .prepare(
       `

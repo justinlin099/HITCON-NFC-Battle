@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { authHeaders, createTestServer, readJson, staffHeaders } from "./helpers";
 
 describe("staff scoreboard edge cases", () => {
@@ -99,40 +99,46 @@ describe("staff scoreboard edge cases", () => {
   it("rolls back FREEZING state when freeze calculation fails", async () => {
     const server = await createTestServer();
     await server.request("/users/me", { headers: await authHeaders("alice") });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    await server.db.exec(
-      `
-      CREATE TRIGGER fail_freeze_snapshot
-      BEFORE INSERT ON prize_results
-      BEGIN
-        SELECT RAISE(ABORT, 'forced freeze failure');
-      END;
-      `,
-    );
+    try {
+      await server.db.exec(
+        `
+        CREATE TRIGGER fail_freeze_snapshot
+        BEFORE INSERT ON prize_results
+        BEGIN
+          SELECT RAISE(ABORT, 'forced freeze failure');
+        END;
+        `,
+      );
 
-    const failedFreeze = await server.request("/staff/freeze_scoreboard", {
-      method: "POST",
-      headers: staffHeaders(),
-    });
-    expect(failedFreeze.status).toBe(400);
+      const failedFreeze = await server.request("/staff/freeze_scoreboard", {
+        method: "POST",
+        headers: staffHeaders(),
+      });
+      expect(failedFreeze.status).toBe(400);
+      expect(consoleError).toHaveBeenCalledWith("Failed to freeze scoreboard.", expect.any(Error));
 
-    await expect(
-      server.db.prepare("SELECT state, freeze_id FROM game_state WHERE id = 1").first(),
-    ).resolves.toEqual({
-      state: "OPEN",
-      freeze_id: null,
-    });
-    await expect(
-      server.db.prepare("SELECT COUNT(*) AS count FROM prize_results").first<{ count: number }>(),
-    ).resolves.toEqual({ count: 0 });
+      await expect(
+        server.db.prepare("SELECT state, freeze_id FROM game_state WHERE id = 1").first(),
+      ).resolves.toEqual({
+        state: "OPEN",
+        freeze_id: null,
+      });
+      await expect(
+        server.db.prepare("SELECT COUNT(*) AS count FROM prize_results").first<{ count: number }>(),
+      ).resolves.toEqual({ count: 0 });
 
-    await server.db.exec("DROP TRIGGER fail_freeze_snapshot");
+      await server.db.exec("DROP TRIGGER fail_freeze_snapshot");
 
-    const retryFreeze = await server.request("/staff/freeze_scoreboard", {
-      method: "POST",
-      headers: staffHeaders(),
-    });
-    expect(retryFreeze.status).toBe(200);
+      const retryFreeze = await server.request("/staff/freeze_scoreboard", {
+        method: "POST",
+        headers: staffHeaders(),
+      });
+      expect(retryFreeze.status).toBe(200);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("recovers stale FREEZING state and clears partial snapshot data", async () => {

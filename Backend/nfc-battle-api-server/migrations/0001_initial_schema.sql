@@ -8,6 +8,8 @@ CREATE TABLE users (
   emoji_icon TEXT NOT NULL,
   bio TEXT NOT NULL DEFAULT '',
   pixel_avatar_base64 TEXT NOT NULL DEFAULT '',
+  profile_version INTEGER NOT NULL DEFAULT 1 CHECK (profile_version >= 0),
+  collection_version INTEGER NOT NULL DEFAULT 0 CHECK (collection_version >= 0),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 ) STRICT;

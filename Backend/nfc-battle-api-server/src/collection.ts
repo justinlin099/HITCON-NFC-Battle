@@ -4,7 +4,7 @@ import { nowIso } from "./ids";
 import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
 import { errorResponse, success } from "./responses";
 import type { AppEnv } from "./types";
-import { getUserRow, lazyInitializeUser } from "./user-store";
+import { getUserRow, lazyInitializeUser, publicFullProfileFromRow } from "./user-store";
 
 interface TagOwnerRow {
   user_id: string;
@@ -48,9 +48,23 @@ collection.post("/scan", async (c) => {
     .bind(authUser.userId, request.user_id, nowIso())
     .run();
 
+  if (insertResult.meta.changes > 0) {
+    await c.env.DB.prepare(
+      `
+      UPDATE users
+      SET collection_version = collection_version + 1,
+          updated_at = ?2
+      WHERE user_id = ?1
+      `,
+    )
+      .bind(authUser.userId, nowIso())
+      .run();
+  }
+
   return success(c, {
     collected_user_id: request.user_id,
     first_time_collected: insertResult.meta.changes > 0,
+    profile: publicFullProfileFromRow(targetUser),
   });
 });
 

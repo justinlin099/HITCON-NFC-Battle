@@ -5,7 +5,15 @@ import { hasOnlyKeys, isPlainObject, readJson } from "./request";
 import { errorResponse, success } from "./responses";
 import { getGameState } from "./game-state";
 import type { AppEnv } from "./types";
-import { getFullProfile, getUserRow, lazyInitializeUser, profileFromRow } from "./user-store";
+import {
+  getFullProfile,
+  getHydratedCollection,
+  getUserRow,
+  getVisibleProfile,
+  hasCollected,
+  lazyInitializeUser,
+  publicFullProfileFromRow,
+} from "./user-store";
 
 interface PrizeResultRow {
   stamp_prize: number;
@@ -80,24 +88,124 @@ users.get("/me/prize", async (c) => {
   });
 });
 
+users.get("/me/bootstrap", async (c) => {
+  const authUser = c.get("authUser");
+  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
+
+  const me = await getFullProfile(c.env.DB, authUser.userId);
+  if (!me) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  const collectedUsers = [];
+  for (const collectedUserId of me.collection) {
+    const row = await getUserRow(c.env.DB, collectedUserId);
+    if (row) {
+      collectedUsers.push(publicFullProfileFromRow(row));
+    }
+  }
+
+  return success(c, {
+    me,
+    collected_users: collectedUsers,
+  });
+});
+
+users.post("/batch", async (c) => {
+  const authUser = c.get("authUser");
+  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
+
+  const request = validateBatchGetUsersRequest(await readJson(c));
+  if (!request) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
+  const results = [];
+  for (const item of request.users) {
+    const row = await getUserRow(c.env.DB, item.user_id);
+    if (!row) {
+      return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+    }
+
+    if (
+      item.profile_version !== undefined &&
+      item.collection_version !== undefined &&
+      row.profile_version === item.profile_version &&
+      row.collection_version === item.collection_version
+    ) {
+      results.push({
+        user_id: row.user_id,
+        unchanged: true,
+      });
+      continue;
+    }
+
+    results.push({
+      user_id: row.user_id,
+      unchanged: false,
+      data: await getVisibleProfile(c.env.DB, authUser.userId, row),
+    });
+  }
+
+  return success(c, { results });
+});
+
 users.get("/:user_id", async (c) => {
+  const authUser = c.get("authUser");
   const userId = c.req.param("user_id");
-  const physicalId = c.req.query("physical_id");
   const row = await getUserRow(c.env.DB, userId);
 
   if (!row) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
 
-  if (physicalId && row.physical_id === physicalId) {
-    return success(c, await profileFromRow(c.env.DB, row));
+  const profileVersion = parseOptionalVersion(c.req.query("profile_version"));
+  const collectionVersion = parseOptionalVersion(c.req.query("collection_version"));
+  if (profileVersion === null || collectionVersion === null) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
-  return success(c, {
-    user_id: row.user_id,
-    display_name: row.display_name,
-    emoji_icon: row.emoji_icon,
-  });
+  if (
+    profileVersion !== undefined &&
+    collectionVersion !== undefined &&
+    row.profile_version === profileVersion &&
+    row.collection_version === collectionVersion
+  ) {
+    return success(c, {
+      user_id: row.user_id,
+      unchanged: true,
+    });
+  }
+
+  return success(c, await getVisibleProfile(c.env.DB, authUser.userId, row));
+});
+
+users.get("/:user_id/collection", async (c) => {
+  const authUser = c.get("authUser");
+  const userId = c.req.param("user_id");
+  const row = await getUserRow(c.env.DB, userId);
+
+  if (!row) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  if (authUser.userId !== userId && !(await hasCollected(c.env.DB, authUser.userId, userId))) {
+    return errorResponse(c, 403, "FORBIDDEN", "Forbidden.");
+  }
+
+  const collectionVersion = parseOptionalVersion(c.req.query("collection_version"));
+  if (collectionVersion === null) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
+  if (collectionVersion !== undefined && row.collection_version === collectionVersion) {
+    return success(c, {
+      user_id: row.user_id,
+      unchanged: true,
+    });
+  }
+
+  return success(c, await getHydratedCollection(c.env.DB, authUser.userId, row));
 });
 
 export default users;
@@ -108,6 +216,16 @@ async function updateMyProfile(db: D1Database, userId: string, update: ProfileUp
     return;
   }
 
+  const nextDisplayName = update.display_name ?? current.display_name;
+  const nextEmojiIcon = update.emoji_icon ?? current.emoji_icon;
+  const nextBio = update.bio ?? current.bio;
+  const nextPixelAvatar = update.pixel_avatar_base64 ?? current.pixel_avatar_base64;
+  const profileChanged =
+    nextDisplayName !== current.display_name ||
+    nextEmojiIcon !== current.emoji_icon ||
+    nextBio !== current.bio ||
+    nextPixelAvatar !== current.pixel_avatar_base64;
+
   await db
     .prepare(
       `
@@ -117,16 +235,18 @@ async function updateMyProfile(db: D1Database, userId: string, update: ProfileUp
         emoji_icon = ?3,
         bio = ?4,
         pixel_avatar_base64 = ?5,
-        updated_at = ?6
+        profile_version = profile_version + ?6,
+        updated_at = ?7
       WHERE user_id = ?1
       `,
     )
     .bind(
       userId,
-      update.display_name ?? current.display_name,
-      update.emoji_icon ?? current.emoji_icon,
-      update.bio ?? current.bio,
-      update.pixel_avatar_base64 ?? current.pixel_avatar_base64,
+      nextDisplayName,
+      nextEmojiIcon,
+      nextBio,
+      nextPixelAvatar,
+      profileChanged ? 1 : 0,
       nowIso(),
     )
     .run();
@@ -173,4 +293,74 @@ function validateProfileUpdate(value: unknown): ProfileUpdate | null {
   }
 
   return update;
+}
+
+interface BatchGetUserItem {
+  user_id: string;
+  profile_version?: number;
+  collection_version?: number;
+}
+
+const BATCH_GET_USERS_KEYS = new Set(["users"]);
+const BATCH_GET_USER_ITEM_KEYS = new Set(["user_id", "profile_version", "collection_version"]);
+
+function validateBatchGetUsersRequest(value: unknown): { users: BatchGetUserItem[] } | null {
+  if (!isPlainObject(value) || !hasOnlyKeys(value, BATCH_GET_USERS_KEYS)) {
+    return null;
+  }
+
+  const usersValue = value.users;
+  if (!Array.isArray(usersValue) || usersValue.length < 1 || usersValue.length > 100) {
+    return null;
+  }
+
+  const users: BatchGetUserItem[] = [];
+  for (const item of usersValue) {
+    if (!isPlainObject(item) || !hasOnlyKeys(item, BATCH_GET_USER_ITEM_KEYS)) {
+      return null;
+    }
+
+    const userId = item.user_id;
+    if (typeof userId !== "string" || userId.trim() === "") {
+      return null;
+    }
+
+    const profileVersion = parseOptionalVersionValue(item.profile_version);
+    const collectionVersion = parseOptionalVersionValue(item.collection_version);
+    if (profileVersion === null || collectionVersion === null) {
+      return null;
+    }
+
+    users.push({
+      user_id: userId,
+      ...(profileVersion !== undefined ? { profile_version: profileVersion } : {}),
+      ...(collectionVersion !== undefined ? { collection_version: collectionVersion } : {}),
+    });
+  }
+
+  return { users };
+}
+
+function parseOptionalVersion(value: string | undefined): number | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+
+  return Number(value);
+}
+
+function parseOptionalVersionValue(value: unknown): number | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    return null;
+  }
+
+  return value;
 }
