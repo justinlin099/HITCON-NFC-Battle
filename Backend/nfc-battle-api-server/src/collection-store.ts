@@ -26,20 +26,6 @@ export async function collectUser(db: D1Database, scannerUserId: string, collect
     .run();
 
   const firstTimeCollected = insertResult.meta.changes > 0;
-  if (firstTimeCollected) {
-    await db
-      .prepare(
-        `
-        UPDATE users
-        SET collection_version = collection_version + 1,
-            updated_at = ?2
-        WHERE user_id = ?1
-        `,
-      )
-      .bind(scannerUserId, nowIso())
-      .run();
-  }
-
   return {
     first_time_collected: firstTimeCollected,
   };

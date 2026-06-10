@@ -53,5 +53,9 @@ describe("tag pairing edge cases", () => {
     await expect(readJson(sameUser)).resolves.toMatchObject({
       code: "TAG_ALREADY_PAIRED",
     });
+
+    await expect(
+      server.db.prepare("SELECT COUNT(*) AS count FROM nfc_tags").first<{ count: number }>(),
+    ).resolves.toEqual({ count: 1 });
   });
 });

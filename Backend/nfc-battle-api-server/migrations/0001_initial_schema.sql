@@ -29,6 +29,16 @@ CREATE TABLE collections (
   CHECK (scanner_user_id <> collected_user_id)
 ) STRICT;
 
+CREATE TRIGGER bump_collection_version_after_insert
+AFTER INSERT ON collections
+BEGIN
+  UPDATE users
+  SET
+    collection_version = collection_version + 1,
+    updated_at = NEW.first_collected_at
+  WHERE user_id = NEW.scanner_user_id;
+END;
+
 CREATE TABLE phishing_events (
   event_id TEXT PRIMARY KEY,
   victim_user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,

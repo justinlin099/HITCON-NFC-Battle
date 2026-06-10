@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
 import { errorResponse, successMessage } from "./responses";
-import { findTag, findTagByUserId, pairTag } from "./tag-store";
+import { pairTag } from "./tag-store";
 import type { AppEnv } from "./types";
 import { lazyInitializeUser } from "./user-store";
 
@@ -21,13 +21,10 @@ tags.post("/pair", async (c) => {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
-  const existingTag = await findTag(c.env.DB, request.physical_id);
-  const existingUserTag = await findTagByUserId(c.env.DB, authUser.userId);
-  if (existingTag || existingUserTag) {
+  const result = await pairTag(c.env.DB, request.physical_id, authUser.userId);
+  if (!result.paired) {
     return errorResponse(c, 409, "TAG_ALREADY_PAIRED", "This NFC tag is already paired.");
   }
-
-  await pairTag(c.env.DB, request.physical_id, authUser.userId);
 
   return successMessage(c, "Tag paired successfully.");
 });
