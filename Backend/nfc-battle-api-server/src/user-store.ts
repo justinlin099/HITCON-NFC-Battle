@@ -1,4 +1,5 @@
 import { nowIso } from "./ids";
+import { getCollection, hasCollected } from "./collection-store";
 import type { UserRole } from "./types";
 
 export interface UserRow {
@@ -13,8 +14,11 @@ export interface UserRow {
   physical_id: string | null;
 }
 
-interface CollectionRow {
-  collected_user_id: string;
+export interface ProfileUpdate {
+  display_name?: string;
+  emoji_icon?: string;
+  bio?: string;
+  pixel_avatar_base64?: string;
 }
 
 export async function lazyInitializeUser(db: D1Database, userId: string, role: UserRole) {
@@ -117,21 +121,6 @@ export async function getVisibleProfile(db: D1Database, viewerUserId: string, ro
   return partialProfileFromRow(row);
 }
 
-export async function hasCollected(db: D1Database, scannerUserId: string, collectedUserId: string) {
-  const row = await db
-    .prepare(
-      `
-      SELECT 1 AS matched
-      FROM collections
-      WHERE scanner_user_id = ?1 AND collected_user_id = ?2
-      `,
-    )
-    .bind(scannerUserId, collectedUserId)
-    .first<{ matched: number }>();
-
-  return row !== null;
-}
-
 export async function getHydratedCollection(db: D1Database, viewerUserId: string, owner: UserRow) {
   const collection = await getCollection(db, owner.user_id);
   const users = [];
@@ -150,20 +139,46 @@ export async function getHydratedCollection(db: D1Database, viewerUserId: string
   };
 }
 
-export async function getCollection(db: D1Database, userId: string) {
-  const { results } = await db
+export async function updateUserProfile(db: D1Database, userId: string, update: ProfileUpdate) {
+  const current = await getUserRow(db, userId);
+  if (!current) {
+    return;
+  }
+
+  const nextDisplayName = update.display_name ?? current.display_name;
+  const nextEmojiIcon = update.emoji_icon ?? current.emoji_icon;
+  const nextBio = update.bio ?? current.bio;
+  const nextPixelAvatar = update.pixel_avatar_base64 ?? current.pixel_avatar_base64;
+  const profileChanged =
+    nextDisplayName !== current.display_name ||
+    nextEmojiIcon !== current.emoji_icon ||
+    nextBio !== current.bio ||
+    nextPixelAvatar !== current.pixel_avatar_base64;
+
+  await db
     .prepare(
       `
-      SELECT collected_user_id
-      FROM collections
-      WHERE scanner_user_id = ?1
-      ORDER BY first_collected_at ASC, collected_user_id ASC
+      UPDATE users
+      SET
+        display_name = ?2,
+        emoji_icon = ?3,
+        bio = ?4,
+        pixel_avatar_base64 = ?5,
+        profile_version = profile_version + ?6,
+        updated_at = ?7
+      WHERE user_id = ?1
       `,
     )
-    .bind(userId)
-    .all<CollectionRow>();
-
-  return results.map((row) => row.collected_user_id);
+    .bind(
+      userId,
+      nextDisplayName,
+      nextEmojiIcon,
+      nextBio,
+      nextPixelAvatar,
+      profileChanged ? 1 : 0,
+      nowIso(),
+    )
+    .run();
 }
 
 function defaultDisplayName(userId: string) {

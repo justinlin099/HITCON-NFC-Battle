@@ -1,15 +1,14 @@
 import { Hono } from "hono";
-import collection from "./collection";
-import collections from "./collections";
+import collectionRoutes from "./collection-routes";
 import { requireAuth } from "./auth";
-import missions from "./missions";
+import missionRoutes from "./mission-routes";
 import { success } from "./responses";
-import scoreboard from "./scoreboard";
+import scoreboardRoutes from "./scoreboard-routes";
 import { requireStaffDangerToken } from "./staff";
 import staffRoutes from "./staff-routes";
-import tags from "./tags";
+import tagRoutes from "./tag-routes";
 import type { AppEnv } from "./types";
-import users from "./users";
+import userRoutes from "./user-routes";
 
 const app = new Hono<AppEnv>();
 
@@ -32,12 +31,11 @@ app.get("/health/staff", requireStaffDangerToken, (c) => {
   });
 });
 
-app.route("/users", users);
-app.route("/tags", tags);
-app.route("/collection", collection);
-app.route("/collections", collections);
-app.route("/missions", missions);
-app.route("/scoreboard", scoreboard);
+app.route("/users", userRoutes);
+app.route("/tags", tagRoutes);
+app.route("/collection", collectionRoutes);
+app.route("/missions", missionRoutes);
+app.route("/scoreboard", scoreboardRoutes);
 app.route("/staff", staffRoutes);
 
 export default app;

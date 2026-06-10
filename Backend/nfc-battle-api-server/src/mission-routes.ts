@@ -1,14 +1,10 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
+import { getStampCounts } from "./collection-store";
 import { STAMP_THRESHOLD } from "./game-config";
 import { success } from "./responses";
 import type { AppEnv } from "./types";
 import { lazyInitializeUser } from "./user-store";
-
-interface StampCountsRow {
-  sponsor_count: number;
-  community_count: number;
-}
 
 const missions = new Hono<AppEnv>();
 
@@ -31,19 +27,3 @@ missions.get("/stamp", async (c) => {
 });
 
 export default missions;
-
-async function getStampCounts(db: D1Database, userId: string) {
-  return db
-    .prepare(
-      `
-      SELECT
-        SUM(CASE WHEN collected.role = 'SPONSOR' THEN 1 ELSE 0 END) AS sponsor_count,
-        SUM(CASE WHEN collected.role = 'COMMUNITY' THEN 1 ELSE 0 END) AS community_count
-      FROM collections
-      INNER JOIN users AS collected ON collected.user_id = collections.collected_user_id
-      WHERE collections.scanner_user_id = ?1
-      `,
-    )
-    .bind(userId)
-    .first<StampCountsRow>();
-}

@@ -1,27 +1,13 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
+import { getLiveCollectionScoreRows } from "./collection-store";
+import { getFrozenScoreboardRows } from "./freeze-snapshot-store";
 import { RANK_THRESHOLD } from "./game-config";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { calculateScore } from "./scoring";
 import { errorResponse, success } from "./responses";
 import type { AppEnv } from "./types";
 import { lazyInitializeUser } from "./user-store";
-
-interface ScoreboardRow {
-  rank: number;
-  user_id: string;
-  display_name: string;
-  emoji_icon: string;
-  num_of_collection: number;
-}
-
-interface FrozenScoreboardRow {
-  rank: number;
-  user_id: string;
-  display_name: string;
-  emoji_icon: string;
-  final_score: number;
-}
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -73,44 +59,7 @@ scoreboard.get("/", async (c) => {
 export default scoreboard;
 
 async function getLiveRankings(db: D1Database, offset: number, limit: number) {
-  const { results } = await db
-    .prepare(
-      `
-      WITH scores AS (
-        SELECT
-          users.user_id,
-          users.display_name,
-          users.emoji_icon,
-          COUNT(collections.collected_user_id) AS num_of_collection
-        FROM users
-        LEFT JOIN collections ON collections.scanner_user_id = users.user_id
-        GROUP BY users.user_id
-      ),
-      ranked AS (
-        SELECT
-          ROW_NUMBER() OVER (
-            ORDER BY num_of_collection DESC, user_id ASC
-          ) AS rank,
-          user_id,
-          display_name,
-          emoji_icon,
-          num_of_collection
-        FROM scores
-      )
-      SELECT
-        rank,
-        user_id,
-        display_name,
-        emoji_icon,
-        num_of_collection
-      FROM ranked
-      ORDER BY rank ASC
-      LIMIT ?1
-      OFFSET ?2
-      `,
-    )
-    .bind(limit, offset)
-    .all<ScoreboardRow>();
+  const results = await getLiveCollectionScoreRows(db, offset, limit);
 
   return results.map((item) => ({
     rank: item.rank,
@@ -122,25 +71,7 @@ async function getLiveRankings(db: D1Database, offset: number, limit: number) {
 }
 
 async function getFrozenRankings(db: D1Database, freezeId: string, offset: number, limit: number) {
-  const { results } = await db
-    .prepare(
-      `
-      SELECT
-        prize_results.rank,
-        users.user_id,
-        users.display_name,
-        users.emoji_icon,
-        prize_results.final_score
-      FROM prize_results
-      INNER JOIN users ON users.user_id = prize_results.user_id
-      WHERE prize_results.freeze_id = ?1
-      ORDER BY prize_results.rank ASC
-      LIMIT ?2
-      OFFSET ?3
-      `,
-    )
-    .bind(freezeId, limit, offset)
-    .all<FrozenScoreboardRow>();
+  const results = await getFrozenScoreboardRows(db, freezeId, offset, limit);
 
   return results.map((item) => ({
     rank: item.rank,

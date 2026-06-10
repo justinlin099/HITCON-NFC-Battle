@@ -158,7 +158,7 @@ describe("NFC Battle API flow", () => {
     });
 
     const phishing = await server.request(
-      "/collections/phishing",
+      "/collection/phishing",
       await jsonRequest("POST", { victim: "alice", attacker: "sponsor-one" }, aliceAuth),
     );
     expect(phishing.status).toBe(200);

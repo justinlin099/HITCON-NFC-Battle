@@ -98,7 +98,7 @@ Example:
 
 ### Phishing
 
-If the mobile app is triggered by clicking a link (like `https://game.hitcon2026.online/b?u={user_id}`) instead of scanning a tag, the app will not detect a physical ID. Then, the app will send request to `POST /collections/phishing` with `victim` and `attacker`. Our API server will record this event. The freeze calculation applies the phishing penalty to eligible phishing events in the stored score snapshot.
+If the mobile app is triggered by clicking a link (like `https://game.hitcon2026.online/b?u={user_id}`) instead of scanning a tag, the app will not detect a physical ID. Then, the app will send request to `POST /collection/phishing` with `victim` and `attacker`. Our API server will record this event. The freeze calculation applies the phishing penalty to eligible phishing events in the stored score snapshot.
 
 ### Missions
 
@@ -131,7 +131,7 @@ To avoid race conditions and support resume, the scoreboard should use a state m
 
 If the scoreboard stays in `FREEZING` longer than `freeze_timeout`, the freeze is considered stale. Partial results for that `freeze_id` should not be visible to users, because `GET /users/me/prize` only reads a stored snapshot when the scoreboard state is `FROZEN`.
 
-The app should keep working after the scoreboard is frozen. `PATCH /users/me`, `POST /tags/pair`, `POST /collection/scan`, `POST /collections/phishing`, profile lookup, collection lookup, bootstrap, batch refresh, and mission progress continue to use and update live app data after the conference ends. These later live updates must not change the stored score and prize snapshot unless staff explicitly resumes scoring and freezes again.
+The app should keep working after the scoreboard is frozen. `PATCH /users/me`, `POST /tags/pair`, `POST /collection/scan`, `POST /collection/phishing`, profile lookup, collection lookup, bootstrap, batch refresh, and mission progress continue to use and update live app data after the conference ends. These later live updates must not change the stored score and prize snapshot unless staff explicitly resumes scoring and freezes again.
 
 The API server should provide `GET /staff/scoreboard_status` with a `STAFF_DANGER_TOKEN` so staff can inspect the current scoreboard state, current `freeze_id`, and freeze timestamps.
 

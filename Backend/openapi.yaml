@@ -64,7 +64,7 @@ info:
       permission
     - `POST /tags/pair`
     - `POST /collection/scan`
-    - `POST /collections/phishing`
+    - `POST /collection/phishing`
     - `GET /missions/stamp`
     - `GET /staff/scoreboard_status`
 
@@ -437,7 +437,7 @@ paths:
           $ref: '#/components/responses/PhysicalIdMismatchError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
-  /collections/phishing:
+  /collection/phishing:
     post:
       tags: [Collection]
       summary: Record a clicked-link phishing event

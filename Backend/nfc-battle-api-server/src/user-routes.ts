@@ -1,32 +1,21 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
-import { nowIso } from "./ids";
+import { hasCollected } from "./collection-store";
 import { hasOnlyKeys, isPlainObject, readJson } from "./request";
 import { errorResponse, success } from "./responses";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
+import { getPrizeResult } from "./freeze-snapshot-store";
 import type { AppEnv } from "./types";
 import {
   getFullProfile,
   getHydratedCollection,
   getUserRow,
   getVisibleProfile,
-  hasCollected,
   lazyInitializeUser,
+  type ProfileUpdate,
   publicFullProfileFromRow,
+  updateUserProfile,
 } from "./user-store";
-
-interface PrizeResultRow {
-  stamp_prize: number;
-  rank_prize: number;
-  rank: number | null;
-}
-
-interface ProfileUpdate {
-  display_name?: string;
-  emoji_icon?: string;
-  bio?: string;
-  pixel_avatar_base64?: string;
-}
 
 const PATCHABLE_PROFILE_FIELDS = new Set([
   "display_name",
@@ -62,7 +51,7 @@ users.patch("/me", async (c) => {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
-  await updateMyProfile(c.env.DB, authUser.userId, update);
+  await updateUserProfile(c.env.DB, authUser.userId, update);
 
   const profile = await getFullProfile(c.env.DB, authUser.userId);
   if (!profile) {
@@ -219,64 +208,6 @@ users.get("/:user_id/collection", async (c) => {
 });
 
 export default users;
-
-async function updateMyProfile(db: D1Database, userId: string, update: ProfileUpdate) {
-  const current = await getUserRow(db, userId);
-  if (!current) {
-    return;
-  }
-
-  const nextDisplayName = update.display_name ?? current.display_name;
-  const nextEmojiIcon = update.emoji_icon ?? current.emoji_icon;
-  const nextBio = update.bio ?? current.bio;
-  const nextPixelAvatar = update.pixel_avatar_base64 ?? current.pixel_avatar_base64;
-  const profileChanged =
-    nextDisplayName !== current.display_name ||
-    nextEmojiIcon !== current.emoji_icon ||
-    nextBio !== current.bio ||
-    nextPixelAvatar !== current.pixel_avatar_base64;
-
-  await db
-    .prepare(
-      `
-      UPDATE users
-      SET
-        display_name = ?2,
-        emoji_icon = ?3,
-        bio = ?4,
-        pixel_avatar_base64 = ?5,
-        profile_version = profile_version + ?6,
-        updated_at = ?7
-      WHERE user_id = ?1
-      `,
-    )
-    .bind(
-      userId,
-      nextDisplayName,
-      nextEmojiIcon,
-      nextBio,
-      nextPixelAvatar,
-      profileChanged ? 1 : 0,
-      nowIso(),
-    )
-    .run();
-}
-
-async function getPrizeResult(db: D1Database, freezeId: string, userId: string) {
-  return db
-    .prepare(
-      `
-      SELECT
-        stamp_prize,
-        rank_prize,
-        rank
-      FROM prize_results
-      WHERE freeze_id = ?1 AND user_id = ?2
-      `,
-    )
-    .bind(freezeId, userId)
-    .first<PrizeResultRow>();
-}
 
 function validateProfileUpdate(value: unknown): ProfileUpdate | null {
   if (!isPlainObject(value)) {
