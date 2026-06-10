@@ -114,21 +114,26 @@ export function partialProfileFromRow(row: UserRow) {
 }
 
 export async function getVisibleProfile(db: D1Database, viewerUserId: string, row: UserRow) {
-  if (viewerUserId === row.user_id || (await hasCollected(db, viewerUserId, row.user_id))) {
-    return publicFullProfileFromRow(row);
-  }
-
-  return partialProfileFromRow(row);
+  return visibleProfileFromRow(
+    row,
+    viewerUserId === row.user_id || (await hasCollected(db, viewerUserId, row.user_id)),
+  );
 }
 
 export async function getHydratedCollection(db: D1Database, viewerUserId: string, owner: UserRow) {
   const collection = await getCollection(db, owner.user_id);
+  const viewerCollection = new Set(await getCollection(db, viewerUserId));
   const users = [];
 
   for (const collectedUserId of collection) {
     const row = await getUserRow(db, collectedUserId);
     if (row) {
-      users.push(await getVisibleProfile(db, viewerUserId, row));
+      users.push(
+        visibleProfileFromRow(
+          row,
+          viewerUserId === row.user_id || viewerCollection.has(row.user_id),
+        ),
+      );
     }
   }
 
@@ -137,6 +142,10 @@ export async function getHydratedCollection(db: D1Database, viewerUserId: string
     collection_version: owner.collection_version,
     users,
   };
+}
+
+function visibleProfileFromRow(row: UserRow, canViewFullProfile: boolean) {
+  return canViewFullProfile ? publicFullProfileFromRow(row) : partialProfileFromRow(row);
 }
 
 export async function updateUserProfile(db: D1Database, userId: string, update: ProfileUpdate) {

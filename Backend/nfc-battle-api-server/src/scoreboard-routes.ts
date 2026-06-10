@@ -53,7 +53,12 @@ scoreboard.get("/", async (c) => {
     });
   }
 
-  return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard changed while reading.");
+  return errorResponse(
+    c,
+    409,
+    "SCOREBOARD_READ_INCONSISTENT",
+    "Scoreboard state changed while reading. Please retry.",
+  );
 });
 
 export default scoreboard;

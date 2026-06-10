@@ -10,7 +10,8 @@ export type ErrorCode =
   | "TAG_ALREADY_PAIRED"
   | "SCOREBOARD_ALREADY_FROZEN"
   | "SCOREBOARD_FREEZING"
-  | "SCOREBOARD_NOT_FROZEN";
+  | "SCOREBOARD_NOT_FROZEN"
+  | "SCOREBOARD_READ_INCONSISTENT";
 
 export interface AuthenticatedUser {
   userId: string;

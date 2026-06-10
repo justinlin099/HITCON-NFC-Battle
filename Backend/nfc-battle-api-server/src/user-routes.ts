@@ -84,7 +84,12 @@ users.get("/me/prize", async (c) => {
     });
   }
 
-  return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard changed while reading.");
+  return errorResponse(
+    c,
+    409,
+    "SCOREBOARD_READ_INCONSISTENT",
+    "Scoreboard state changed while reading. Please retry.",
+  );
 });
 
 users.get("/me/bootstrap", async (c) => {
@@ -151,7 +156,11 @@ users.post("/batch", async (c) => {
 
 users.get("/:user_id", async (c) => {
   const authUser = c.get("authUser");
-  const userId = c.req.param("user_id");
+  const userId = c.req.param("user_id").trim();
+  if (userId === "") {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
   const row = await getUserRow(c.env.DB, userId);
 
   if (!row) {
@@ -181,7 +190,11 @@ users.get("/:user_id", async (c) => {
 
 users.get("/:user_id/collection", async (c) => {
   const authUser = c.get("authUser");
-  const userId = c.req.param("user_id");
+  const userId = c.req.param("user_id").trim();
+  if (userId === "") {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
   const row = await getUserRow(c.env.DB, userId);
 
   if (!row) {
@@ -262,7 +275,12 @@ function validateBatchGetUsersRequest(value: unknown): { users: BatchGetUserItem
     }
 
     const userId = item.user_id;
-    if (typeof userId !== "string" || userId.trim() === "") {
+    if (typeof userId !== "string") {
+      return null;
+    }
+
+    const trimmedUserId = userId.trim();
+    if (trimmedUserId === "") {
       return null;
     }
 
@@ -273,7 +291,7 @@ function validateBatchGetUsersRequest(value: unknown): { users: BatchGetUserItem
     }
 
     users.push({
-      user_id: userId,
+      user_id: trimmedUserId,
       ...(profileVersion !== undefined ? { profile_version: profileVersion } : {}),
       ...(collectionVersion !== undefined ? { collection_version: collectionVersion } : {}),
     });

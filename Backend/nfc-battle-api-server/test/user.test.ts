@@ -98,6 +98,18 @@ describe("user profile behavior", () => {
         unchanged: true,
       },
     });
+
+    const trimmedPathBob = await server.request("/users/%20bob%20", {
+      headers: aliceAuth,
+    });
+    expect(trimmedPathBob.status).toBe(200);
+    await expect(readJson(trimmedPathBob)).resolves.toMatchObject({
+      status: "success",
+      data: {
+        user_id: "bob",
+        display_name: "Bob",
+      },
+    });
   });
 
   it("rejects invalid profile updates and prize lookup before freeze", async () => {
@@ -189,6 +201,29 @@ describe("user profile behavior", () => {
       },
     });
 
+    const trimmedBatch = await server.request(
+      "/users/batch",
+      await jsonRequest(
+        "POST",
+        {
+          users: [{ user_id: " bob ", profile_version: 1, collection_version: 1 }],
+        },
+        aliceAuth,
+      ),
+    );
+    expect(trimmedBatch.status).toBe(200);
+    await expect(readJson(trimmedBatch)).resolves.toEqual({
+      status: "success",
+      data: {
+        results: [
+          {
+            user_id: "bob",
+            unchanged: true,
+          },
+        ],
+      },
+    });
+
     const bobCollection = await server.request("/users/bob/collection", { headers: aliceAuth });
     expect(bobCollection.status).toBe(200);
     await expect(readJson(bobCollection)).resolves.toEqual({
@@ -215,6 +250,18 @@ describe("user profile behavior", () => {
       data: {
         user_id: "bob",
         unchanged: true,
+      },
+    });
+
+    const trimmedPathCollection = await server.request("/users/%20bob%20/collection", {
+      headers: aliceAuth,
+    });
+    expect(trimmedPathCollection.status).toBe(200);
+    await expect(readJson(trimmedPathCollection)).resolves.toMatchObject({
+      status: "success",
+      data: {
+        user_id: "bob",
+        collection_version: 1,
       },
     });
 

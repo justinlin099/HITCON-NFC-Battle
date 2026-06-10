@@ -70,13 +70,17 @@ info:
 
     The following endpoints are available only in `FROZEN`:
     - `GET /users/me/prize`; rejected in `OPEN` and `FREEZING` with
-      `SCOREBOARD_NOT_FROZEN`
+      `SCOREBOARD_NOT_FROZEN`. If the scoreboard state changes during a
+      consistent read, it is rejected with `SCOREBOARD_READ_INCONSISTENT` and
+      clients should retry.
 
     The following endpoints are available in `OPEN` and `FROZEN`, but rejected
     in `FREEZING`:
     - `GET /scoreboard`; returns live scores in `OPEN`, returns the stored
       freeze snapshot in `FROZEN`, and is rejected in `FREEZING` with
-      `SCOREBOARD_FREEZING` error
+      `SCOREBOARD_FREEZING` error. If the scoreboard state changes during a
+      consistent read, it is rejected with `SCOREBOARD_READ_INCONSISTENT` and
+      clients should retry.
 
     The following endpoints are state transition operations:
     - `POST /staff/freeze_scoreboard`: accepted only in `OPEN`; rejected in
@@ -167,7 +171,9 @@ paths:
         Returns the authenticated user's prize result after the scoreboard is
         frozen and prize calculation has run. Prize results are read from the
         stored freeze snapshot. This endpoint is rejected while the scoreboard
-        is `OPEN` or `FREEZING`.
+        is `OPEN` or `FREEZING`. If the scoreboard state changes during a
+        consistent read, the endpoint returns `SCOREBOARD_READ_INCONSISTENT`
+        and clients should retry.
       responses:
         '200':
           description: Prize result loaded.
@@ -181,7 +187,16 @@ paths:
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '409':
-          $ref: '#/components/responses/ScoreboardNotFrozenError'
+          description: Scoreboard is not frozen yet, or the read saw a transient scoreboard state change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                not_frozen:
+                  $ref: '#/components/examples/ScoreboardNotFrozenError'
+                read_inconsistent:
+                  $ref: '#/components/examples/ScoreboardReadInconsistentError'
   /users/me/bootstrap:
     get:
       tags: [Users]
@@ -511,6 +526,9 @@ paths:
         do not change even if pairing, scanning, phishing records, and profile
         updates continue after the conference ends. The response includes the
         snapshot `freeze_id` and `scoring_cutoff_at`.
+
+        If the scoreboard state changes during a consistent read, the endpoint
+        returns `SCOREBOARD_READ_INCONSISTENT` and clients should retry.
       parameters:
         - in: query
           name: offset
@@ -544,7 +562,16 @@ paths:
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '409':
-          $ref: '#/components/responses/ScoreboardFreezingError'
+          description: Scoreboard is freezing, or the read saw a transient scoreboard state change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                freezing:
+                  $ref: '#/components/examples/ScoreboardFreezingError'
+                read_inconsistent:
+                  $ref: '#/components/examples/ScoreboardReadInconsistentError'
   /staff/scoreboard_status:
     get:
       tags: [Staff]
@@ -768,6 +795,16 @@ components:
             status: error
             code: SCOREBOARD_NOT_FROZEN
             message: Scoreboard is not frozen yet.
+    ScoreboardReadInconsistentError:
+      description: Scoreboard state changed during a consistent read; clients should retry.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: SCOREBOARD_READ_INCONSISTENT
+            message: Scoreboard state changed while reading. Please retry.
 
   schemas:
     ErrorResponse:
@@ -790,6 +827,7 @@ components:
             - SCOREBOARD_ALREADY_FROZEN
             - SCOREBOARD_FREEZING
             - SCOREBOARD_NOT_FROZEN
+            - SCOREBOARD_READ_INCONSISTENT
         message:
           type: string
 
@@ -1581,6 +1619,24 @@ components:
           stamp_prize: true
           rank_prize: true
           rank: 7
+
+    ScoreboardFreezingError:
+      value:
+        status: error
+        code: SCOREBOARD_FREEZING
+        message: Scoreboard is being frozen.
+
+    ScoreboardNotFrozenError:
+      value:
+        status: error
+        code: SCOREBOARD_NOT_FROZEN
+        message: Scoreboard is not frozen yet.
+
+    ScoreboardReadInconsistentError:
+      value:
+        status: error
+        code: SCOREBOARD_READ_INCONSISTENT
+        message: Scoreboard state changed while reading. Please retry.
 
     GetScoreboardStatusResponse:
       value:
