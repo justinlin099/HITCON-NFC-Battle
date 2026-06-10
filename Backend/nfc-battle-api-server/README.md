@@ -89,6 +89,21 @@ Smoke test staging:
 curl https://nfc-battle-staging.hitcon2026.online/health
 ```
 
+## Reset Staging Database
+
+Destructive: this deletes all staging data. Use only when staging data is
+disposable, and never run this against production.
+
+This keeps the existing staging D1 database ID, drops the application tables,
+then applies the current initial schema directly. Applying the schema with
+`d1 execute --file` avoids depending on D1 migration history after the tables
+have been dropped.
+
+```txt
+npx wrangler d1 execute nfc-battle-api-server-staging --remote --command "DROP TRIGGER IF EXISTS bump_collection_version_after_insert; DROP TABLE IF EXISTS prize_results; DROP TABLE IF EXISTS game_state; DROP TABLE IF EXISTS phishing_events; DROP TABLE IF EXISTS collections; DROP TABLE IF EXISTS nfc_tags; DROP TABLE IF EXISTS users;"
+npx wrangler d1 execute nfc-battle-api-server-staging --remote --file ./migrations/0001_initial_schema.sql
+```
+
 ## Manual Production Deploy
 
 Production uses a separate Worker environment and D1 database. Create the
