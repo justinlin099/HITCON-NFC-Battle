@@ -6,13 +6,23 @@ import {
   SCORE_PER_COLLECTION,
   STAMP_THRESHOLD,
 } from "./game-config";
-import { getGameState, type GameStateRow } from "./game-state";
+import {
+  getGameState,
+  markScoreboardFrozen,
+  markScoreboardResumeInProgress,
+  resetScoreboardToOpen,
+  rollbackScoreboardFreeze,
+  startScoreboardFreeze,
+  type GameStateRow,
+} from "./game-state";
 import { newFreezeId, nowIso } from "./ids";
+import { hasOnlyKeys, isPlainObject } from "./request";
 import { errorResponse, success, successMessage } from "./responses";
 import { requireStaffDangerToken } from "./staff";
 import type { AppEnv } from "./types";
 
 const staffRoutes = new Hono<AppEnv>();
+const FREEZE_SCOREBOARD_KEYS = new Set(["scoring_cutoff_at"]);
 
 staffRoutes.use("*", requireStaffDangerToken);
 
@@ -23,43 +33,37 @@ staffRoutes.get("/scoreboard_status", async (c) => {
 });
 
 staffRoutes.post("/freeze_scoreboard", async (c) => {
+  const request = await readOptionalFreezeRequest(c.req.raw);
+  if (!request) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
   const freezeId = newFreezeId();
   const startedAt = nowIso();
+  const scoringCutoffAt = request.scoring_cutoff_at ?? startedAt;
 
-  const transition = await c.env.DB.prepare(
-    `
-    UPDATE game_state
-    SET
-      state = 'FREEZING',
-      freeze_id = ?1,
-      freeze_started_at = ?2,
-      frozen_at = NULL,
-      updated_at = ?2
-    WHERE id = 1 AND state = 'OPEN'
-    `,
-  )
-    .bind(freezeId, startedAt)
-    .run();
-
-  if (transition.meta.changes === 0) {
+  if (!(await startScoreboardFreeze(c.env.DB, freezeId, startedAt, scoringCutoffAt))) {
     return errorResponse(c, 409, "SCOREBOARD_ALREADY_FROZEN", "Scoreboard is already frozen.");
   }
 
   try {
-    await writePrizeSnapshot(c.env.DB, freezeId);
-    await markPhishingEventsApplied(c.env.DB, freezeId);
-    await transitionToFrozen(c.env.DB, freezeId);
+    await writePrizeSnapshot(c.env.DB, freezeId, scoringCutoffAt);
+    await markPhishingEventsApplied(c.env.DB, freezeId, scoringCutoffAt);
+    const frozenAt = await transitionToFrozen(c.env.DB, freezeId);
+
+    return success(c, {
+      frozen: true,
+      freeze_id: freezeId,
+      scoring_cutoff_at: scoringCutoffAt,
+      frozen_at: frozenAt,
+      stamp_threshold: STAMP_THRESHOLD,
+      rank_threshold: RANK_THRESHOLD,
+    });
   } catch (error) {
     console.error("Failed to freeze scoreboard.", error);
     await rollbackFailedFreeze(c.env.DB, freezeId);
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
-
-  return success(c, {
-    frozen: true,
-    stamp_threshold: STAMP_THRESHOLD,
-    rank_threshold: RANK_THRESHOLD,
-  });
 });
 
 staffRoutes.post("/resume_scoreboard", async (c) => {
@@ -75,6 +79,17 @@ staffRoutes.post("/resume_scoreboard", async (c) => {
   }
 
   if (state.freeze_id) {
+    if (state.state === "FROZEN") {
+      const resumeStarted = await markScoreboardResumeInProgress(
+        c.env.DB,
+        state.freeze_id,
+        nowIso(),
+      );
+      if (!resumeStarted) {
+        return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
+      }
+    }
+
     await c.env.DB.prepare("DELETE FROM prize_results WHERE freeze_id = ?1")
       .bind(state.freeze_id)
       .run();
@@ -89,21 +104,7 @@ staffRoutes.post("/resume_scoreboard", async (c) => {
       .run();
   }
 
-  const timestamp = nowIso();
-  await c.env.DB.prepare(
-    `
-    UPDATE game_state
-    SET
-      state = 'OPEN',
-      freeze_id = NULL,
-      freeze_started_at = NULL,
-      frozen_at = NULL,
-      updated_at = ?1
-    WHERE id = 1
-    `,
-  )
-    .bind(timestamp)
-    .run();
+  await resetScoreboardToOpen(c.env.DB, nowIso());
 
   return successMessage(c, "Scoreboard resumed.");
 });
@@ -115,6 +116,7 @@ function scoreboardStatusData(state: GameStateRow) {
     state: state.state,
     freeze_id: state.freeze_id,
     freeze_started_at: state.freeze_started_at,
+    scoring_cutoff_at: state.scoring_cutoff_at,
     frozen_at: state.frozen_at,
     freeze_timeout_seconds: state.freeze_timeout_seconds,
     freezing_stale: isFreezingStale(
@@ -125,7 +127,7 @@ function scoreboardStatusData(state: GameStateRow) {
   };
 }
 
-async function writePrizeSnapshot(db: D1Database, freezeId: string) {
+async function writePrizeSnapshot(db: D1Database, freezeId: string, scoringCutoffAt: string) {
   await db
     .prepare(
       `
@@ -134,6 +136,7 @@ async function writePrizeSnapshot(db: D1Database, freezeId: string) {
           scanner_user_id AS user_id,
           COUNT(*) AS num_of_collection
         FROM collections
+        WHERE first_collected_at <= ?7
         GROUP BY scanner_user_id
       ),
       phishing_counts AS (
@@ -141,7 +144,7 @@ async function writePrizeSnapshot(db: D1Database, freezeId: string) {
           victim_user_id AS user_id,
           COUNT(*) AS num_of_phishing
         FROM phishing_events
-        WHERE applied_freeze_id IS NULL
+        WHERE applied_freeze_id IS NULL AND created_at <= ?7
         GROUP BY victim_user_id
       ),
       stamp_counts AS (
@@ -151,6 +154,7 @@ async function writePrizeSnapshot(db: D1Database, freezeId: string) {
           SUM(CASE WHEN collected.role = 'COMMUNITY' THEN 1 ELSE 0 END) AS community_count
         FROM collections
         INNER JOIN users AS collected ON collected.user_id = collections.collected_user_id
+        WHERE collections.first_collected_at <= ?7
         GROUP BY collections.scanner_user_id
       ),
       scored AS (
@@ -201,20 +205,21 @@ async function writePrizeSnapshot(db: D1Database, freezeId: string) {
       STAMP_THRESHOLD,
       RANK_THRESHOLD,
       nowIso(),
+      scoringCutoffAt,
     )
     .run();
 }
 
-async function markPhishingEventsApplied(db: D1Database, freezeId: string) {
+async function markPhishingEventsApplied(db: D1Database, freezeId: string, scoringCutoffAt: string) {
   await db
     .prepare(
       `
       UPDATE phishing_events
       SET applied_freeze_id = ?1
-      WHERE applied_freeze_id IS NULL
+      WHERE applied_freeze_id IS NULL AND created_at <= ?2
       `,
     )
-    .bind(freezeId)
+    .bind(freezeId, scoringCutoffAt)
     .run();
 }
 
@@ -234,36 +239,43 @@ async function rollbackFailedFreeze(db: D1Database, freezeId: string) {
     )
     .bind(freezeId)
     .run();
-  await db
-    .prepare(
-      `
-      UPDATE game_state
-      SET
-        state = 'OPEN',
-        freeze_id = NULL,
-        freeze_started_at = NULL,
-        frozen_at = NULL,
-        updated_at = ?2
-      WHERE id = 1 AND state = 'FREEZING' AND freeze_id = ?1
-      `,
-    )
-    .bind(freezeId, timestamp)
-    .run();
+  await rollbackScoreboardFreeze(db, freezeId, timestamp);
 }
 
 async function transitionToFrozen(db: D1Database, freezeId: string) {
   const timestamp = nowIso();
-  await db
-    .prepare(
-      `
-      UPDATE game_state
-      SET
-        state = 'FROZEN',
-        frozen_at = ?2,
-        updated_at = ?2
-      WHERE id = 1 AND state = 'FREEZING' AND freeze_id = ?1
-      `,
-    )
-    .bind(freezeId, timestamp)
-    .run();
+  await markScoreboardFrozen(db, freezeId, timestamp);
+
+  return timestamp;
+}
+
+async function readOptionalFreezeRequest(request: Request) {
+  const text = await request.text();
+  if (text.trim() === "") {
+    return {};
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+
+  if (!isPlainObject(value) || !hasOnlyKeys(value, FREEZE_SCOREBOARD_KEYS)) {
+    return null;
+  }
+
+  const scoringCutoffAt = value.scoring_cutoff_at;
+  if (scoringCutoffAt === undefined) {
+    return {};
+  }
+
+  if (typeof scoringCutoffAt !== "string" || Number.isNaN(Date.parse(scoringCutoffAt))) {
+    return null;
+  }
+
+  return {
+    scoring_cutoff_at: new Date(scoringCutoffAt).toISOString(),
+  };
 }

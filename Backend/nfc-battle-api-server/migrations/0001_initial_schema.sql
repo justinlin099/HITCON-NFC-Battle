@@ -42,6 +42,7 @@ CREATE TABLE game_state (
   state TEXT NOT NULL CHECK (state IN ('OPEN', 'FREEZING', 'FROZEN')),
   freeze_id TEXT,
   freeze_started_at TEXT,
+  scoring_cutoff_at TEXT,
   frozen_at TEXT,
   freeze_timeout_seconds INTEGER NOT NULL DEFAULT 30 CHECK (freeze_timeout_seconds > 0),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),

@@ -3,7 +3,7 @@ import { requireAuth } from "./auth";
 import { nowIso } from "./ids";
 import { hasOnlyKeys, isPlainObject, readJson } from "./request";
 import { errorResponse, success } from "./responses";
-import { getGameState } from "./game-state";
+import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import type { AppEnv } from "./types";
 import {
   getFullProfile,
@@ -34,6 +34,7 @@ const PATCHABLE_PROFILE_FIELDS = new Set([
   "bio",
   "pixel_avatar_base64",
 ]);
+const MAX_CONSISTENT_READ_ATTEMPTS = 2;
 
 const users = new Hono<AppEnv>();
 
@@ -73,19 +74,28 @@ users.patch("/me", async (c) => {
 
 users.get("/me/prize", async (c) => {
   const authUser = c.get("authUser");
-  const state = await getGameState(c.env.DB);
-  if (state.state !== "FROZEN" || !state.freeze_id) {
-    return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
+
+  for (let attempt = 0; attempt < MAX_CONSISTENT_READ_ATTEMPTS; attempt += 1) {
+    const state = await getGameState(c.env.DB);
+    if (state.state !== "FROZEN" || !state.freeze_id) {
+      return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
+    }
+
+    const result = await getPrizeResult(c.env.DB, state.freeze_id, authUser.userId);
+    const latestState = await getGameState(c.env.DB);
+    if (!isSameGameStateSnapshot(state, latestState)) {
+      continue;
+    }
+
+    return success(c, {
+      scoreboard_frozen: true,
+      stamp_prize: result?.stamp_prize === 1,
+      rank_prize: result?.rank_prize === 1,
+      rank: result?.rank ?? null,
+    });
   }
 
-  const result = await getPrizeResult(c.env.DB, state.freeze_id, authUser.userId);
-
-  return success(c, {
-    scoreboard_frozen: true,
-    stamp_prize: result?.stamp_prize === 1,
-    rank_prize: result?.rank_prize === 1,
-    rank: result?.rank ?? null,
-  });
+  return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard changed while reading.");
 });
 
 users.get("/me/bootstrap", async (c) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { authHeaders, createTestServer, readJson, staffHeaders } from "./helpers";
+import { authHeaders, createTestServer, jsonRequest, readJson, staffHeaders } from "./helpers";
 
 describe("staff scoreboard edge cases", () => {
   it("rejects staff endpoints without the staff danger token", async () => {
@@ -33,6 +33,33 @@ describe("staff scoreboard edge cases", () => {
     });
   });
 
+  it("rejects invalid freeze request bodies before changing scoreboard state", async () => {
+    const server = await createTestServer();
+
+    for (const body of [
+      null,
+      "nope",
+      { scoring_cutoff_at: "not-a-date" },
+      { scoring_cutoff_at: "2026-04-12T15:00:00Z", extra: true },
+    ]) {
+      const response = await server.request(
+        "/staff/freeze_scoreboard",
+        await jsonRequest("POST", body, staffHeaders()),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(readJson(response)).resolves.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+      await expect(
+        server.db.prepare("SELECT state, freeze_id FROM game_state WHERE id = 1").first(),
+      ).resolves.toEqual({
+        state: "OPEN",
+        freeze_id: null,
+      });
+    }
+  });
+
   it("rejects a second freeze after the scoreboard is frozen", async () => {
     const server = await createTestServer();
     await server.request("/users/me", { headers: await authHeaders("alice") });
@@ -62,6 +89,16 @@ describe("staff scoreboard edge cases", () => {
       headers: staffHeaders(),
     });
     expect(freeze.status).toBe(200);
+    const freezeBody = await readJson(freeze) as {
+      data: {
+        freeze_id: string;
+        scoring_cutoff_at: string;
+        frozen_at: string;
+      };
+    };
+    expect(freezeBody.data.freeze_id).toMatch(/^freeze_/);
+    expect(freezeBody.data.scoring_cutoff_at).toEqual(expect.any(String));
+    expect(freezeBody.data.frozen_at).toEqual(expect.any(String));
 
     const frozenStatus = await server.request("/staff/scoreboard_status", {
       headers: staffHeaders(),
@@ -70,6 +107,9 @@ describe("staff scoreboard edge cases", () => {
     await expect(readJson(frozenStatus)).resolves.toMatchObject({
       data: {
         state: "FROZEN",
+        freeze_id: freezeBody.data.freeze_id,
+        scoring_cutoff_at: freezeBody.data.scoring_cutoff_at,
+        frozen_at: freezeBody.data.frozen_at,
         freeze_timeout_seconds: 30,
         freezing_stale: false,
       },
@@ -90,6 +130,7 @@ describe("staff scoreboard edge cases", () => {
         state: "OPEN",
         freeze_id: null,
         freeze_started_at: null,
+        scoring_cutoff_at: null,
         frozen_at: null,
         freezing_stale: false,
       },
@@ -120,10 +161,13 @@ describe("staff scoreboard edge cases", () => {
       expect(consoleError).toHaveBeenCalledWith("Failed to freeze scoreboard.", expect.any(Error));
 
       await expect(
-        server.db.prepare("SELECT state, freeze_id FROM game_state WHERE id = 1").first(),
+        server.db
+          .prepare("SELECT state, freeze_id, scoring_cutoff_at FROM game_state WHERE id = 1")
+          .first(),
       ).resolves.toEqual({
         state: "OPEN",
         freeze_id: null,
+        scoring_cutoff_at: null,
       });
       await expect(
         server.db.prepare("SELECT COUNT(*) AS count FROM prize_results").first<{ count: number }>(),
@@ -152,6 +196,7 @@ describe("staff scoreboard edge cases", () => {
         state = 'FREEZING',
         freeze_id = 'freeze_stale',
         freeze_started_at = '2026-04-12T15:00:00.000Z',
+        scoring_cutoff_at = '2026-04-12T15:00:00.000Z',
         frozen_at = NULL,
         freeze_timeout_seconds = 1
       WHERE id = 1
@@ -190,6 +235,7 @@ describe("staff scoreboard edge cases", () => {
       data: {
         state: "FREEZING",
         freeze_id: "freeze_stale",
+        scoring_cutoff_at: "2026-04-12T15:00:00.000Z",
         freezing_stale: true,
       },
     });
@@ -218,6 +264,7 @@ describe("staff scoreboard edge cases", () => {
       data: {
         state: "OPEN",
         freeze_id: null,
+        scoring_cutoff_at: null,
       },
     });
   });
