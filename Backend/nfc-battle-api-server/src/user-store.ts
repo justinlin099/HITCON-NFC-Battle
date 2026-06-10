@@ -2,6 +2,8 @@ import { nowIso } from "./ids";
 import { getCollection, hasCollected } from "./collection-store";
 import type { UserRole } from "./types";
 
+const MAX_USER_ROW_BATCH_SIZE = 100;
+
 export interface UserRow {
   user_id: string;
   display_name: string;
@@ -75,6 +77,44 @@ export async function getUserRow(db: D1Database, userId: string) {
     .first<UserRow>();
 }
 
+async function getUserRowsById(db: D1Database, userIds: string[]) {
+  const rowsById = new Map<string, UserRow>();
+  for (let offset = 0; offset < userIds.length; offset += MAX_USER_ROW_BATCH_SIZE) {
+    const chunk = userIds.slice(offset, offset + MAX_USER_ROW_BATCH_SIZE);
+    if (chunk.length === 0) {
+      continue;
+    }
+
+    const placeholders = chunk.map((_, index) => `?${index + 1}`).join(", ");
+    const { results } = await db
+      .prepare(
+        `
+        SELECT
+          users.user_id,
+          users.display_name,
+          users.role,
+          users.emoji_icon,
+          users.bio,
+          users.pixel_avatar_base64,
+          users.profile_version,
+          users.collection_version,
+          nfc_tags.physical_id
+        FROM users
+        LEFT JOIN nfc_tags ON nfc_tags.user_id = users.user_id
+        WHERE users.user_id IN (${placeholders})
+        `,
+      )
+      .bind(...chunk)
+      .all<UserRow>();
+
+    for (const row of results) {
+      rowsById.set(row.user_id, row);
+    }
+  }
+
+  return rowsById;
+}
+
 export async function profileFromRow(db: D1Database, row: UserRow) {
   const collection = await getCollection(db, row.user_id);
 
@@ -123,10 +163,11 @@ export async function getVisibleProfile(db: D1Database, viewerUserId: string, ro
 export async function getHydratedCollection(db: D1Database, viewerUserId: string, owner: UserRow) {
   const collection = await getCollection(db, owner.user_id);
   const viewerCollection = new Set(await getCollection(db, viewerUserId));
+  const rowsById = await getUserRowsById(db, collection);
   const users = [];
 
   for (const collectedUserId of collection) {
-    const row = await getUserRow(db, collectedUserId);
+    const row = rowsById.get(collectedUserId);
     if (row) {
       users.push(
         visibleProfileFromRow(

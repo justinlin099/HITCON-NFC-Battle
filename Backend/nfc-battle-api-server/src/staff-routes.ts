@@ -127,7 +127,15 @@ async function rollbackFailedFreeze(db: D1Database, freezeId: string) {
 
 async function transitionToFrozen(db: D1Database, freezeId: string) {
   const timestamp = nowIso();
-  await markScoreboardFrozen(db, freezeId, timestamp);
+  const transitioned = await markScoreboardFrozen(db, freezeId, timestamp);
+  if (!transitioned) {
+    throw new Error("Failed to transition scoreboard to FROZEN.");
+  }
+
+  const state = await getGameState(db);
+  if (state.state !== "FROZEN" || state.freeze_id !== freezeId || state.frozen_at !== timestamp) {
+    throw new Error("Scoreboard FROZEN transition did not persist.");
+  }
 
   return timestamp;
 }

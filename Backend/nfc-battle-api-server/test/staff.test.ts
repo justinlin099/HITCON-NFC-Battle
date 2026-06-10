@@ -185,6 +185,54 @@ describe("staff scoreboard edge cases", () => {
     }
   });
 
+  it("fails freeze when the final FROZEN transition does not persist", async () => {
+    const server = await createTestServer();
+    await server.request("/users/me", { headers: await authHeaders("alice") });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await server.db.exec(
+        `
+        CREATE TRIGGER reset_freeze_before_frozen_transition
+        AFTER INSERT ON prize_results
+        BEGIN
+          UPDATE game_state
+          SET
+            state = 'OPEN',
+            freeze_id = NULL,
+            freeze_started_at = NULL,
+            scoring_cutoff_at = NULL,
+            frozen_at = NULL
+          WHERE id = 1;
+        END;
+        `,
+      );
+
+      const failedFreeze = await server.request("/staff/freeze_scoreboard", {
+        method: "POST",
+        headers: staffHeaders(),
+      });
+      expect(failedFreeze.status).toBe(400);
+      expect(consoleError).toHaveBeenCalledWith("Failed to freeze scoreboard.", expect.any(Error));
+
+      await expect(
+        server.db
+          .prepare("SELECT state, freeze_id, frozen_at FROM game_state WHERE id = 1")
+          .first(),
+      ).resolves.toEqual({
+        state: "OPEN",
+        freeze_id: null,
+        frozen_at: null,
+      });
+      await expect(
+        server.db.prepare("SELECT COUNT(*) AS count FROM prize_results").first<{ count: number }>(),
+      ).resolves.toEqual({ count: 0 });
+    } finally {
+      await server.db.exec("DROP TRIGGER IF EXISTS reset_freeze_before_frozen_transition");
+      consoleError.mockRestore();
+    }
+  });
+
   it("recovers stale FREEZING state and clears partial snapshot data", async () => {
     const server = await createTestServer();
     await server.request("/users/me", { headers: await authHeaders("alice") });

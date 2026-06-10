@@ -70,7 +70,7 @@ export async function startScoreboardFreeze(
 }
 
 export async function markScoreboardFrozen(db: D1Database, freezeId: string, frozenAt: string) {
-  await db
+  const transition = await db
     .prepare(
       `
       UPDATE game_state
@@ -83,6 +83,8 @@ export async function markScoreboardFrozen(db: D1Database, freezeId: string, fro
     )
     .bind(freezeId, frozenAt)
     .run();
+
+  return transition.meta.changes > 0;
 }
 
 export async function resetScoreboardToOpen(db: D1Database, updatedAt: string) {
