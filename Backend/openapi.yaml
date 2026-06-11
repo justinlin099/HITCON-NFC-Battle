@@ -316,6 +316,8 @@ paths:
                   $ref: '#/components/examples/GetFullUserProfileResponse'
                 unchanged:
                   $ref: '#/components/examples/GetUnchangedUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '404':
@@ -361,6 +363,8 @@ paths:
                   $ref: '#/components/examples/GetUserCollectionResponse'
                 unchanged:
                   $ref: '#/components/examples/GetUnchangedUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
