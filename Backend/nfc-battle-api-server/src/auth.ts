@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { errorResponse } from "./responses";
+import { timingSafeEqual } from "./timing-safe";
 import type { AppEnv, AuthenticatedUser, JwtPayload, UserRole } from "./types";
 
 const JWT_ALGORITHM = { name: "HMAC", hash: "SHA-256" } as const;
@@ -96,7 +97,7 @@ async function verifySignature(signingInput: string, encodedSignature: string, s
   );
   const actualSignature = base64UrlToBytes(encodedSignature);
 
-  if (!constantTimeEqual(expectedSignature, actualSignature)) {
+  if (!timingSafeEqual(actualSignature, expectedSignature)) {
     throw new AuthError("Invalid JWT signature.");
   }
 }
@@ -140,15 +141,4 @@ function base64UrlToBytes(encoded: string) {
   }
 
   return bytes;
-}
-
-function constantTimeEqual(expected: Uint8Array, actual: Uint8Array) {
-  let diff = expected.length ^ actual.length;
-  const length = Math.max(expected.length, actual.length);
-
-  for (let i = 0; i < length; i += 1) {
-    diff |= (expected[i] ?? 0) ^ (actual[i] ?? 0);
-  }
-
-  return diff === 0;
 }

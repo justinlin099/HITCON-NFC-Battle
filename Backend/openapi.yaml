@@ -16,11 +16,11 @@ info:
 
     Authenticated app APIs use the conference JWT:
     `Authorization: Bearer <JWT>`. The backend derives caller identity from the
-    JWT subject, which is the hashed KKTIX user ID. JWT verification uses a
-    shared secret and HMAC.
+    JWT subject, which is the user ID provided by the JWT issuer. JWT
+    verification uses a shared secret and HMAC.
 
     Required JWT claims:
-    - `sub`: user ID, the hashed KKTIX user ID.
+    - `sub`: user ID, provided by the JWT issuer.
     - `exp`: expiration time.
     - `iss`: issuer.
     - `aud`: audience.
@@ -31,10 +31,17 @@ info:
     server must verify that the physical ID belongs to the parsed user ID before
     adding the target user to the scanner's collection.
 
+    Collection records are the long-term permission for full profile access.
+    `profile_version` and `collection_version` are integer versions stored on
+    the user row. `profile_version` changes when profile fields change.
+    `collection_version` changes only when that user's own collection changes.
+
     Staff scoreboard freeze/resume APIs use `STAFF_DANGER_TOKEN`.
-    Freeze calculates and stores a per-user prize snapshot. Prize lookups read
-    that stored snapshot instead of recalculating results on every request.
-    Resume invalidates the current freeze snapshot and reopens scoring.
+    Freeze calculates and stores a per-user score and prize snapshot using
+    `scoring_cutoff_at` as the latest event timestamp that counts toward the
+    snapshot. Prize lookups read that stored snapshot instead of recalculating
+    results on every request. Resume invalidates the current freeze snapshot and
+    reopens scoring.
 
     Current provisional scoring formula:
     `score = 10 * num_of_collection`. This formula may be finalized or changed
@@ -43,6 +50,51 @@ info:
     A scoreboard can stay in `FREEZING` only until the configured
     `freeze_timeout`. After that, the freeze is stale and staff may recover it
     with `POST /staff/resume_scoreboard`.
+
+    Scoreboard state behavior:
+
+    The following endpoints are available in all states (`OPEN`, `FREEZING`,
+    and `FROZEN`):
+    - `GET /users/me`
+    - `PATCH /users/me`
+    - `GET /users/me/bootstrap`
+    - `POST /users/batch`
+    - `GET /users/{user_id}`
+    - `GET /users/{user_id}/collection`, subject to collection-based visibility
+      permission
+    - `POST /tags/pair`
+    - `POST /collection/scan`
+    - `POST /collection/phishing`
+    - `GET /missions/stamp`
+    - `GET /staff/scoreboard_status`
+
+    The following endpoints are available only in `FROZEN`:
+    - `GET /users/me/prize`; rejected in `OPEN` and `FREEZING` with
+      `SCOREBOARD_NOT_FROZEN`. If the scoreboard state changes during a
+      consistent read, it is rejected with `SCOREBOARD_READ_INCONSISTENT` and
+      clients should retry.
+
+    The following endpoints are available in `OPEN` and `FROZEN`, but rejected
+    in `FREEZING`:
+    - `GET /scoreboard`; returns live scores in `OPEN`, returns the stored
+      freeze snapshot in `FROZEN`, and is rejected in `FREEZING` with
+      `SCOREBOARD_FREEZING` error. If the scoreboard state changes during a
+      consistent read, it is rejected with `SCOREBOARD_READ_INCONSISTENT` and
+      clients should retry.
+
+    The following endpoints are state transition operations:
+    - `POST /staff/freeze_scoreboard`: accepted only in `OPEN`; rejected in
+      `FREEZING` or `FROZEN` with `409 Conflict`
+    - `POST /staff/resume_scoreboard`: accepted in `FROZEN` and stale
+      `FREEZING`; rejected in `OPEN` and non-stale `FREEZING` with
+      `SCOREBOARD_NOT_FROZEN`
+
+    The app remains usable after the conference ends. Pairing, scanning,
+    phishing records, profile updates, collection browsing, bootstrap, and
+    batch refresh continue to update live app data after the scoreboard is
+    frozen. The freeze operation creates a score and prize snapshot; later live
+    activity must not change that stored snapshot unless staff explicitly
+    resumes scoring and freezes again.
 servers:
   - url: https://{devHost}/v1
     description: Development API
@@ -65,7 +117,8 @@ paths:
       summary: Lazy initialize or get my profile
       description: |
         Creates a default profile when the authenticated JWT subject is new,
-        then returns the authenticated user's complete data.
+        then returns the authenticated user's complete data. If the user has
+        not paired an NFC tag yet, `physical_id` is returned as `null`.
       responses:
         '200':
           description: Profile loaded.
@@ -76,6 +129,8 @@ paths:
               examples:
                 profile:
                   $ref: '#/components/examples/GetMyProfileResponse'
+                unpaired:
+                  $ref: '#/components/examples/GetMyUnpairedProfileResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
     patch:
@@ -115,7 +170,10 @@ paths:
       description: |
         Returns the authenticated user's prize result after the scoreboard is
         frozen and prize calculation has run. Prize results are read from the
-        stored freeze snapshot.
+        stored freeze snapshot. This endpoint is rejected while the scoreboard
+        is `OPEN` or `FREEZING`. If the scoreboard state changes during a
+        consistent read, the endpoint returns `SCOREBOARD_READ_INCONSISTENT`
+        and clients should retry.
       responses:
         '200':
           description: Prize result loaded.
@@ -129,31 +187,121 @@ paths:
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '409':
-          $ref: '#/components/responses/ScoreboardNotFrozenError'
+          description: Scoreboard is not frozen yet, or the read saw a transient scoreboard state change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                not_frozen:
+                  $ref: '#/components/examples/ScoreboardNotFrozenError'
+                read_inconsistent:
+                  $ref: '#/components/examples/ScoreboardReadInconsistentError'
+  /users/me/bootstrap:
+    get:
+      tags: [Users]
+      summary: Bootstrap my local app cache
+      description: |
+        Returns the authenticated user's full profile plus full profiles for all
+        users they have collected. This endpoint is intended for app recovery or
+        fresh installs, not normal incremental refresh. Collected user profiles
+        do not include nested collection lists.
+      responses:
+        '200':
+          description: Bootstrap data loaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetMyBootstrapResponse'
+              examples:
+                bootstrap:
+                  $ref: '#/components/examples/GetMyBootstrapResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+  /users/batch:
+    post:
+      tags: [Users]
+      summary: Batch refresh user profiles
+      description: |
+        Read-only, idempotent batch lookup for multiple cached user profiles.
+        This endpoint uses `POST` only so the client can send a structured
+        request body with many user IDs and cached versions.
+
+        For each user, the server applies the same visibility rule as
+        `GET /users/{user_id}`: full profile if the caller has collected that
+        user, otherwise partial profile. If the client sends both cached
+        versions and both match the server's current versions, the server
+        returns only `user_id` and `unchanged: true` for that user.
+
+        `profile_version` is the client's cached version of that user's profile
+        fields. `collection_version` is the client's cached version of that
+        user's collection list. When either cached version is omitted or stale,
+        the server returns `unchanged: false` plus the user's profile using the
+        same visibility behavior as `GET /users/{user_id}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchGetUsersRequest'
+            examples:
+              batch:
+                $ref: '#/components/examples/BatchGetUsersRequest'
+      responses:
+        '200':
+          description: Batch profile data loaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchGetUsersResponse'
+              examples:
+                batch:
+                  $ref: '#/components/examples/BatchGetUsersResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
   /users/{user_id}:
     get:
       tags: [Users]
       summary: Get another user's profile
       description: |
-        Returns another user's public profile. If the caller also provides the
-        queried user's NFC physical ID as a query parameter, the server returns
-        all profile data. Otherwise, it only returns `display_name` and
-        `emoji_icon`, allowing the mobile app to show a locked character state.
+        Returns another user's profile. If the caller has collected the queried
+        user, the server returns full profile data plus version metadata.
+        Otherwise, it only returns `user_id`, `display_name`, and `emoji_icon`,
+        allowing the mobile app to show a locked character state.
+
+        The client may send both `profile_version` and `collection_version` for
+        a cached full profile. If both versions match the server's current
+        versions, the server returns an unchanged marker instead of the profile
+        body. If either version is omitted or stale, the server returns the
+        profile body using the normal visibility rule.
       parameters:
         - in: path
           name: user_id
           required: true
           schema:
             type: string
-          description: Target user's hashed KKTIX user ID.
+          description: Target user ID from the JWT issuer.
           example: kktix_hash_abc123
         - in: query
-          name: physical_id
+          name: profile_version
           required: false
           schema:
-            type: string
-          description: Physical ID read from the queried user's NFC tag.
-          example: '04:1A:2B:3C:4D:5E:6F'
+            type: integer
+            minimum: 0
+          description: Locally cached profile version for this user.
+          example: 2
+        - in: query
+          name: collection_version
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: Locally cached collection version for this user.
+          example: 5
       responses:
         '200':
           description: Profile loaded.
@@ -162,12 +310,65 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetUserProfileResponse'
               examples:
-                locked:
-                  $ref: '#/components/examples/GetLockedUserProfileResponse'
-                unlocked:
-                  $ref: '#/components/examples/GetUnlockedUserProfileResponse'
+                partial:
+                  $ref: '#/components/examples/GetPartialUserProfileResponse'
+                full:
+                  $ref: '#/components/examples/GetFullUserProfileResponse'
+                unchanged:
+                  $ref: '#/components/examples/GetUnchangedUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
+  /users/{user_id}/collection:
+    get:
+      tags: [Users]
+      summary: Get another user's collection
+      description: |
+        Returns the queried user's collection only when the caller has collected
+        the queried user. For each user in that collection, the server applies
+        the same visibility rule from the caller's point of view: full profile
+        if the caller has collected that listed user, otherwise partial profile.
+
+        The client may send `collection_version` for a cached collection. If it
+        matches the server's current collection version for the queried user,
+        the server returns an unchanged marker instead of the collection body.
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema:
+            type: string
+          description: Target user ID from the JWT issuer.
+          example: kktix_hash_def456
+        - in: query
+          name: collection_version
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: Locally cached collection version for this user.
+          example: 5
+      responses:
+        '200':
+          description: Collection loaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetUserCollectionResponse'
+              examples:
+                collection:
+                  $ref: '#/components/examples/GetUserCollectionResponse'
+                unchanged:
+                  $ref: '#/components/examples/GetUnchangedUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
   /tags/pair:
@@ -179,6 +380,11 @@ paths:
         with the app. The app also writes
         `https://game.hitcon2026.online/b?u={user_id}` to the tag, then locks
         the tag so it is read-only and cannot be accidentally overwritten.
+
+        This endpoint remains available in `OPEN`, `FREEZING`, and `FROZEN` so
+        the app keeps working after the conference ends. Pairing after a freeze
+        updates live app data but does not change the stored score and prize
+        snapshot.
       requestBody:
         required: true
         content:
@@ -215,8 +421,14 @@ paths:
         physical ID, and extracts `user_id` from the URL.
 
         The server verifies that `physical_id` belongs to `user_id`, adds the
-        target user ID to the scanner's collection, and inserts a collection
-        record if this is the first time the scanner collected this tag.
+        target user ID to the scanner's collection, increments the scanner's
+        `collection_version` if this is a new collection record, and returns the
+        scanned user's profile without that user's collection list.
+
+        This endpoint remains available in `OPEN`, `FREEZING`, and `FROZEN` so
+        the app keeps working after the conference ends. Scans after a freeze
+        update live collection data but do not change the stored score and prize
+        snapshot.
       requestBody:
         required: true
         content:
@@ -244,15 +456,19 @@ paths:
           $ref: '#/components/responses/PhysicalIdMismatchError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
-  /collections/phishing:
+  /collection/phishing:
     post:
       tags: [Collection]
       summary: Record a clicked-link phishing event
       description: |
         Called when the app is opened by clicking a URL instead of scanning a
         physical NFC tag, so the app cannot detect a physical ID. The server
-        records `victim` and `attacker`, then applies the score penalty to the
-        victim after the scoreboard is frozen.
+        records `victim` and `attacker`.
+
+        This endpoint remains available in `OPEN`, `FREEZING`, and `FROZEN` so
+        the app keeps working after the conference ends. Phishing records after
+        a freeze update live event data but do not change the stored score and
+        prize snapshot.
       requestBody:
         required: true
         content:
@@ -302,8 +518,21 @@ paths:
       tags: [Scoreboard]
       summary: Get global scoreboard
       description: |
-        Returns the global scoreboard using offset/limit pagination. Scores use
-        the current provisional formula: `score = 10 * num_of_collection`.
+        Returns the global scoreboard using offset/limit pagination.
+
+        In `OPEN`, this endpoint returns live scores using the current
+        provisional formula: `score = 10 * num_of_collection`.
+
+        In `FREEZING`, this endpoint is rejected because a consistent snapshot
+        is being calculated.
+
+        In `FROZEN`, this endpoint returns the stored freeze snapshot, so scores
+        do not change even if pairing, scanning, phishing records, and profile
+        updates continue after the conference ends. The response includes the
+        snapshot `freeze_id` and `scoring_cutoff_at`.
+
+        If the scoreboard state changes during a consistent read, the endpoint
+        returns `SCOREBOARD_READ_INCONSISTENT` and clients should retry.
       parameters:
         - in: query
           name: offset
@@ -336,6 +565,17 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          description: Scoreboard is freezing, or the read saw a transient scoreboard state change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                freezing:
+                  $ref: '#/components/examples/ScoreboardFreezingError'
+                read_inconsistent:
+                  $ref: '#/components/examples/ScoreboardReadInconsistentError'
   /staff/scoreboard_status:
     get:
       tags: [Staff]
@@ -343,8 +583,8 @@ paths:
       description: |
         Staff-only status endpoint for inspecting the scoreboard state before
         freeze or resume operations. Returns the current state, current
-        `freeze_id`, freeze timestamps, configured freeze timeout, and whether a
-        `FREEZING` state is stale.
+        `freeze_id`, freeze timestamps, `scoring_cutoff_at`, configured freeze
+        timeout, and whether a `FREEZING` state is stale.
       security:
         - staffDangerToken: []
       responses:
@@ -369,6 +609,17 @@ paths:
         final scores and stored prize results for a new `freeze_id`, then
         transition to `FROZEN`.
 
+        This endpoint is accepted only while the scoreboard is `OPEN`. A
+        successful freeze creates a score and prize snapshot, but it does not
+        disable live app features.
+
+        The request may include `scoring_cutoff_at`, which is the latest event
+        timestamp that should count in the score snapshot. If omitted, the
+        server uses its current time. The value must not be later than the
+        server time when the freeze begins. The server should include only
+        collection records and phishing records whose event timestamps are less
+        than or equal to `scoring_cutoff_at`.
+
         A scoreboard that remains in `FREEZING` longer than `freeze_timeout` is
         stale. Stale partial results for that `freeze_id` must not be visible to
         users.
@@ -381,6 +632,15 @@ paths:
         `GET /users/me/prize` request.
       security:
         - staffDangerToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FreezeScoreboardRequest'
+            examples:
+              freeze:
+                $ref: '#/components/examples/FreezeScoreboardRequest'
       responses:
         '200':
           description: Scoreboard frozen and prizes calculated.
@@ -406,7 +666,7 @@ paths:
 
         This endpoint may also recover a stale `FREEZING` state by changing it
         back to `OPEN` and invalidating partial results for the stale
-        `freeze_id`.
+        `freeze_id`. It is rejected in `OPEN` and non-stale `FREEZING`.
       security:
         - staffDangerToken: []
       responses:
@@ -480,6 +740,16 @@ components:
             status: error
             code: USER_NOT_FOUND
             message: User not found.
+    ForbiddenError:
+      description: Forbidden.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: FORBIDDEN
+            message: Forbidden.
     PhysicalIdMismatchError:
       description: Physical tag ID does not belong to the parsed user ID.
       content:
@@ -510,6 +780,16 @@ components:
             status: error
             code: SCOREBOARD_ALREADY_FROZEN
             message: Scoreboard is already frozen.
+    ScoreboardFreezingError:
+      description: Scoreboard snapshot is being calculated.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: SCOREBOARD_FREEZING
+            message: Scoreboard is being frozen.
     ScoreboardNotFrozenError:
       description: Scoreboard is not frozen yet.
       content:
@@ -520,6 +800,16 @@ components:
             status: error
             code: SCOREBOARD_NOT_FROZEN
             message: Scoreboard is not frozen yet.
+    ScoreboardReadInconsistentError:
+      description: Scoreboard state changed during a consistent read; clients should retry.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: SCOREBOARD_READ_INCONSISTENT
+            message: Scoreboard state changed while reading. Please retry.
 
   schemas:
     ErrorResponse:
@@ -535,11 +825,14 @@ components:
             - BAD_REQUEST
             - UNAUTHORIZED
             - STAFF_DANGER_TOKEN_INVALID
+            - FORBIDDEN
             - USER_NOT_FOUND
             - PHYSICAL_ID_MISMATCH
             - TAG_ALREADY_PAIRED
             - SCOREBOARD_ALREADY_FROZEN
+            - SCOREBOARD_FREEZING
             - SCOREBOARD_NOT_FROZEN
+            - SCOREBOARD_READ_INCONSISTENT
         message:
           type: string
 
@@ -557,7 +850,7 @@ components:
       type: string
       enum: [ATTENDEE, STAFF, SPONSOR, COMMUNITY]
 
-    UserProfileFull:
+    UserProfilePublicFull:
       type: object
       required:
         - user_id
@@ -566,12 +859,12 @@ components:
         - emoji_icon
         - bio
         - pixel_avatar_base64
-        - physical_id
-        - collection
+        - profile_version
+        - collection_version
       properties:
         user_id:
           type: string
-          description: Hashed KKTIX user ID.
+          description: User ID provided by the JWT issuer.
           example: kktix_hash_abc123
         display_name:
           type: string
@@ -587,30 +880,73 @@ components:
           example: I love reverse engineering.
         pixel_avatar_base64:
           type: string
-          description: Base64-encoded pixel avatar image.
+          description: Base64-encoded 48x48 pixel avatar image.
           example: iVBORw0KGgoAAAANSU...
-        physical_id:
-          type: string
-          nullable: true
-          description: Paired NFC tag physical ID, or null before pairing.
-          example: '04:1A:2B:3C:4D:5E:6F'
-        collection:
-          type: array
-          description: User IDs this user has previously scanned.
-          items:
-            type: string
-          example: [kktix_hash_def456]
+        profile_version:
+          type: integer
+          description: Incremented when profile fields change.
+          example: 3
+        collection_version:
+          type: integer
+          description: Incremented when this user's own collection changes.
+          example: 8
 
-    UserProfileLocked:
+    UserProfileSelf:
+      allOf:
+        - $ref: '#/components/schemas/UserProfilePublicFull'
+        - type: object
+          required:
+            - physical_id
+            - collection
+          properties:
+            physical_id:
+              type: string
+              nullable: true
+              description: Paired NFC tag physical ID. This is null before the user pairs an NFC tag.
+              example: '04:1A:2B:3C:4D:5E:6F'
+            collection:
+              type: array
+              description: User IDs this user has previously scanned.
+              items:
+                type: string
+              example: [kktix_hash_def456]
+
+    UserProfilePartial:
       type: object
       required: [user_id, display_name, emoji_icon]
       properties:
         user_id:
           type: string
+          example: kktix_hash_def456
         display_name:
           type: string
+          example: Alice
         emoji_icon:
           type: string
+          description: Emoji character shown as the user's icon.
+          example: 😉
+
+    UserCollectionItem:
+      oneOf:
+        - $ref: '#/components/schemas/UserProfilePublicFull'
+        - $ref: '#/components/schemas/UserProfilePartial'
+
+    UserCollection:
+      type: object
+      required: [user_id, collection_version, users]
+      properties:
+        user_id:
+          type: string
+          description: Owner of this collection.
+          example: kktix_hash_def456
+        collection_version:
+          type: integer
+          example: 8
+        users:
+          type: array
+          description: Hydrated users in the collection.
+          items:
+            $ref: '#/components/schemas/UserCollectionItem'
 
     GetMyProfileResponse:
       type: object
@@ -620,7 +956,26 @@ components:
           type: string
           enum: [success]
         data:
-          $ref: '#/components/schemas/UserProfileFull'
+          $ref: '#/components/schemas/UserProfileSelf'
+
+    GetMyBootstrapResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: object
+          required: [me, collected_users]
+          properties:
+            me:
+              $ref: '#/components/schemas/UserProfileSelf'
+            collected_users:
+              type: array
+              description: Full profiles for users the authenticated user has collected.
+              items:
+                $ref: '#/components/schemas/UserProfilePublicFull'
 
     UpdateMyProfileRequest:
       type: object
@@ -641,14 +996,27 @@ components:
           example: Updated bio.
         pixel_avatar_base64:
           type: string
+          description: Base64-encoded 48x48 pixel avatar image.
           example: iVBORw0KGgo...
 
     GetUserProfileResponse:
       oneOf:
-        - $ref: '#/components/schemas/GetLockedUserProfileResponse'
-        - $ref: '#/components/schemas/GetUnlockedUserProfileResponse'
+        - $ref: '#/components/schemas/GetUnchangedUserResponse'
+        - $ref: '#/components/schemas/GetPartialUserProfileResponse'
+        - $ref: '#/components/schemas/GetFullUserProfileResponse'
 
-    GetLockedUserProfileResponse:
+    CachedUserUnchanged:
+      type: object
+      required: [user_id, unchanged]
+      properties:
+        user_id:
+          type: string
+          example: kktix_hash_def456
+        unchanged:
+          type: boolean
+          enum: [true]
+
+    GetUnchangedUserResponse:
       type: object
       required: [status, data]
       properties:
@@ -656,9 +1024,9 @@ components:
           type: string
           enum: [success]
         data:
-          $ref: '#/components/schemas/UserProfileLocked'
+          $ref: '#/components/schemas/CachedUserUnchanged'
 
-    GetUnlockedUserProfileResponse:
+    GetPartialUserProfileResponse:
       type: object
       required: [status, data]
       properties:
@@ -666,7 +1034,100 @@ components:
           type: string
           enum: [success]
         data:
-          $ref: '#/components/schemas/UserProfileFull'
+          $ref: '#/components/schemas/UserProfilePartial'
+
+    GetFullUserProfileResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          $ref: '#/components/schemas/UserProfilePublicFull'
+
+    GetUserCollectionResponse:
+      oneOf:
+        - $ref: '#/components/schemas/GetUserCollectionLoadedResponse'
+        - $ref: '#/components/schemas/GetUnchangedUserResponse'
+
+    GetUserCollectionLoadedResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          $ref: '#/components/schemas/UserCollection'
+
+    BatchGetUsersRequest:
+      type: object
+      required: [users]
+      additionalProperties: false
+      properties:
+        users:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [user_id]
+            additionalProperties: false
+            properties:
+              user_id:
+                type: string
+                example: kktix_hash_def456
+              profile_version:
+                type: integer
+                minimum: 0
+                description: |
+                  Locally cached profile version for this user, if any. If this
+                  is omitted, the server treats the profile cache as stale.
+                example: 2
+              collection_version:
+                type: integer
+                minimum: 0
+                description: |
+                  Locally cached collection version for this user's collection
+                  list, if any. If the caller has full access to this user and
+                  this is omitted, the server treats the collection cache as
+                  stale.
+                example: 7
+
+    BatchUserResult:
+      oneOf:
+        - $ref: '#/components/schemas/CachedUserUnchanged'
+        - type: object
+          required: [user_id, unchanged, data]
+          properties:
+            user_id:
+              type: string
+              example: kktix_hash_def456
+            unchanged:
+              type: boolean
+              enum: [false]
+            data:
+              description: Profile data using the same visibility behavior as `GET /users/{user_id}`.
+              oneOf:
+                - $ref: '#/components/schemas/UserProfilePublicFull'
+                - $ref: '#/components/schemas/UserProfilePartial'
+
+    BatchGetUsersResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: object
+          required: [results]
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/BatchUserResult'
 
     PairTagRequest:
       type: object
@@ -701,7 +1162,7 @@ components:
           enum: [success]
         data:
           type: object
-          required: [collected_user_id, first_time_collected]
+          required: [collected_user_id, first_time_collected, profile]
           properties:
             collected_user_id:
               type: string
@@ -710,6 +1171,8 @@ components:
               type: boolean
               description: Whether this scan inserted a new collection record.
               example: true
+            profile:
+              $ref: '#/components/schemas/UserProfilePublicFull'
 
     PhishingRequest:
       type: object
@@ -784,7 +1247,14 @@ components:
           enum: [success]
         data:
           type: object
-          required: [offset, limit, rank_threshold, frozen, rankings]
+          required:
+            - offset
+            - limit
+            - rank_threshold
+            - frozen
+            - freeze_id
+            - scoring_cutoff_at
+            - rankings
           properties:
             offset:
               type: integer
@@ -799,6 +1269,17 @@ components:
             frozen:
               type: boolean
               example: false
+            freeze_id:
+              type: string
+              nullable: true
+              description: Current freeze snapshot ID when frozen, otherwise null.
+              example: freeze_20260412_01
+            scoring_cutoff_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Latest event timestamp included in the frozen score snapshot, or null for live scores.
+              example: '2026-04-12T15:00:00Z'
             rankings:
               type: array
               items:
@@ -849,6 +1330,7 @@ components:
             - freeze_id
             - freeze_started_at
             - frozen_at
+            - scoring_cutoff_at
             - freeze_timeout_seconds
             - freezing_stale
           properties:
@@ -871,14 +1353,33 @@ components:
               nullable: true
               description: Time the scoreboard reached FROZEN state.
               example: '2026-04-12T15:01:12Z'
+            scoring_cutoff_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Latest event timestamp included in the current freeze snapshot, or null when no freeze snapshot exists.
+              example: '2026-04-12T15:00:00Z'
             freeze_timeout_seconds:
               type: integer
               description: Configured timeout before FREEZING is considered stale.
-              example: 300
+              example: 30
             freezing_stale:
               type: boolean
               description: Whether the current FREEZING state has exceeded the timeout.
               example: false
+
+    FreezeScoreboardRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        scoring_cutoff_at:
+          type: string
+          format: date-time
+          description: |
+            Latest event timestamp included in the score and prize snapshot. If
+            omitted, the server uses its current time. Must not be later than
+            the server time when the freeze begins.
+          example: '2026-04-12T15:00:00Z'
 
     FreezeScoreboardResponse:
       type: object
@@ -889,11 +1390,31 @@ components:
           enum: [success]
         data:
           type: object
-          required: [frozen, stamp_threshold, rank_threshold]
+          required:
+            - frozen
+            - freeze_id
+            - scoring_cutoff_at
+            - frozen_at
+            - stamp_threshold
+            - rank_threshold
           properties:
             frozen:
               type: boolean
               enum: [true]
+            freeze_id:
+              type: string
+              description: Stored score and prize snapshot ID.
+              example: freeze_20260412_01
+            scoring_cutoff_at:
+              type: string
+              format: date-time
+              description: Latest event timestamp included in the score and prize snapshot.
+              example: '2026-04-12T15:00:00Z'
+            frozen_at:
+              type: string
+              format: date-time
+              description: Time the scoreboard reached FROZEN state.
+              example: '2026-04-12T15:01:12Z'
             stamp_threshold:
               type: integer
               example: 10
@@ -912,9 +1433,52 @@ components:
           emoji_icon: 🐱
           bio: I love reverse engineering.
           pixel_avatar_base64: iVBORw0KGgoAAAANSU...
+          profile_version: 3
+          collection_version: 12
           physical_id: '04:1A:2B:3C:4D:5E:6F'
           collection:
             - kktix_hash_def456
+
+    GetMyUnpairedProfileResponse:
+      value:
+        status: success
+        data:
+          user_id: kktix_hash_new_user
+          display_name: Player_new_user
+          role: ATTENDEE
+          emoji_icon: 🙂
+          bio: ''
+          pixel_avatar_base64: ''
+          profile_version: 1
+          collection_version: 0
+          physical_id: null
+          collection: []
+
+    GetMyBootstrapResponse:
+      value:
+        status: success
+        data:
+          me:
+            user_id: kktix_hash_abc123
+            display_name: Hacker_Aries
+            role: ATTENDEE
+            emoji_icon: 🐱
+            bio: I love reverse engineering.
+            pixel_avatar_base64: iVBORw0KGgoAAAANSU...
+            profile_version: 3
+            collection_version: 12
+            physical_id: '04:1A:2B:3C:4D:5E:6F'
+            collection:
+              - kktix_hash_def456
+          collected_users:
+            - user_id: kktix_hash_def456
+              display_name: Plant_Lover
+              role: COMMUNITY
+              emoji_icon: 🌱
+              bio: Ask me about community projects.
+              pixel_avatar_base64: iVBORw0KGgoAAAANSU...
+              profile_version: 2
+              collection_version: 5
 
     UpdateMyProfileRequest:
       value:
@@ -923,7 +1487,30 @@ components:
         bio: Updated bio.
         pixel_avatar_base64: iVBORw0KGgo...
 
-    GetLockedUserProfileResponse:
+    BatchGetUsersRequest:
+      value:
+        users:
+          - user_id: kktix_hash_def456
+            profile_version: 2
+            collection_version: 5
+          - user_id: kktix_hash_ctf
+            profile_version: 1
+
+    BatchGetUsersResponse:
+      value:
+        status: success
+        data:
+          results:
+            - user_id: kktix_hash_def456
+              unchanged: true
+            - user_id: kktix_hash_ctf
+              unchanged: false
+              data:
+                user_id: kktix_hash_ctf
+                display_name: CTF_Player
+                emoji_icon: 🐱
+
+    GetPartialUserProfileResponse:
       value:
         status: success
         data:
@@ -931,7 +1518,7 @@ components:
           display_name: Alice
           emoji_icon: 😉
 
-    GetUnlockedUserProfileResponse:
+    GetFullUserProfileResponse:
       value:
         status: success
         data:
@@ -941,9 +1528,34 @@ components:
           emoji_icon: 🌱
           bio: Ask me about community projects.
           pixel_avatar_base64: iVBORw0KGgoAAAANSU...
-          physical_id: '04:99:88:77:66:55:44'
-          collection:
-            - kktix_hash_abc123
+          profile_version: 2
+          collection_version: 5
+
+    GetUnchangedUserResponse:
+      value:
+        status: success
+        data:
+          user_id: kktix_hash_def456
+          unchanged: true
+
+    GetUserCollectionResponse:
+      value:
+        status: success
+        data:
+          user_id: kktix_hash_def456
+          collection_version: 5
+          users:
+            - user_id: kktix_hash_ctf
+              display_name: CTF_Player
+              emoji_icon: 🐱
+            - user_id: kktix_hash_root
+              display_name: Root_User
+              role: STAFF
+              emoji_icon: 💻
+              bio: Root shell collector.
+              pixel_avatar_base64: iVBORw0KGgoAAAANSU...
+              profile_version: 4
+              collection_version: 10
 
     PairTagRequest:
       value:
@@ -960,6 +1572,15 @@ components:
         data:
           collected_user_id: kktix_hash_def456
           first_time_collected: true
+          profile:
+            user_id: kktix_hash_def456
+            display_name: Plant_Lover
+            role: COMMUNITY
+            emoji_icon: 🌱
+            bio: Ask me about community projects.
+            pixel_avatar_base64: iVBORw0KGgoAAAANSU...
+            profile_version: 2
+            collection_version: 5
 
     PhishingRequest:
       value:
@@ -983,6 +1604,8 @@ components:
           limit: 50
           rank_threshold: 10
           frozen: false
+          freeze_id: null
+          scoring_cutoff_at: null
           rankings:
             - rank: 1
               user_id: kktix_hash_root
@@ -1004,6 +1627,24 @@ components:
           rank_prize: true
           rank: 7
 
+    ScoreboardFreezingError:
+      value:
+        status: error
+        code: SCOREBOARD_FREEZING
+        message: Scoreboard is being frozen.
+
+    ScoreboardNotFrozenError:
+      value:
+        status: error
+        code: SCOREBOARD_NOT_FROZEN
+        message: Scoreboard is not frozen yet.
+
+    ScoreboardReadInconsistentError:
+      value:
+        status: error
+        code: SCOREBOARD_READ_INCONSISTENT
+        message: Scoreboard state changed while reading. Please retry.
+
     GetScoreboardStatusResponse:
       value:
         status: success
@@ -1012,13 +1653,21 @@ components:
           freeze_id: freeze_20260412_01
           freeze_started_at: '2026-04-12T15:00:00Z'
           frozen_at: '2026-04-12T15:01:12Z'
-          freeze_timeout_seconds: 300
+          scoring_cutoff_at: '2026-04-12T15:00:00Z'
+          freeze_timeout_seconds: 30
           freezing_stale: false
+
+    FreezeScoreboardRequest:
+      value:
+        scoring_cutoff_at: '2026-04-12T15:00:00Z'
 
     FreezeScoreboardResponse:
       value:
         status: success
         data:
           frozen: true
+          freeze_id: freeze_20260412_01
+          scoring_cutoff_at: '2026-04-12T15:00:00Z'
+          frozen_at: '2026-04-12T15:01:12Z'
           stamp_threshold: 10
           rank_threshold: 10

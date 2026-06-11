@@ -76,11 +76,17 @@ describe("NFC Battle API flow", () => {
 
     const sponsorScan = await scanTag(server, aliceAuth, "sponsor-one", "tag-sponsor");
     expect(sponsorScan.status).toBe(200);
-    await expect(readJson(sponsorScan)).resolves.toEqual({
+    await expect(readJson(sponsorScan)).resolves.toMatchObject({
       status: "success",
       data: {
         collected_user_id: "sponsor-one",
         first_time_collected: true,
+        profile: {
+          user_id: "sponsor-one",
+          role: "SPONSOR",
+          collection_version: 0,
+          profile_version: 1,
+        },
       },
     });
 
@@ -94,7 +100,7 @@ describe("NFC Battle API flow", () => {
 
     await scanTag(server, aliceAuth, "community-one", "tag-community");
 
-    const unlockedProfile = await server.request("/users/sponsor-one?physical_id=tag-sponsor", {
+    const unlockedProfile = await server.request("/users/sponsor-one", {
       headers: aliceAuth,
     });
     expect(unlockedProfile.status).toBe(200);
@@ -102,8 +108,20 @@ describe("NFC Battle API flow", () => {
       data: {
         user_id: "sponsor-one",
         role: "SPONSOR",
-        physical_id: "tag-sponsor",
-        collection: [],
+        profile_version: 1,
+        collection_version: 0,
+      },
+    });
+
+    const unchangedSponsorProfile = await server.request(
+      "/users/sponsor-one?profile_version=1&collection_version=0",
+      { headers: aliceAuth },
+    );
+    expect(unchangedSponsorProfile.status).toBe(200);
+    await expect(readJson(unchangedSponsorProfile)).resolves.toMatchObject({
+      data: {
+        user_id: "sponsor-one",
+        unchanged: true,
       },
     });
 
@@ -140,7 +158,7 @@ describe("NFC Battle API flow", () => {
     });
 
     const phishing = await server.request(
-      "/collections/phishing",
+      "/collection/phishing",
       await jsonRequest("POST", { victim: "alice", attacker: "sponsor-one" }, aliceAuth),
     );
     expect(phishing.status).toBe(200);

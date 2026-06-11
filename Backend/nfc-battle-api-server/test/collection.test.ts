@@ -102,6 +102,11 @@ describe("collection scan edge cases", () => {
         first_time_collected: true,
       },
     });
+    await expect(
+      server.db
+        .prepare("SELECT collection_version FROM users WHERE user_id = 'alice'")
+        .first<{ collection_version: number }>(),
+    ).resolves.toEqual({ collection_version: 1 });
 
     const secondScan = await scanTag(server, aliceAuth, "bob", "tag-bob");
     expect(secondScan.status).toBe(200);
@@ -111,6 +116,11 @@ describe("collection scan edge cases", () => {
         first_time_collected: false,
       },
     });
+    await expect(
+      server.db
+        .prepare("SELECT collection_version FROM users WHERE user_id = 'alice'")
+        .first<{ collection_version: number }>(),
+    ).resolves.toEqual({ collection_version: 1 });
   });
 
   it("normalizes string request fields before storing and comparing IDs", async () => {

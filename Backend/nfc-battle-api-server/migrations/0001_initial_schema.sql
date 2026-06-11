@@ -8,6 +8,8 @@ CREATE TABLE users (
   emoji_icon TEXT NOT NULL,
   bio TEXT NOT NULL DEFAULT '',
   pixel_avatar_base64 TEXT NOT NULL DEFAULT '',
+  profile_version INTEGER NOT NULL DEFAULT 1 CHECK (profile_version >= 0),
+  collection_version INTEGER NOT NULL DEFAULT 0 CHECK (collection_version >= 0),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 ) STRICT;
@@ -27,6 +29,16 @@ CREATE TABLE collections (
   CHECK (scanner_user_id <> collected_user_id)
 ) STRICT;
 
+CREATE TRIGGER bump_collection_version_after_insert
+AFTER INSERT ON collections
+BEGIN
+  UPDATE users
+  SET
+    collection_version = collection_version + 1,
+    updated_at = NEW.first_collected_at
+  WHERE user_id = NEW.scanner_user_id;
+END;
+
 CREATE TABLE phishing_events (
   event_id TEXT PRIMARY KEY,
   victim_user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -40,8 +52,9 @@ CREATE TABLE game_state (
   state TEXT NOT NULL CHECK (state IN ('OPEN', 'FREEZING', 'FROZEN')),
   freeze_id TEXT,
   freeze_started_at TEXT,
+  scoring_cutoff_at TEXT,
   frozen_at TEXT,
-  freeze_timeout_seconds INTEGER NOT NULL DEFAULT 300 CHECK (freeze_timeout_seconds > 0),
+  freeze_timeout_seconds INTEGER NOT NULL DEFAULT 30 CHECK (freeze_timeout_seconds > 0),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 ) STRICT;

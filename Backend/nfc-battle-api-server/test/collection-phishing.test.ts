@@ -6,7 +6,7 @@ describe("phishing event edge cases", () => {
     const server = await createTestServer();
 
     const response = await server.request(
-      "/collections/phishing",
+      "/collection/phishing",
       await jsonRequest("POST", { victim: "alice", attacker: "bob" }),
     );
 
@@ -29,7 +29,7 @@ describe("phishing event edge cases", () => {
       { victim: "alice", attacker: "bob", extra: "nope" },
     ]) {
       const response = await server.request(
-        "/collections/phishing",
+        "/collection/phishing",
         await jsonRequest("POST", body, aliceAuth),
       );
 
@@ -45,19 +45,19 @@ describe("phishing event edge cases", () => {
     const aliceAuth = await authHeaders("alice");
 
     const victimMismatch = await server.request(
-      "/collections/phishing",
+      "/collection/phishing",
       await jsonRequest("POST", { victim: "bob", attacker: "alice" }, aliceAuth),
     );
     expect(victimMismatch.status).toBe(400);
 
     const selfPhishing = await server.request(
-      "/collections/phishing",
+      "/collection/phishing",
       await jsonRequest("POST", { victim: "alice", attacker: "alice" }, aliceAuth),
     );
     expect(selfPhishing.status).toBe(400);
 
     const unknownAttacker = await server.request(
-      "/collections/phishing",
+      "/collection/phishing",
       await jsonRequest("POST", { victim: "alice", attacker: "bob" }, aliceAuth),
     );
     expect(unknownAttacker.status).toBe(400);
@@ -70,7 +70,7 @@ describe("phishing event edge cases", () => {
     await server.request("/users/me", { headers: bobAuth });
 
     const response = await server.request(
-      "/collections/phishing",
+      "/collection/phishing",
       await jsonRequest("POST", { victim: "alice", attacker: "bob" }, aliceAuth),
     );
 
