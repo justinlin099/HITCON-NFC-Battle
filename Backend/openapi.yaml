@@ -876,7 +876,7 @@ components:
           example: I love reverse engineering.
         pixel_avatar_base64:
           type: string
-          description: Base64-encoded pixel avatar image.
+          description: Base64-encoded 48x48 pixel avatar image.
           example: iVBORw0KGgoAAAANSU...
         profile_version:
           type: integer
@@ -992,6 +992,7 @@ components:
           example: Updated bio.
         pixel_avatar_base64:
           type: string
+          description: Base64-encoded 48x48 pixel avatar image.
           example: iVBORw0KGgo...
 
     GetUserProfileResponse:

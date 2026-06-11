@@ -12,7 +12,7 @@ A user's data contains:
 * user role
 * emoji icon
 * bio
-* pixel_avatar_base64
+* pixel_avatar_base64: a base64-encoded 48x48 pixel avatar image
 * NFC tag's physical ID
 * profile version
 * collection version
