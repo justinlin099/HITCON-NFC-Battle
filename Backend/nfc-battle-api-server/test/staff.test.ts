@@ -40,6 +40,7 @@ describe("staff scoreboard edge cases", () => {
       null,
       "nope",
       { scoring_cutoff_at: "not-a-date" },
+      { scoring_cutoff_at: "9999-01-01T00:00:00Z" },
       { scoring_cutoff_at: "2026-04-12T15:00:00Z", extra: true },
     ]) {
       const response = await server.request(

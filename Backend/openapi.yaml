@@ -611,9 +611,10 @@ paths:
 
         The request may include `scoring_cutoff_at`, which is the latest event
         timestamp that should count in the score snapshot. If omitted, the
-        server uses its current time. The server should include only collection
-        records and phishing records whose event timestamps are less than or
-        equal to `scoring_cutoff_at`.
+        server uses its current time. The value must not be later than the
+        server time when the freeze begins. The server should include only
+        collection records and phishing records whose event timestamps are less
+        than or equal to `scoring_cutoff_at`.
 
         A scoreboard that remains in `FREEZING` longer than `freeze_timeout` is
         stale. Stale partial results for that `freeze_id` must not be visible to
@@ -1371,7 +1372,8 @@ components:
           format: date-time
           description: |
             Latest event timestamp included in the score and prize snapshot. If
-            omitted, the server uses its current time.
+            omitted, the server uses its current time. Must not be later than
+            the server time when the freeze begins.
           example: '2026-04-12T15:00:00Z'
 
     FreezeScoreboardResponse:

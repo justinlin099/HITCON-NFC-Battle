@@ -123,7 +123,7 @@ This endpoint is for app bootstrap and recovery. Normal refresh should still use
 
 ## Near the End of the Conference
 
-When the conference is about to end, someone will make a request to `POST /staff/freeze_scoreboard` with a `STAFF_DANGER_TOKEN` to freeze the scoreboard. The request may include `scoring_cutoff_at` to specify the latest event timestamp that should count in the score snapshot. If `scoring_cutoff_at` is omitted, the server uses its current time. Then, the server will calculate the stamp prize and scoreboard prize.
+When the conference is about to end, someone will make a request to `POST /staff/freeze_scoreboard` with a `STAFF_DANGER_TOKEN` to freeze the scoreboard. The request may include `scoring_cutoff_at` to specify the latest event timestamp that should count in the score snapshot. If `scoring_cutoff_at` is omitted, the server uses its current time. `scoring_cutoff_at` must not be later than the server time when the freeze begins. Then, the server will calculate the stamp prize and scoreboard prize.
 
 The freeze operation should calculate the final scores and prize results once, using only collection records and phishing records whose event timestamps are less than or equal to `scoring_cutoff_at`, then store a per-user result snapshot. This snapshot should be used by `GET /scoreboard` and `GET /users/me/prize` while the scoreboard state is `FROZEN`; do not recalculate scoreboard or prize results on every lookup.
 

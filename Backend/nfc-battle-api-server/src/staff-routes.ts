@@ -42,6 +42,9 @@ staffRoutes.post("/freeze_scoreboard", async (c) => {
   const freezeId = newFreezeId();
   const startedAt = nowIso();
   const scoringCutoffAt = request.scoring_cutoff_at ?? startedAt;
+  if (scoringCutoffAt > startedAt) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
 
   if (!(await startScoreboardFreeze(c.env.DB, freezeId, startedAt, scoringCutoffAt))) {
     return errorResponse(c, 409, "SCOREBOARD_ALREADY_FROZEN", "Scoreboard is already frozen.");
