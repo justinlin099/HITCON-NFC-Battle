@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
-import { hasCollected } from "./collection-store";
+import { getCollection, hasCollected } from "./collection-store";
 import { hasOnlyKeys, isPlainObject, readJson } from "./request";
 import { errorResponse, success } from "./responses";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
@@ -126,15 +126,16 @@ users.post("/batch", async (c) => {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
+  const rowsById = await getUserRowsById(c.env.DB, request.users.map((item) => item.user_id));
+  const viewerCollection = new Set(await getCollection(c.env.DB, authUser.userId));
   const results = [];
   for (const item of request.users) {
-    const row = await getUserRow(c.env.DB, item.user_id);
+    const row = rowsById.get(item.user_id);
     if (!row) {
       return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
     }
 
-    const canViewFullProfile =
-      authUser.userId === row.user_id || (await hasCollected(c.env.DB, authUser.userId, row.user_id));
+    const canViewFullProfile = authUser.userId === row.user_id || viewerCollection.has(row.user_id);
     if (
       canViewFullProfile &&
       item.profile_version !== undefined &&
