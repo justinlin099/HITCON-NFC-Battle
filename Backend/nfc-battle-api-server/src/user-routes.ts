@@ -10,6 +10,7 @@ import {
   getFullProfile,
   getHydratedCollection,
   getUserRow,
+  getUserRowsById,
   getVisibleProfile,
   lazyInitializeUser,
   type ProfileUpdate,
@@ -101,9 +102,10 @@ users.get("/me/bootstrap", async (c) => {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
 
+  const rowsById = await getUserRowsById(c.env.DB, me.collection);
   const collectedUsers = [];
   for (const collectedUserId of me.collection) {
-    const row = await getUserRow(c.env.DB, collectedUserId);
+    const row = rowsById.get(collectedUserId);
     if (row) {
       collectedUsers.push(publicFullProfileFromRow(row));
     }
@@ -131,7 +133,10 @@ users.post("/batch", async (c) => {
       return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
     }
 
+    const canViewFullProfile =
+      authUser.userId === row.user_id || (await hasCollected(c.env.DB, authUser.userId, row.user_id));
     if (
+      canViewFullProfile &&
       item.profile_version !== undefined &&
       item.collection_version !== undefined &&
       row.profile_version === item.profile_version &&
@@ -147,7 +152,7 @@ users.post("/batch", async (c) => {
     results.push({
       user_id: row.user_id,
       unchanged: false,
-      data: await getVisibleProfile(c.env.DB, authUser.userId, row),
+      data: getVisibleProfile(row, canViewFullProfile),
     });
   }
 
@@ -173,7 +178,10 @@ users.get("/:user_id", async (c) => {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
+  const canViewFullProfile =
+    authUser.userId === row.user_id || (await hasCollected(c.env.DB, authUser.userId, row.user_id));
   if (
+    canViewFullProfile &&
     profileVersion !== undefined &&
     collectionVersion !== undefined &&
     row.profile_version === profileVersion &&
@@ -185,7 +193,7 @@ users.get("/:user_id", async (c) => {
     });
   }
 
-  return success(c, await getVisibleProfile(c.env.DB, authUser.userId, row));
+  return success(c, getVisibleProfile(row, canViewFullProfile));
 });
 
 users.get("/:user_id/collection", async (c) => {

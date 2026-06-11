@@ -27,6 +27,48 @@ describe("user profile behavior", () => {
       },
     });
 
+    const limitedBobWithMatchingVersions = await server.request(
+      "/users/bob?profile_version=1&collection_version=0",
+      { headers: aliceAuth },
+    );
+    expect(limitedBobWithMatchingVersions.status).toBe(200);
+    await expect(readJson(limitedBobWithMatchingVersions)).resolves.toEqual({
+      status: "success",
+      data: {
+        user_id: "bob",
+        display_name: "Player_bob",
+        emoji_icon: "🙂",
+      },
+    });
+
+    const limitedBatchWithMatchingVersions = await server.request(
+      "/users/batch",
+      await jsonRequest(
+        "POST",
+        {
+          users: [{ user_id: "bob", profile_version: 1, collection_version: 0 }],
+        },
+        aliceAuth,
+      ),
+    );
+    expect(limitedBatchWithMatchingVersions.status).toBe(200);
+    await expect(readJson(limitedBatchWithMatchingVersions)).resolves.toEqual({
+      status: "success",
+      data: {
+        results: [
+          {
+            user_id: "bob",
+            unchanged: false,
+            data: {
+              user_id: "bob",
+              display_name: "Player_bob",
+              emoji_icon: "🙂",
+            },
+          },
+        ],
+      },
+    });
+
     const bobPair = await server.request(
       "/tags/pair",
       await jsonRequest("POST", { physical_id: "tag-bob" }, bobAuth),

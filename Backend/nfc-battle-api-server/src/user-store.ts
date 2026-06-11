@@ -1,5 +1,5 @@
 import { nowIso } from "./ids";
-import { getCollection, hasCollected } from "./collection-store";
+import { getCollection } from "./collection-store";
 import type { UserRole } from "./types";
 
 const MAX_USER_ROW_BATCH_SIZE = 100;
@@ -77,7 +77,7 @@ export async function getUserRow(db: D1Database, userId: string) {
     .first<UserRow>();
 }
 
-async function getUserRowsById(db: D1Database, userIds: string[]) {
+export async function getUserRowsById(db: D1Database, userIds: string[]) {
   const rowsById = new Map<string, UserRow>();
   for (let offset = 0; offset < userIds.length; offset += MAX_USER_ROW_BATCH_SIZE) {
     const chunk = userIds.slice(offset, offset + MAX_USER_ROW_BATCH_SIZE);
@@ -153,11 +153,8 @@ export function partialProfileFromRow(row: UserRow) {
   };
 }
 
-export async function getVisibleProfile(db: D1Database, viewerUserId: string, row: UserRow) {
-  return visibleProfileFromRow(
-    row,
-    viewerUserId === row.user_id || (await hasCollected(db, viewerUserId, row.user_id)),
-  );
+export function getVisibleProfile(row: UserRow, canViewFullProfile: boolean) {
+  return canViewFullProfile ? publicFullProfileFromRow(row) : partialProfileFromRow(row);
 }
 
 export async function getHydratedCollection(db: D1Database, viewerUserId: string, owner: UserRow) {
@@ -170,7 +167,7 @@ export async function getHydratedCollection(db: D1Database, viewerUserId: string
     const row = rowsById.get(collectedUserId);
     if (row) {
       users.push(
-        visibleProfileFromRow(
+        getVisibleProfile(
           row,
           viewerUserId === row.user_id || viewerCollection.has(row.user_id),
         ),
@@ -183,10 +180,6 @@ export async function getHydratedCollection(db: D1Database, viewerUserId: string
     collection_version: owner.collection_version,
     users,
   };
-}
-
-function visibleProfileFromRow(row: UserRow, canViewFullProfile: boolean) {
-  return canViewFullProfile ? publicFullProfileFromRow(row) : partialProfileFromRow(row);
 }
 
 export async function updateUserProfile(db: D1Database, userId: string, update: ProfileUpdate) {
