@@ -1,6 +1,7 @@
 import { check } from "k6";
 import crypto from "k6/crypto";
 import encoding from "k6/encoding";
+import exec from "k6/execution";
 import http from "k6/http";
 
 const BASE_URL = (__ENV.BASE_URL || "https://nfc-battle-staging.hitcon2026.online").replace(
@@ -10,20 +11,21 @@ const BASE_URL = (__ENV.BASE_URL || "https://nfc-battle-staging.hitcon2026.onlin
 const JWT_SECRET = __ENV.JWT_SECRET || "";
 const JWT_ISSUER = __ENV.JWT_ISSUER || "";
 const JWT_AUDIENCE = __ENV.JWT_AUDIENCE || "";
-const LAZY_USER_PREFIX = __ENV.LAZY_USER_PREFIX || `k6_lazy_${Date.now()}`;
-const LAZY_RUN_ID = __ENV.LAZY_RUN_ID || `${Date.now()}`;
-const LAZY_RATE = parsePositiveInteger(__ENV.LAZY_RATE, 5);
-const LAZY_DURATION = __ENV.LAZY_DURATION || "30s";
+const PAIR_USER_PREFIX = __ENV.PAIR_USER_PREFIX || "k6_pair_user";
+const PAIR_TAG_PREFIX = __ENV.PAIR_TAG_PREFIX || "04:A7";
+const PAIR_RUN_ID = __ENV.PAIR_RUN_ID || `${Date.now()}`;
+const PAIR_RATE = parsePositiveInteger(__ENV.PAIR_RATE, 10);
+const PAIR_DURATION = __ENV.PAIR_DURATION || "30s";
 
 export const options = {
   scenarios: {
-    lazy_initialization: {
+    pair_tags: {
       executor: "constant-arrival-rate",
-      rate: LAZY_RATE,
+      rate: PAIR_RATE,
       timeUnit: "1s",
-      duration: LAZY_DURATION,
-      preAllocatedVUs: parsePositiveInteger(__ENV.LAZY_PRE_ALLOCATED_VUS, 10),
-      maxVUs: parsePositiveInteger(__ENV.LAZY_MAX_VUS, 50),
+      duration: PAIR_DURATION,
+      preAllocatedVUs: parsePositiveInteger(__ENV.PAIR_PRE_ALLOCATED_VUS, 10),
+      maxVUs: parsePositiveInteger(__ENV.PAIR_MAX_VUS, 50),
     },
   },
   thresholds: {
@@ -39,29 +41,37 @@ export function setup() {
   requireEnv("JWT_AUDIENCE", JWT_AUDIENCE);
 
   return {
-    runId: LAZY_RUN_ID,
-    userPrefix: LAZY_USER_PREFIX,
+    runId: PAIR_RUN_ID,
   };
 }
 
 export default function (data) {
-  const userId = `${data.userPrefix}_${data.runId}_${__VU}_${__ITER}`;
-  const response = http.get(`${BASE_URL}/users/me`, {
-    headers: {
-      Authorization: `Bearer ${signJwt(userId)}`,
+  const sequence = exec.scenario.iterationInTest + 1;
+  const userId = `${PAIR_USER_PREFIX}_${data.runId}_${sequence}`;
+  const physicalId = physicalIdFor(data.runId, sequence);
+  const response = http.post(
+    `${BASE_URL}/tags/pair`,
+    JSON.stringify({
+      physical_id: physicalId,
+    }),
+    {
+      headers: {
+        Authorization: `Bearer ${signJwt(userId)}`,
+        "Content-Type": "application/json",
+      },
     },
-  });
+  );
 
   check(response, {
-    "GET /users/me returns 200": (res) => res.status === 200,
-    "response belongs to generated user": (res) => {
+    "POST /tags/pair returns 200": (res) => res.status === 200,
+    "tag paired successfully": (res) => {
       const body = res.json();
-      return body?.status === "success" && body?.data?.user_id === userId;
+      return body?.status === "success";
     },
   });
 }
 
-function signJwt(userId) {
+function signJwt(userId, role) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const header = {
     alg: "HS256",
@@ -72,7 +82,7 @@ function signJwt(userId) {
     exp: nowSeconds + parsePositiveInteger(__ENV.JWT_TTL_SECONDS, 3600),
     iss: JWT_ISSUER,
     aud: JWT_AUDIENCE,
-    role: __ENV.LAZY_USER_ROLE || "ATTENDEE",
+    role: role ?? __ENV.PAIR_USER_ROLE ?? "ATTENDEE",
   };
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
@@ -89,6 +99,12 @@ function base64UrlEncode(value) {
 function parsePositiveInteger(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function physicalIdFor(runId, sequence) {
+  const hash = crypto.sha256(`${PAIR_TAG_PREFIX}:${runId}:${sequence}`, "hex");
+  const suffix = hash.slice(0, 10).match(/.{1,2}/g).join(":").toUpperCase();
+  return `${PAIR_TAG_PREFIX}:${suffix}`;
 }
 
 function requireEnv(name, value) {

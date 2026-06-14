@@ -2,7 +2,10 @@
 
 These scripts are manual load tests for staging. They are not part of `npm test`, and they should not be run against production without an explicit test window and quota budget.
 
-Each file in this directory is one scenario. `lazy-initialization.js` is the first scenario; add more scenario files here as backend load-test coverage grows.
+Each file in this directory is one scenario. Current scenarios:
+
+- `lazy-initialization.js`: first-time `GET /users/me`.
+- `pair-tags.js`: first-time `POST /tags/pair` with generated users and generated physical tag IDs.
 
 ## Deterministic Fixture
 
@@ -54,7 +57,7 @@ cp scripts/k6/.env.example scripts/k6/.env
 Run with Docker from `Backend/nfc-battle-api-server`:
 
 ```txt
-npm run load:k6
+npm run load:k6:lazy-init
 ```
 
 `scripts/k6/.env` is ignored by Git. Do not commit real `JWT_SECRET` or `STAFF_DANGER_TOKEN` values.
@@ -79,7 +82,7 @@ If k6 is installed locally, run the local-binary shortcut:
 set -a
 source scripts/k6/.env
 set +a
-npm run load:k6:local
+npm run load:k6:lazy-init:local
 ```
 
 Equivalent local direct command:
@@ -95,13 +98,46 @@ BASE_URL="https://nfc-battle-staging.hitcon2026.online" \
 JWT_SECRET="<staging JWT_SECRET>" \
 JWT_ISSUER="hitcon-2026-staging" \
 JWT_AUDIENCE="nfc-battle-api-server-staging" \
-RATE=10 \
-DURATION=30s \
-USER_PREFIX="k6_lazy_20260614_a" \
-npm run load:k6
+LAZY_RATE=10 \
+LAZY_DURATION=30s \
+LAZY_USER_PREFIX="k6_lazy_20260614_a" \
+npm run load:k6:lazy-init
 ```
 
-`USER_PREFIX` is a stable namespace. `RUN_ID` is appended to generated user IDs; if it is omitted, the script generates a timestamp-based run ID so repeated runs still create fresh users. Set a fixed `RUN_ID` only when you intentionally want a repeatable ID set.
+`LAZY_USER_PREFIX` is a stable namespace. `LAZY_RUN_ID` is appended to generated user IDs; if it is omitted, the script generates a timestamp-based run ID so repeated runs still create fresh users. Set a fixed `LAZY_RUN_ID` only when you intentionally want a repeatable ID set.
+
+## Pair Tags
+
+`pair-tags.js` tests first-time `POST /tags/pair`. It generates a fresh JWT subject and a fresh physical tag ID for every iteration, so repeated runs behave like new users pairing new tags.
+
+Run it from `Backend/nfc-battle-api-server`:
+
+```txt
+npm run load:k6:pair-tags
+```
+
+The default pair-tags scenario is:
+
+- 10 users pair with a tag per second
+- 30 seconds
+- about 300 tag-pairing requests total
+
+Equivalent Docker command:
+
+```txt
+docker run --rm --env-file scripts/k6/.env -v "$PWD:/work" -w /work grafana/k6 run scripts/k6/pair-tags.js
+```
+
+If k6 is installed locally:
+
+```txt
+set -a
+source scripts/k6/.env
+set +a
+npm run load:k6:pair-tags:local
+```
+
+`PAIR_USER_PREFIX` and `PAIR_TAG_PREFIX` are stable namespaces. `PAIR_RUN_ID` is appended to generated user IDs and used to derive generated physical tag IDs; if it is omitted, the script generates a timestamp-based run ID. Reusing the same `PAIR_RUN_ID` will intentionally reuse the same users and physical tag IDs, so later runs will return `TAG_ALREADY_PAIRED`.
 
 ## Database Shape
 
