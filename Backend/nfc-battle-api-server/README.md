@@ -137,7 +137,7 @@ npm run deploy:production
 
 ## GitHub Deploy
 
-Pushes to `main` that touch the backend automatically run **Backend Staging Deploy**. The staging workflow runs tests, typecheck, remote staging D1 migrations, syncs staging Worker secrets from GitHub environment secrets, and deploys the staging Worker. Pull requests run CI only; shared staging is not updated from unmerged PR code.
+Backend pull requests and backend pushes run **Backend CI**. Pushes to `main` that touch the backend also run **Backend Staging Deploy**. The staging workflow runs tests, typecheck, remote staging D1 migrations, syncs staging Worker secrets from GitHub environment secrets, and deploys the staging Worker. Shared staging is not updated from unmerged PR code.
 
 The manual **Backend Deploy** workflow can deploy either `staging` or `production`. It expects these repository-level GitHub Actions secrets:
 
@@ -148,7 +148,7 @@ CLOUDFLARE_API_TOKEN
 
 `CLOUDFLARE_ACCOUNT_ID` can be copied from the Cloudflare dashboard URL for the HITCON Events account. `CLOUDFLARE_API_TOKEN` can be generated from Cloudflare **User API Tokens** using the **Edit Cloudflare Workers** template, then adding account-level D1 edit permission so the workflow can apply remote D1 migrations.
 
-Create GitHub Environments named `staging` and `production`, then add these secrets to each environment. GitHub is the source of truth for these Worker runtime secrets; deploy workflows sync them to Cloudflare before deploying:
+Create GitHub Environments named `staging` and `production`, then add these secrets to each environment. GitHub deploy workflows read these environment secrets and sync them to Cloudflare before deploying:
 
 ```txt
 JWT_SECRET
