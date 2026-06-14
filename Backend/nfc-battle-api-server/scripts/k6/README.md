@@ -15,10 +15,10 @@ Generate the full conference-sized fixture:
 npm run load:fixture:generate
 ```
 
-The default fixture contains 1000 attendees, 100 staff, 20 sponsors, and 20 community users. It writes generated files under `scripts/k6/fixtures/`, which is ignored by Git:
+The default fixture contains 1000 attendees, 100 staff, 20 sponsors, 20 community users, and one paired NFC tag per user. It writes generated files under `scripts/k6/fixtures/`, which is ignored by Git:
 
-- `full.json`: manifest for k6 scenarios. Future scenarios should read this file and choose how many users or tags they need.
-- `seed-full.sql`: deterministic SQL seed. It deletes only fixture users matching `FIXTURE_USER_PREFIX` before inserting the generated users.
+- `full.json`: manifest for k6 scenarios. Future scenarios should read this file and choose how many users or paired tags they need.
+- `seed-full.sql`: deterministic SQL seed. It deletes only fixture users matching `FIXTURE_USER_PREFIX`, then inserts generated users and paired NFC tags.
 
 Override counts when you want a smaller fixture:
 
@@ -26,7 +26,7 @@ Override counts when you want a smaller fixture:
 ATTENDEES=50 STAFF=5 SPONSORS=2 COMMUNITIES=2 npm run load:fixture:generate
 ```
 
-The tag IDs in `full.json` are intentionally not inserted into `nfc_tags`. They are available physical IDs for pairing scenarios such as `POST /tags/pair`.
+The tag IDs in `full.json` are inserted into `nfc_tags` by the seed SQL. This fixture is intended for in-conference scenarios where users already have paired tags, such as scan, collection, bootstrap, batch, and scoreboard traffic.
 
 Apply the generated seed locally:
 
@@ -40,7 +40,7 @@ Apply the generated seed to staging:
 npm run load:fixture:seed:staging
 ```
 
-Seed commands mutate the target D1 database. They delete only fixture users matching `FIXTURE_USER_PREFIX`, then insert the generated users. The generated SQL avoids explicit `BEGIN TRANSACTION`/`COMMIT` statements because remote D1 execution rejects transaction statements in uploaded SQL. User inserts are chunked so each SQL statement stays small enough for remote D1 execution. Future k6 scenarios should read `full.json` and use scenario-specific environment variables to decide how many fixture users or tags to exercise.
+Seed commands mutate the target D1 database. They delete only fixture users matching `FIXTURE_USER_PREFIX`, then insert the generated users and paired NFC tags. The generated SQL avoids explicit `BEGIN TRANSACTION`/`COMMIT` statements because remote D1 execution rejects transaction statements in uploaded SQL. Inserts are chunked so each SQL statement stays small enough for remote D1 execution. Future k6 scenarios should read `full.json` and use scenario-specific environment variables to decide how many fixture users or tags to exercise.
 
 ## Lazy Initialization
 

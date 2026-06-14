@@ -91,6 +91,11 @@ function generateSeedSql() {
     lines.push(...generateUserInsertLines(chunk), "");
   }
 
+  for (let offset = 0; offset < tags.length; offset += SQL_INSERT_CHUNK_SIZE) {
+    const chunk = tags.slice(offset, offset + SQL_INSERT_CHUNK_SIZE);
+    lines.push(...generateTagInsertLines(chunk), "");
+  }
+
   lines.push("");
   return lines.join("\n");
 }
@@ -119,6 +124,28 @@ function generateUserInsertLines(chunk) {
       )}, ${sqlString(user.emoji_icon)}, ${sqlString(user.bio)}, ${sqlString(
         user.pixel_avatar_base64,
       )}, ${user.profile_version}, ${user.collection_version}, ${sqlString(
+        generatedAt,
+      )}, ${sqlString(generatedAt)})${suffix}`,
+    );
+  });
+
+  return lines;
+}
+
+function generateTagInsertLines(chunk) {
+  const lines = [
+    "INSERT INTO nfc_tags (",
+    "  physical_id,",
+    "  user_id,",
+    "  paired_at,",
+    "  locked_at",
+    ") VALUES",
+  ];
+
+  chunk.forEach((tag, index) => {
+    const suffix = index === chunk.length - 1 ? ";" : ",";
+    lines.push(
+      `  (${sqlString(tag.physical_id)}, ${sqlString(tag.user_id)}, ${sqlString(
         generatedAt,
       )}, ${sqlString(generatedAt)})${suffix}`,
     );
