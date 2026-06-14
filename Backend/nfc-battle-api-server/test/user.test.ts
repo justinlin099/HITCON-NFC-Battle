@@ -170,6 +170,26 @@ describe("user profile behavior", () => {
       },
     });
 
+    const noOpUpdate = await server.request(
+      "/users/me",
+      await jsonRequest(
+        "PATCH",
+        {
+          display_name: "Player_alice",
+          emoji_icon: "🙂",
+          bio: "",
+          pixel_avatar_base64: "",
+        },
+        aliceAuth,
+      ),
+    );
+    expect(noOpUpdate.status).toBe(200);
+    await expect(readJson(noOpUpdate)).resolves.toMatchObject({
+      data: {
+        profile_version: 1,
+      },
+    });
+
     const invalidUpdate = await server.request(
       "/users/me",
       await jsonRequest("PATCH", { display_name: "Alice", unknown_field: "nope" }, aliceAuth),

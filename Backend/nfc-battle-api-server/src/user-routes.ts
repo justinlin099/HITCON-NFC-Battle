@@ -44,7 +44,6 @@ users.get("/me", async (c) => {
 
 users.patch("/me", async (c) => {
   const authUser = c.get("authUser");
-  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
   const body = await readJson(c);
   const update = validateProfileUpdate(body);
@@ -95,7 +94,6 @@ users.get("/me/prize", async (c) => {
 
 users.get("/me/bootstrap", async (c) => {
   const authUser = c.get("authUser");
-  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
   const me = await getFullProfile(c.env.DB, authUser.userId);
   if (!me) {
@@ -119,7 +117,6 @@ users.get("/me/bootstrap", async (c) => {
 
 users.post("/batch", async (c) => {
   const authUser = c.get("authUser");
-  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
   const request = validateBatchGetUsersRequest(await readJson(c));
   if (!request) {

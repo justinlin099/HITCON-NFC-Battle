@@ -39,7 +39,7 @@ The user will receive an email, containing a link like `https://game.hitcon2026.
 
 After downloading the app, the user will somehow setup the app, and somehow the app will obtain their JWT token.
 
-The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. The user can use `PATCH /users/me` to update their profile before the conference starts.
+The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. `GET /users/me` is the only endpoint that lazy-initializes a user profile, so the app should call it before pairing tags, scanning, recording phishing events, or using cache/bootstrap APIs that expect the authenticated user row to already exist. The user can use `PATCH /users/me` to update their profile before the conference starts.
 
 ## When Conference Starts, at Reception Desk
 

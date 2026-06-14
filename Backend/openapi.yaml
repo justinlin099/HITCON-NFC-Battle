@@ -36,6 +36,11 @@ info:
     the user row. `profile_version` changes when profile fields change.
     `collection_version` changes only when that user's own collection changes.
 
+    `GET /users/me` is the only endpoint that lazy-initializes a user profile.
+    The app should call it before pairing tags, scanning, recording phishing
+    events, or using cache/bootstrap APIs that expect the authenticated user row
+    to already exist.
+
     Staff APIs under `/staff/*` require a conference JWT whose `role` claim is
     `STAFF`. Scoreboard status, freeze, and resume APIs additionally require
     `STAFF_DANGER_TOKEN`.
@@ -142,7 +147,9 @@ paths:
       description: |
         Partially updates the authenticated user's profile. The user may send
         only the fields they want to change. Updatable fields are
-        `display_name`, `emoji_icon`, `bio`, and `pixel_avatar_base64`.
+        `display_name`, `emoji_icon`, `bio`, and `pixel_avatar_base64`. If the
+        submitted fields are identical to the stored profile, the server returns
+        the current profile without incrementing `profile_version`.
       requestBody:
         required: true
         content:
@@ -166,6 +173,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
   /users/me/prize:
     get:
       tags: [Users]
@@ -208,7 +217,8 @@ paths:
         Returns the authenticated user's full profile plus full profiles for all
         users they have collected. This endpoint is intended for app recovery or
         fresh installs, not normal incremental refresh. Collected user profiles
-        do not include nested collection lists.
+        do not include nested collection lists. The authenticated user must
+        already be initialized with `GET /users/me`.
       responses:
         '200':
           description: Bootstrap data loaded.
@@ -221,6 +231,8 @@ paths:
                   $ref: '#/components/examples/GetMyBootstrapResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
   /users/batch:
     post:
       tags: [Users]
@@ -380,7 +392,8 @@ paths:
       summary: Pair a physical NFC tag to my profile
       description: |
         Called at the reception desk after the user picks up a tag and scans it
-        with the app. The app also writes
+        with the app. The user must already be initialized with `GET /users/me`
+        before pairing. The app also writes
         `https://game.hitcon2026.online/b?u={user_id}` to the tag, then locks
         the tag so it is read-only and cannot be accidentally overwritten.
 
@@ -413,6 +426,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
         '409':
           $ref: '#/components/responses/TagAlreadyPairedError'
   /collection/scan:

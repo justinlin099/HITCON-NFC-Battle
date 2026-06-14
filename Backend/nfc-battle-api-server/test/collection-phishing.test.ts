@@ -67,6 +67,7 @@ describe("phishing event edge cases", () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
     const bobAuth = await authHeaders("bob");
+    await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
 
     const response = await server.request(

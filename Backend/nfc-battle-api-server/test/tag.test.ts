@@ -35,10 +35,24 @@ describe("tag pairing edge cases", () => {
     }
   });
 
+  it("rejects pair requests for users that have not been initialized", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+
+    const response = await pairTag(server, aliceAuth, "tag-alice");
+
+    expect(response.status).toBe(404);
+    await expect(readJson(response)).resolves.toMatchObject({
+      code: "USER_NOT_FOUND",
+    });
+  });
+
   it("rejects pairing the same tag or pairing a user twice", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
     const bobAuth = await authHeaders("bob");
+    await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
 
     expect((await pairTag(server, aliceAuth, "tag-alice")).status).toBe(200);
 

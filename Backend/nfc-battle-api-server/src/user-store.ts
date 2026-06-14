@@ -198,6 +198,10 @@ export async function updateUserProfile(db: D1Database, userId: string, update: 
     nextBio !== current.bio ||
     nextPixelAvatar !== current.pixel_avatar_base64;
 
+  if (!profileChanged) {
+    return;
+  }
+
   await db
     .prepare(
       `
@@ -207,8 +211,8 @@ export async function updateUserProfile(db: D1Database, userId: string, update: 
         emoji_icon = ?3,
         bio = ?4,
         pixel_avatar_base64 = ?5,
-        profile_version = profile_version + ?6,
-        updated_at = ?7
+        profile_version = profile_version + 1,
+        updated_at = ?6
       WHERE user_id = ?1
       `,
     )
@@ -218,7 +222,6 @@ export async function updateUserProfile(db: D1Database, userId: string, update: 
       nextEmojiIcon,
       nextBio,
       nextPixelAvatar,
-      profileChanged ? 1 : 0,
       nowIso(),
     )
     .run();

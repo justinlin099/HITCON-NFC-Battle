@@ -57,6 +57,7 @@ describe("mission and scoreboard edge cases", () => {
 
     await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
+    await server.request("/users/me", { headers: carolAuth });
     expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
 
     await scanTag(server, bobAuth, "carol", "tag-carol");
@@ -103,6 +104,9 @@ describe("mission and scoreboard edge cases", () => {
     const cutoff = "2026-04-12T15:00:00.000Z";
 
     await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
+    await server.request("/users/me", { headers: carolAuth });
+    await server.request("/users/me", { headers: daveAuth });
     expect((await pairTag(server, bobAuth, "tag-bob")).status).toBe(200);
     expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
     expect((await pairTag(server, daveAuth, "tag-dave")).status).toBe(200);
@@ -207,6 +211,7 @@ describe("mission and scoreboard edge cases", () => {
     for (let index = 0; index < 10; index += 1) {
       const sponsorId = `post-freeze-sponsor-${index}`;
       const sponsorAuth = await authHeaders(sponsorId, "SPONSOR");
+      await server.request("/users/me", { headers: sponsorAuth });
       expect((await pairTag(server, sponsorAuth, `tag-${sponsorId}`)).status).toBe(200);
       expect((await scanTag(server, aliceAuth, sponsorId, `tag-${sponsorId}`)).status).toBe(200);
     }

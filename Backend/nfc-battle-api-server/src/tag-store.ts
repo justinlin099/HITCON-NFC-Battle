@@ -4,6 +4,10 @@ interface TagOwnerRow {
   user_id: string;
 }
 
+interface UserTagRow {
+  physical_id: string;
+}
+
 export interface ReplaceUserTagResult {
   replaced: boolean;
   conflict: boolean;
@@ -37,6 +41,19 @@ export async function getTagOwner(db: D1Database, physicalId: string) {
     )
     .bind(physicalId)
     .first<TagOwnerRow>();
+}
+
+export async function getUserTag(db: D1Database, userId: string) {
+  return db
+    .prepare(
+      `
+      SELECT physical_id
+      FROM nfc_tags
+      WHERE user_id = ?1
+      `,
+    )
+    .bind(userId)
+    .first<UserTagRow>();
 }
 
 export async function replaceUserTag(

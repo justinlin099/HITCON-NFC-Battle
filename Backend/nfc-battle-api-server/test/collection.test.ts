@@ -70,6 +70,7 @@ describe("collection scan edge cases", () => {
     const bobAuth = await authHeaders("bob");
     const carolAuth = await authHeaders("carol");
 
+    await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
     await server.request("/users/me", { headers: carolAuth });
     expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
@@ -92,6 +93,8 @@ describe("collection scan edge cases", () => {
     const aliceAuth = await authHeaders("alice");
     const bobAuth = await authHeaders("bob");
 
+    await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
     expect((await pairTag(server, bobAuth, "tag-bob")).status).toBe(200);
 
     const firstScan = await scanTag(server, aliceAuth, "bob", "tag-bob");
@@ -128,6 +131,8 @@ describe("collection scan edge cases", () => {
     const aliceAuth = await authHeaders("alice");
     const bobAuth = await authHeaders("bob");
 
+    await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
     const pairResponse = await server.request(
       "/tags/pair",
       await jsonRequest("POST", { physical_id: " tag-bob " }, bobAuth),

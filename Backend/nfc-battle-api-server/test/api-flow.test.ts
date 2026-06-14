@@ -29,6 +29,9 @@ describe("NFC Battle API flow", () => {
       },
     });
 
+    await server.request("/users/me", { headers: sponsorAuth });
+    await server.request("/users/me", { headers: communityAuth });
+
     const patchResponse = await server.request(
       "/users/me",
       await jsonRequest("PATCH", { display_name: "Alice", emoji_icon: "🙂" }, aliceAuth),
