@@ -99,6 +99,7 @@ describe("mission and scoreboard edge cases", () => {
     const bobAuth = await authHeaders("bob");
     const carolAuth = await authHeaders("carol");
     const daveAuth = await authHeaders("dave");
+    const staffDanger = await staffDangerHeaders();
     const cutoff = "2026-04-12T15:00:00.000Z";
 
     await server.request("/users/me", { headers: aliceAuth });
@@ -142,7 +143,7 @@ describe("mission and scoreboard edge cases", () => {
 
     const freeze = await server.request(
       "/staff/freeze_scoreboard",
-      await jsonRequest("POST", { scoring_cutoff_at: cutoff }, staffHeaders()),
+      await jsonRequest("POST", { scoring_cutoff_at: cutoff }, staffDanger),
     );
     expect(freeze.status).toBe(200);
     const freezeBody = await readJson(freeze) as {
@@ -276,3 +277,10 @@ describe("mission and scoreboard edge cases", () => {
     });
   });
 });
+
+async function staffDangerHeaders() {
+  return {
+    ...(await authHeaders("staff", "STAFF")),
+    ...staffHeaders(),
+  };
+}

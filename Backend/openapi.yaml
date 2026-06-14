@@ -36,7 +36,9 @@ info:
     the user row. `profile_version` changes when profile fields change.
     `collection_version` changes only when that user's own collection changes.
 
-    Staff scoreboard freeze/resume APIs use `STAFF_DANGER_TOKEN`.
+    Staff APIs under `/staff/*` require a conference JWT whose `role` claim is
+    `STAFF`. Scoreboard status, freeze, and resume APIs additionally require
+    `STAFF_DANGER_TOKEN`.
     Freeze calculates and stores a per-user score and prize snapshot using
     `scoring_cutoff_at` as the latest event timestamp that counts toward the
     snapshot. Prize lookups read that stored snapshot instead of recalculating
@@ -67,6 +69,7 @@ info:
     - `POST /collection/phishing`
     - `GET /missions/stamp`
     - `GET /staff/scoreboard_status`
+    - `POST /staff/replace_user_tag`
 
     The following endpoints are available only in `FROZEN`:
     - `GET /users/me/prize`; rejected in `OPEN` and `FREEZING` with
@@ -582,11 +585,13 @@ paths:
       summary: Get scoreboard freeze status
       description: |
         Staff-only status endpoint for inspecting the scoreboard state before
-        freeze or resume operations. Returns the current state, current
-        `freeze_id`, freeze timestamps, `scoring_cutoff_at`, configured freeze
-        timeout, and whether a `FREEZING` state is stale.
+        freeze or resume operations. Requires a staff JWT plus
+        `STAFF_DANGER_TOKEN`. Returns the current state, current `freeze_id`,
+        freeze timestamps, `scoring_cutoff_at`, configured freeze timeout, and
+        whether a `FREEZING` state is stale.
       security:
-        - staffDangerToken: []
+        - bearerAuth: []
+          staffDangerToken: []
       responses:
         '200':
           description: Scoreboard status loaded.
@@ -598,16 +603,77 @@ paths:
                 status:
                   $ref: '#/components/examples/GetScoreboardStatusResponse'
         '401':
-          $ref: '#/components/responses/StaffDangerTokenError'
+          description: Missing or invalid JWT, or missing or invalid `STAFF_DANGER_TOKEN`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unauthorized:
+                  $ref: '#/components/examples/UnauthorizedError'
+                staff_danger_token:
+                  $ref: '#/components/examples/StaffDangerTokenError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+  /staff/replace_user_tag:
+    post:
+      tags: [Staff]
+      summary: Replace a user's paired NFC tag
+      description: |
+        Staff-only endpoint used when a user's NFC tag is broken or replaced.
+        Requires a conference JWT whose `role` claim is `STAFF`. Replaces the
+        server-side `nfc_tags` mapping so `new_physical_id` belongs to
+        `user_id`. Staff or the app should write
+        `https://game.hitcon2026.online/b?u={user_id}` to the new tag and lock
+        it before giving it to the user.
+
+        The `nfc_tags` table is the source of truth for the user's paired
+        physical tag ID. After this replacement, the old physical tag ID immediately
+        stops passing `POST /collection/scan`. This operation does not change
+        `profile_version` or `collection_version`. `GET /users/me` and
+        `GET /users/me/bootstrap` return the new physical tag ID.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceUserTagRequest'
+            examples:
+              replace:
+                $ref: '#/components/examples/ReplaceUserTagRequest'
+      responses:
+        '200':
+          description: User tag replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              examples:
+                replaced:
+                  value:
+                    status: success
+                    message: User tag replaced successfully.
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
+        '409':
+          $ref: '#/components/responses/TagAlreadyPairedError'
   /staff/freeze_scoreboard:
     post:
       tags: [Staff]
       summary: Freeze scoreboard and calculate prizes
       description: |
-        Freezes the scoreboard near the end of the conference. The server should
-        atomically transition the scoreboard from `OPEN` to `FREEZING`, calculate
-        final scores and stored prize results for a new `freeze_id`, then
-        transition to `FROZEN`.
+        Freezes the scoreboard near the end of the conference. Requires a staff
+        JWT plus `STAFF_DANGER_TOKEN`. The server should atomically transition
+        the scoreboard from `OPEN` to `FREEZING`, calculate final scores and
+        stored prize results for a new `freeze_id`, then transition to `FROZEN`.
 
         This endpoint is accepted only while the scoreboard is `OPEN`. A
         successful freeze creates a score and prize snapshot, but it does not
@@ -631,7 +697,8 @@ paths:
         Prize results are snapshot data and should not be recalculated on every
         `GET /users/me/prize` request.
       security:
-        - staffDangerToken: []
+        - bearerAuth: []
+          staffDangerToken: []
       requestBody:
         required: false
         content:
@@ -652,7 +719,18 @@ paths:
                 frozen:
                   $ref: '#/components/examples/FreezeScoreboardResponse'
         '401':
-          $ref: '#/components/responses/StaffDangerTokenError'
+          description: Missing or invalid JWT, or missing or invalid `STAFF_DANGER_TOKEN`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unauthorized:
+                  $ref: '#/components/examples/UnauthorizedError'
+                staff_danger_token:
+                  $ref: '#/components/examples/StaffDangerTokenError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
         '409':
           $ref: '#/components/responses/ScoreboardAlreadyFrozenError'
   /staff/resume_scoreboard:
@@ -660,15 +738,17 @@ paths:
       tags: [Staff]
       summary: Resume an accidentally frozen scoreboard
       description: |
-        Resumes the scoreboard after an accidental freeze. The server should
-        transition `FROZEN` back to `OPEN` and invalidate the stored result
-        snapshot for the current `freeze_id`.
+        Resumes the scoreboard after an accidental freeze. Requires a staff JWT
+        plus `STAFF_DANGER_TOKEN`. The server should transition `FROZEN` back
+        to `OPEN` and invalidate the stored result snapshot for the current
+        `freeze_id`.
 
         This endpoint may also recover a stale `FREEZING` state by changing it
         back to `OPEN` and invalidating partial results for the stale
         `freeze_id`. It is rejected in `OPEN` and non-stale `FREEZING`.
       security:
-        - staffDangerToken: []
+        - bearerAuth: []
+          staffDangerToken: []
       responses:
         '200':
           description: Scoreboard resumed.
@@ -682,7 +762,18 @@ paths:
                     status: success
                     message: Scoreboard resumed.
         '401':
-          $ref: '#/components/responses/StaffDangerTokenError'
+          description: Missing or invalid JWT, or missing or invalid `STAFF_DANGER_TOKEN`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unauthorized:
+                  $ref: '#/components/examples/UnauthorizedError'
+                staff_danger_token:
+                  $ref: '#/components/examples/StaffDangerTokenError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
         '409':
           $ref: '#/components/responses/ScoreboardNotFrozenError'
 
@@ -1139,6 +1230,20 @@ components:
           description: Physical ID read from the NFC tag.
           example: '04:1A:2B:3C:4D:5E:6F'
 
+    ReplaceUserTagRequest:
+      type: object
+      required: [user_id, new_physical_id]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          description: User ID whose paired NFC tag should be replaced.
+          example: kktix_hash_abc123
+        new_physical_id:
+          type: string
+          description: Physical ID read from the replacement NFC tag.
+          example: '04:FE:DC:BA:98:76:54'
+
     ScanCollectionRequest:
       type: object
       required: [user_id, physical_id]
@@ -1561,6 +1666,11 @@ components:
       value:
         physical_id: '04:1A:2B:3C:4D:5E:6F'
 
+    ReplaceUserTagRequest:
+      value:
+        user_id: kktix_hash_abc123
+        new_physical_id: '04:FE:DC:BA:98:76:54'
+
     ScanCollectionRequest:
       value:
         user_id: kktix_hash_def456
@@ -1626,6 +1736,18 @@ components:
           stamp_prize: true
           rank_prize: true
           rank: 7
+
+    UnauthorizedError:
+      value:
+        status: error
+        code: UNAUTHORIZED
+        message: Missing or invalid JWT.
+
+    StaffDangerTokenError:
+      value:
+        status: error
+        code: STAFF_DANGER_TOKEN_INVALID
+        message: Missing or invalid staff danger token.
 
     ScoreboardFreezingError:
       value:
