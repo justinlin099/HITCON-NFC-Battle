@@ -9,8 +9,7 @@ Copy local secrets before running the Worker:
 cp .dev.vars.example .dev.vars
 ```
 
-Use `.dev.vars` only for local Worker runtime secrets such as `JWT_SECRET` and
-`STAFF_DANGER_TOKEN`.
+Use `.dev.vars` only for local Worker runtime secrets such as `JWT_SECRET` and `STAFF_DANGER_TOKEN`.
 
 ## Checks
 
@@ -18,6 +17,10 @@ Use `.dev.vars` only for local Worker runtime secrets such as `JWT_SECRET` and
 npm test
 npm run typecheck
 ```
+
+## Manual Load Test
+
+Manual k6 load-test scenarios live in [`scripts/k6/README.md`](./scripts/k6/README.md).
 
 ## Local Smoke
 
