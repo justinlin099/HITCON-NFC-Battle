@@ -3,7 +3,7 @@ import { authenticateJwt } from "../src/auth";
 import { isFreezingStale } from "../src/freeze";
 import { calculateScore } from "../src/scoring";
 import type { AppBindings } from "../src/types";
-import { createTestServer, readJson, signJwt } from "./helpers";
+import { authHeaders, createTestServer, readJson, signJwt } from "./helpers";
 
 const env = {
   JWT_SECRET: "test-secret",
@@ -31,6 +31,38 @@ describe("health endpoint", () => {
     });
     expect(body.data.server_time).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
     expect(Number.isNaN(Date.parse(body.data.server_time))).toBe(false);
+  });
+
+  it("checks staff role with JWT auth", async () => {
+    const server = await createTestServer();
+
+    const missingJwt = await server.request("/health/staff");
+    expect(missingJwt.status).toBe(401);
+    await expect(readJson(missingJwt)).resolves.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
+
+    const attendeeJwt = await server.request("/health/staff", {
+      headers: await authHeaders("alice", "ATTENDEE"),
+    });
+    expect(attendeeJwt.status).toBe(403);
+    await expect(readJson(attendeeJwt)).resolves.toMatchObject({
+      code: "FORBIDDEN",
+    });
+
+    const staffJwt = await server.request("/health/staff", {
+      headers: await authHeaders("staff", "STAFF"),
+    });
+    expect(staffJwt.status).toBe(200);
+    await expect(readJson(staffJwt)).resolves.toMatchObject({
+      data: {
+        ok: true,
+        user: {
+          userId: "staff",
+          role: "STAFF",
+        },
+      },
+    });
   });
 });
 
