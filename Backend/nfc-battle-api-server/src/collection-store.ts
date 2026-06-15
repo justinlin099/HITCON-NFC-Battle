@@ -31,6 +31,21 @@ export async function collectUser(db: D1Database, scannerUserId: string, collect
   };
 }
 
+export async function collectUserIfNew(
+  db: D1Database,
+  scannerUserId: string,
+  collectedUserId: string,
+) {
+  const alreadyCollected = await hasCollected(db, scannerUserId, collectedUserId);
+  if (alreadyCollected) {
+    return {
+      first_time_collected: false,
+    };
+  }
+
+  return collectUser(db, scannerUserId, collectedUserId);
+}
+
 export async function hasCollected(
   db: D1Database,
   scannerUserId: string,

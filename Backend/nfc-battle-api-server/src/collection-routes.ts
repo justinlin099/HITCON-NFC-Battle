@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
-import { collectUser, hasCollected } from "./collection-store";
+import { collectUserIfNew } from "./collection-store";
 import { recordPhishingEvent } from "./freeze-snapshot-store";
 import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
 import { errorResponse, success, successMessage } from "./responses";
@@ -36,14 +36,11 @@ collection.post("/scan", async (c) => {
     return errorResponse(c, 403, "PHYSICAL_ID_MISMATCH", "Physical tag ID does not match user ID.");
   }
 
-  const alreadyCollected = await hasCollected(c.env.DB, authUser.userId, request.user_id);
-  if (!alreadyCollected) {
-    await collectUser(c.env.DB, authUser.userId, request.user_id);
-  }
+  const collectionResult = await collectUserIfNew(c.env.DB, authUser.userId, request.user_id);
 
   return success(c, {
     collected_user_id: request.user_id,
-    first_time_collected: !alreadyCollected,
+    first_time_collected: collectionResult.first_time_collected,
     profile: publicFullProfileFromRow(targetUser),
   });
 });
