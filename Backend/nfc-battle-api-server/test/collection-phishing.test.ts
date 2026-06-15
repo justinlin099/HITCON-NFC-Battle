@@ -40,9 +40,27 @@ describe("phishing event edge cases", () => {
     }
   });
 
+  it("rejects missing authenticated victim rows", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    const bobAuth = await authHeaders("bob");
+    await server.request("/users/me", { headers: bobAuth });
+
+    const response = await server.request(
+      "/collection/phishing",
+      await jsonRequest("POST", { victim: "alice", attacker: "bob" }, aliceAuth),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(readJson(response)).resolves.toMatchObject({
+      code: "USER_NOT_FOUND",
+    });
+  });
+
   it("rejects victim mismatch, self phishing, and unknown attackers", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
+    await server.request("/users/me", { headers: aliceAuth });
 
     const victimMismatch = await server.request(
       "/collection/phishing",
@@ -67,6 +85,7 @@ describe("phishing event edge cases", () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
     const bobAuth = await authHeaders("bob");
+    await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
 
     const response = await server.request(

@@ -15,6 +15,7 @@ describe("NFC Battle API flow", () => {
     const aliceAuth = await authHeaders("alice", "ATTENDEE");
     const sponsorAuth = await authHeaders("sponsor-one", "SPONSOR");
     const communityAuth = await authHeaders("community-one", "COMMUNITY");
+    const staffDanger = await staffDangerHeaders();
 
     const aliceProfileResponse = await server.request("/users/me", { headers: aliceAuth });
     expect(aliceProfileResponse.status).toBe(200);
@@ -27,6 +28,9 @@ describe("NFC Battle API flow", () => {
         collection: [],
       },
     });
+
+    await server.request("/users/me", { headers: sponsorAuth });
+    await server.request("/users/me", { headers: communityAuth });
 
     const patchResponse = await server.request(
       "/users/me",
@@ -47,9 +51,11 @@ describe("NFC Battle API flow", () => {
       200,
     );
 
+    const malloryAuth = await authHeaders("mallory");
+    await server.request("/users/me", { headers: malloryAuth });
     const duplicatePair = await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: "tag-alice" }, await authHeaders("mallory")),
+      await jsonRequest("POST", { physical_id: "tag-alice" }, malloryAuth),
     );
     expect(duplicatePair.status).toBe(409);
 
@@ -167,7 +173,7 @@ describe("NFC Battle API flow", () => {
     expect(prizeBeforeFreeze.status).toBe(409);
 
     const statusBeforeFreeze = await server.request("/staff/scoreboard_status", {
-      headers: staffHeaders(),
+      headers: staffDanger,
     });
     expect(statusBeforeFreeze.status).toBe(200);
     await expect(readJson(statusBeforeFreeze)).resolves.toMatchObject({
@@ -180,7 +186,7 @@ describe("NFC Battle API flow", () => {
 
     const freeze = await server.request("/staff/freeze_scoreboard", {
       method: "POST",
-      headers: staffHeaders(),
+      headers: staffDanger,
     });
     expect(freeze.status).toBe(200);
     await expect(readJson(freeze)).resolves.toMatchObject({
@@ -193,7 +199,7 @@ describe("NFC Battle API flow", () => {
 
     const duplicateFreeze = await server.request("/staff/freeze_scoreboard", {
       method: "POST",
-      headers: staffHeaders(),
+      headers: staffDanger,
     });
     expect(duplicateFreeze.status).toBe(409);
 
@@ -210,7 +216,7 @@ describe("NFC Battle API flow", () => {
 
     const resume = await server.request("/staff/resume_scoreboard", {
       method: "POST",
-      headers: staffHeaders(),
+      headers: staffDanger,
     });
     expect(resume.status).toBe(200);
 
@@ -218,3 +224,10 @@ describe("NFC Battle API flow", () => {
     expect(prizeAfterResume.status).toBe(409);
   });
 });
+
+async function staffDangerHeaders() {
+  return {
+    ...(await authHeaders("staff", "STAFF")),
+    ...staffHeaders(),
+  };
+}

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -73,8 +73,10 @@ export async function createTestServer(): Promise<TestServer> {
   const sqlite = new DatabaseSync(":memory:");
   const db = new TestD1Database(sqlite) as unknown as D1Database;
   const testDir = dirname(fileURLToPath(import.meta.url));
-  const migrationPath = join(testDir, "../migrations/0001_initial_schema.sql");
-  await db.exec(readFileSync(migrationPath, "utf8"));
+  const migrationsDir = join(testDir, "../migrations");
+  for (const migrationFile of readdirSync(migrationsDir).sort()) {
+    await db.exec(readFileSync(join(migrationsDir, migrationFile), "utf8"));
+  }
 
   const env = {
     DB: db,

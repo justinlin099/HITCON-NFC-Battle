@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import collectionRoutes from "./collection-routes";
 import { requireAuth } from "./auth";
+import { nowIso } from "./ids";
 import missionRoutes from "./mission-routes";
 import { success } from "./responses";
 import scoreboardRoutes from "./scoreboard-routes";
-import { requireStaffDangerToken } from "./staff";
+import { requireStaffRole } from "./staff";
 import staffRoutes from "./staff-routes";
 import tagRoutes from "./tag-routes";
 import type { AppEnv } from "./types";
@@ -16,6 +17,7 @@ app.get("/health", (c) => {
   return success(c, {
     ok: true,
     database: Boolean(c.env.DB),
+    server_time: nowIso(),
   });
 });
 
@@ -25,9 +27,10 @@ app.get("/health/auth", requireAuth, (c) => {
   });
 });
 
-app.get("/health/staff", requireStaffDangerToken, (c) => {
+app.get("/health/staff", requireAuth, requireStaffRole, (c) => {
   return success(c, {
     ok: true,
+    user: c.get("authUser"),
   });
 });
 

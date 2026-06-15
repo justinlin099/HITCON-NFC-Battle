@@ -1,16 +1,63 @@
 import { describe, expect, it, vi } from "vitest";
-import { authHeaders, createTestServer, jsonRequest, readJson, staffHeaders } from "./helpers";
+import {
+  authHeaders,
+  createTestServer,
+  initializeUser,
+  jsonRequest,
+  pairTag,
+  readJson,
+  scanTag,
+  staffHeaders,
+} from "./helpers";
 
 describe("staff scoreboard edge cases", () => {
-  it("rejects staff endpoints without the staff danger token", async () => {
+  it("rejects staff endpoints without a staff JWT", async () => {
     const server = await createTestServer();
+
+    for (const [path, method] of [
+      ["/staff/scoreboard_status", "GET"],
+      ["/staff/replace_user_tag", "POST"],
+      ["/staff/freeze_scoreboard", "POST"],
+      ["/staff/resume_scoreboard", "POST"],
+    ] as const) {
+      const response = await server.request(path, { method });
+
+      expect(response.status).toBe(401);
+      await expect(readJson(response)).resolves.toMatchObject({
+        code: "UNAUTHORIZED",
+      });
+    }
+  });
+
+  it("rejects staff endpoints for non-staff JWTs", async () => {
+    const server = await createTestServer();
+    const attendeeJwt = await authHeaders("attendee", "ATTENDEE");
+
+    for (const [path, method] of [
+      ["/staff/scoreboard_status", "GET"],
+      ["/staff/replace_user_tag", "POST"],
+      ["/staff/freeze_scoreboard", "POST"],
+      ["/staff/resume_scoreboard", "POST"],
+    ] as const) {
+      const response = await server.request(path, { method, headers: attendeeJwt });
+
+      expect(response.status).toBe(403);
+      await expect(readJson(response)).resolves.toMatchObject({
+        code: "FORBIDDEN",
+      });
+    }
+  });
+
+  it("rejects danger-token staff endpoints without the staff danger token", async () => {
+    const server = await createTestServer();
+    const staffJwt = await authHeaders("staff", "STAFF");
 
     for (const [path, method] of [
       ["/staff/scoreboard_status", "GET"],
       ["/staff/freeze_scoreboard", "POST"],
       ["/staff/resume_scoreboard", "POST"],
     ] as const) {
-      const response = await server.request(path, { method });
+      const response = await server.request(path, { method, headers: staffJwt });
 
       expect(response.status).toBe(401);
       await expect(readJson(response)).resolves.toMatchObject({
@@ -19,12 +66,254 @@ describe("staff scoreboard edge cases", () => {
     }
   });
 
+  it("requires a staff JWT for replacing a user's NFC tag", async () => {
+    const server = await createTestServer();
+
+    const missingJwt = await server.request("/staff/replace_user_tag", { method: "POST" });
+    expect(missingJwt.status).toBe(401);
+    await expect(readJson(missingJwt)).resolves.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
+
+    const attendeeJwt = await server.request(
+      "/staff/replace_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: "alice",
+          new_physical_id: "tag-alice",
+        },
+        await authHeaders("attendee", "ATTENDEE"),
+      ),
+    );
+    expect(attendeeJwt.status).toBe(403);
+    await expect(readJson(attendeeJwt)).resolves.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("replaces a user's NFC tag without changing profile or collection versions", async () => {
+    const server = await createTestServer();
+    const alice = await initializeUser(server, "alice");
+    const bob = await initializeUser(server, "bob");
+    const staffJwt = await authHeaders("staff", "STAFF");
+    await pairTag(server, alice.headers, "tag-alice-old");
+
+    const before = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
+      data: {
+        physical_id: string;
+        profile_version: number;
+        collection_version: number;
+      };
+    };
+    expect(before.data.physical_id).toBe("tag-alice-old");
+
+    const update = await server.request(
+      "/staff/replace_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: " alice ",
+          new_physical_id: " tag-alice-new ",
+        },
+        staffJwt,
+      ),
+    );
+    expect(update.status).toBe(200);
+
+    await expect(
+      server.db
+        .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = 'tag-alice-old'")
+        .first<{ user_id: string }>(),
+    ).resolves.toBeNull();
+    await expect(
+      server.db
+        .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'alice'")
+        .first<{ physical_id: string }>(),
+    ).resolves.toEqual({ physical_id: "tag-alice-new" });
+
+    const oldTagScan = await scanTag(server, bob.headers, "alice", "tag-alice-old");
+    expect(oldTagScan.status).toBe(403);
+    await expect(readJson(oldTagScan)).resolves.toMatchObject({
+      code: "PHYSICAL_ID_MISMATCH",
+    });
+
+    const newTagScan = await scanTag(server, bob.headers, "alice", "tag-alice-new");
+    expect(newTagScan.status).toBe(200);
+
+    const after = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
+      data: {
+        physical_id: string;
+        profile_version: number;
+        collection_version: number;
+      };
+    };
+    expect(after.data).toMatchObject({
+      physical_id: "tag-alice-new",
+      profile_version: before.data.profile_version,
+      collection_version: before.data.collection_version,
+    });
+
+    const bootstrap = await readJson(
+      await server.request("/users/me/bootstrap", { headers: alice.headers }),
+    ) as {
+      data: {
+        me: {
+          physical_id: string;
+          nfc_tag_key: string;
+        };
+      };
+    };
+    expect(bootstrap.data.me.physical_id).toBe("tag-alice-new");
+    expect(bootstrap.data.me.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  it("allows a staff tag update when the new tag is already owned by the same user", async () => {
+    const server = await createTestServer();
+    const alice = await initializeUser(server, "alice");
+    const staffJwt = await authHeaders("staff", "STAFF");
+    await pairTag(server, alice.headers, "tag-alice");
+
+    const update = await server.request(
+      "/staff/replace_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: "alice",
+          new_physical_id: "tag-alice",
+        },
+        staffJwt,
+      ),
+    );
+
+    expect(update.status).toBe(200);
+    await expect(
+      server.db.prepare("SELECT COUNT(*) AS count FROM nfc_tags").first<{ count: number }>(),
+    ).resolves.toEqual({ count: 1 });
+  });
+
+  it("rejects updating a user to another user's NFC tag", async () => {
+    const server = await createTestServer();
+    const alice = await initializeUser(server, "alice");
+    const bob = await initializeUser(server, "bob");
+    const staffJwt = await authHeaders("staff", "STAFF");
+    await pairTag(server, alice.headers, "tag-alice");
+    await pairTag(server, bob.headers, "tag-bob");
+
+    const update = await server.request(
+      "/staff/replace_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: "alice",
+          new_physical_id: "tag-bob",
+        },
+        staffJwt,
+      ),
+    );
+
+    expect(update.status).toBe(409);
+    await expect(readJson(update)).resolves.toMatchObject({
+      code: "TAG_ALREADY_PAIRED",
+    });
+    await expect(
+      server.db
+        .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'alice'")
+        .first<{ physical_id: string }>(),
+    ).resolves.toEqual({ physical_id: "tag-alice" });
+    await expect(
+      server.db
+        .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'bob'")
+        .first<{ physical_id: string }>(),
+    ).resolves.toEqual({ physical_id: "tag-bob" });
+  });
+
+  it("returns a tag conflict if another request pairs the replacement tag during the write", async () => {
+    const server = await createTestServer();
+    const alice = await initializeUser(server, "alice");
+    await initializeUser(server, "bob");
+    const staffJwt = await authHeaders("staff", "STAFF");
+    await pairTag(server, alice.headers, "tag-alice");
+    server.env.DB = new PairTagDuringReplacementWriteDb(
+      server.db,
+      "tag-race",
+      "bob",
+    ) as unknown as D1Database;
+
+    const update = await server.request(
+      "/staff/replace_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: "alice",
+          new_physical_id: "tag-race",
+        },
+        staffJwt,
+      ),
+    );
+
+    expect(update.status).toBe(409);
+    await expect(readJson(update)).resolves.toMatchObject({
+      code: "TAG_ALREADY_PAIRED",
+    });
+    await expect(
+      server.db
+        .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'alice'")
+        .first<{ physical_id: string }>(),
+    ).resolves.toEqual({ physical_id: "tag-alice" });
+    await expect(
+      server.db
+        .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'bob'")
+        .first<{ physical_id: string }>(),
+    ).resolves.toEqual({ physical_id: "tag-race" });
+  });
+
+  it("rejects invalid or unknown staff tag update requests", async () => {
+    const server = await createTestServer();
+    const staffJwt = await authHeaders("staff", "STAFF");
+
+    for (const body of [
+      null,
+      "nope",
+      {},
+      { user_id: "", new_physical_id: "tag-alice" },
+      { user_id: "alice", new_physical_id: "" },
+      { user_id: "alice", new_physical_id: "tag-alice", extra: true },
+    ]) {
+      const response = await server.request(
+        "/staff/replace_user_tag",
+        await jsonRequest("POST", body, staffJwt),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(readJson(response)).resolves.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    }
+
+    const unknownUser = await server.request(
+      "/staff/replace_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: "missing",
+          new_physical_id: "tag-missing",
+        },
+        staffJwt,
+      ),
+    );
+    expect(unknownUser.status).toBe(404);
+    await expect(readJson(unknownUser)).resolves.toMatchObject({
+      code: "USER_NOT_FOUND",
+    });
+  });
+
   it("rejects resume while the scoreboard is open", async () => {
     const server = await createTestServer();
 
     const response = await server.request("/staff/resume_scoreboard", {
       method: "POST",
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
 
     expect(response.status).toBe(409);
@@ -45,7 +334,7 @@ describe("staff scoreboard edge cases", () => {
     ]) {
       const response = await server.request(
         "/staff/freeze_scoreboard",
-        await jsonRequest("POST", body, staffHeaders()),
+        await jsonRequest("POST", body, await staffDangerHeaders()),
       );
 
       expect(response.status).toBe(400);
@@ -67,13 +356,13 @@ describe("staff scoreboard edge cases", () => {
 
     const firstFreeze = await server.request("/staff/freeze_scoreboard", {
       method: "POST",
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
     expect(firstFreeze.status).toBe(200);
 
     const secondFreeze = await server.request("/staff/freeze_scoreboard", {
       method: "POST",
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
     expect(secondFreeze.status).toBe(409);
     await expect(readJson(secondFreeze)).resolves.toMatchObject({
@@ -87,7 +376,7 @@ describe("staff scoreboard edge cases", () => {
 
     const freeze = await server.request("/staff/freeze_scoreboard", {
       method: "POST",
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
     expect(freeze.status).toBe(200);
     const freezeBody = await readJson(freeze) as {
@@ -102,7 +391,7 @@ describe("staff scoreboard edge cases", () => {
     expect(freezeBody.data.frozen_at).toEqual(expect.any(String));
 
     const frozenStatus = await server.request("/staff/scoreboard_status", {
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
     expect(frozenStatus.status).toBe(200);
     await expect(readJson(frozenStatus)).resolves.toMatchObject({
@@ -118,12 +407,12 @@ describe("staff scoreboard edge cases", () => {
 
     const resume = await server.request("/staff/resume_scoreboard", {
       method: "POST",
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
     expect(resume.status).toBe(200);
 
     const openStatus = await server.request("/staff/scoreboard_status", {
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
     expect(openStatus.status).toBe(200);
     await expect(readJson(openStatus)).resolves.toMatchObject({
@@ -156,7 +445,7 @@ describe("staff scoreboard edge cases", () => {
 
       const failedFreeze = await server.request("/staff/freeze_scoreboard", {
         method: "POST",
-        headers: staffHeaders(),
+        headers: await staffDangerHeaders(),
       });
       expect(failedFreeze.status).toBe(400);
       expect(consoleError).toHaveBeenCalledWith("Failed to freeze scoreboard.", expect.any(Error));
@@ -178,7 +467,7 @@ describe("staff scoreboard edge cases", () => {
 
       const retryFreeze = await server.request("/staff/freeze_scoreboard", {
         method: "POST",
-        headers: staffHeaders(),
+        headers: await staffDangerHeaders(),
       });
       expect(retryFreeze.status).toBe(200);
     } finally {
@@ -211,7 +500,7 @@ describe("staff scoreboard edge cases", () => {
 
       const failedFreeze = await server.request("/staff/freeze_scoreboard", {
         method: "POST",
-        headers: staffHeaders(),
+        headers: await staffDangerHeaders(),
       });
       expect(failedFreeze.status).toBe(400);
       expect(consoleError).toHaveBeenCalledWith("Failed to freeze scoreboard.", expect.any(Error));
@@ -277,7 +566,7 @@ describe("staff scoreboard edge cases", () => {
     ).run();
 
     const staleStatus = await server.request("/staff/scoreboard_status", {
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
     expect(staleStatus.status).toBe(200);
     await expect(readJson(staleStatus)).resolves.toMatchObject({
@@ -291,7 +580,7 @@ describe("staff scoreboard edge cases", () => {
 
     const resume = await server.request("/staff/resume_scoreboard", {
       method: "POST",
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
     expect(resume.status).toBe(200);
 
@@ -307,7 +596,7 @@ describe("staff scoreboard edge cases", () => {
     ).resolves.toEqual({ applied_freeze_id: null });
 
     const openStatus = await server.request("/staff/scoreboard_status", {
-      headers: staffHeaders(),
+      headers: await staffDangerHeaders(),
     });
     await expect(readJson(openStatus)).resolves.toMatchObject({
       data: {
@@ -318,3 +607,78 @@ describe("staff scoreboard edge cases", () => {
     });
   });
 });
+
+class PairTagDuringReplacementWriteDb {
+  private hasInsertedRaceTag = false;
+
+  constructor(
+    private readonly db: D1Database,
+    private readonly physicalId: string,
+    private readonly userId: string,
+  ) {}
+
+  prepare(query: string) {
+    const statement = this.db.prepare(query);
+    if (!query.includes("ON CONFLICT(user_id) DO UPDATE")) {
+      return statement;
+    }
+
+    return new PairTagDuringReplacementWriteStatement(
+      statement,
+      async () => {
+        if (this.hasInsertedRaceTag) {
+          return;
+        }
+
+        this.hasInsertedRaceTag = true;
+        await this.db
+          .prepare(
+            `
+            INSERT INTO nfc_tags (physical_id, user_id, paired_at, locked_at)
+            VALUES (?1, ?2, ?3, ?3)
+            `,
+          )
+          .bind(this.physicalId, this.userId, "2026-04-12T15:00:00.000Z")
+          .run();
+      },
+    );
+  }
+
+  exec(query: string) {
+    return this.db.exec(query);
+  }
+}
+
+class PairTagDuringReplacementWriteStatement {
+  constructor(
+    private readonly statement: D1PreparedStatement,
+    private readonly beforeRun: () => Promise<void>,
+  ) {}
+
+  bind(...values: unknown[]) {
+    return new PairTagDuringReplacementWriteStatement(
+      this.statement.bind(...values),
+      this.beforeRun,
+    );
+  }
+
+  async run() {
+    await this.beforeRun();
+    return this.statement.run();
+  }
+
+  first<T = unknown>() {
+    return this.statement.first<T>();
+  }
+
+  all<T = unknown>() {
+    return this.statement.all<T>();
+  }
+}
+
+async function staffDangerHeaders() {
+  return {
+    ...(await authHeaders("staff", "STAFF")),
+    ...staffHeaders(),
+  };
+}

@@ -14,6 +14,7 @@ A user's data contains:
 * bio
 * pixel_avatar_base64: a base64-encoded 48x48 pixel avatar image
 * NFC tag's physical ID
+* nfc_tag_key: a 6-byte key, encoded as a 12-character lowercase hex string, used by the app to lock or unlock the user's NFC tag
 * profile version
 * collection version
 
@@ -39,7 +40,7 @@ The user will receive an email, containing a link like `https://game.hitcon2026.
 
 After downloading the app, the user will somehow setup the app, and somehow the app will obtain their JWT token.
 
-The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. The user can use `PATCH /users/me` to update their profile before the conference starts.
+The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. `GET /users/me` is the only endpoint that lazy-initializes a user profile, so the app should call it before pairing tags, scanning, recording phishing events, or using cache/bootstrap APIs that expect the authenticated user row to already exist. The response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts.
 
 ## When Conference Starts, at Reception Desk
 
@@ -47,11 +48,13 @@ The user will pick up a NFC tag, open the app, and scan the tag using the app. T
 
 Also, the app will write a URL `https://game.hitcon2026.online/b?u={user_id}` to the tag. Again, this is hosted elsewhere. The URL will redirect the mobile device to open the app.
 
-After the app writes the URL to the tag, it will lock (encrypt) the tag, so it is only readable. This will make sure the tag won't be accidentally overwritten.
+After the app writes the URL to the tag, it will use `nfc_tag_key` to lock the tag, so it is only readable. This will make sure the tag won't be accidentally overwritten. The app should keep the key so it can offer an unlock button after the conference.
 
 ## During the Conference
 
 The user can still use `PATCH /users/me` to update their profile at any time.
+
+If a user's NFC tag is broken or replaced, staff can give the user a new tag and call `POST /staff/replace_user_tag` with a JWT whose `role` is `STAFF` to replace the server-side tag mapping. Staff or the app should write the same URL format, `https://game.hitcon2026.online/b?u={user_id}`, to the new tag and lock it. The `nfc_tags` table is the source of truth for which physical tag ID belongs to a user, so the old physical tag ID stops passing `POST /collection/scan` immediately after the replacement. This operation does not change `profile_version` or `collection_version`. `GET /users/me` and `GET /users/me/bootstrap` return the new physical tag ID.
 
 ### Scanning Other's NFC Tag
 
@@ -113,6 +116,8 @@ The user can use `GET /scoreboard` with `offset` and `limit` to query the global
 If the user somehow resets their app or needs a fresh installation, the app can use `GET /users/me/bootstrap` to restore the local cache in 1 request:
 
 * the full user profile of themselves
+* the user's current NFC tag physical ID
+* the user's `nfc_tag_key`
 * the user's `profile_version` and `collection_version`
 * the full profile of every previously collected user, without each collected user's collection list
 * each collected user's `profile_version` and `collection_version`
@@ -123,7 +128,7 @@ This endpoint is for app bootstrap and recovery. Normal refresh should still use
 
 ## Near the End of the Conference
 
-When the conference is about to end, someone will make a request to `POST /staff/freeze_scoreboard` with a `STAFF_DANGER_TOKEN` to freeze the scoreboard. The request may include `scoring_cutoff_at` to specify the latest event timestamp that should count in the score snapshot. If `scoring_cutoff_at` is omitted, the server uses its current time. `scoring_cutoff_at` must not be later than the server time when the freeze begins. Then, the server will calculate the stamp prize and scoreboard prize.
+When the conference is about to end, staff will make a request to `POST /staff/freeze_scoreboard` with a JWT whose `role` is `STAFF` plus `STAFF_DANGER_TOKEN` to freeze the scoreboard. The request may include `scoring_cutoff_at` to specify the latest event timestamp that should count in the score snapshot. If `scoring_cutoff_at` is omitted, the server uses its current time. `scoring_cutoff_at` must not be later than the server time when the freeze begins. Then, the server will calculate the stamp prize and scoreboard prize.
 
 The freeze operation should calculate the final scores and prize results once, using only collection records and phishing records whose event timestamps are less than or equal to `scoring_cutoff_at`, then store a per-user result snapshot. This snapshot should be used by `GET /scoreboard` and `GET /users/me/prize` while the scoreboard state is `FROZEN`; do not recalculate scoreboard or prize results on every lookup.
 
@@ -131,10 +136,14 @@ To avoid race conditions and support resume, the scoreboard should use a state m
 
 If the scoreboard stays in `FREEZING` longer than `freeze_timeout`, the freeze is considered stale. Partial results for that `freeze_id` should not be visible to users, because `GET /users/me/prize` only reads a stored snapshot when the scoreboard state is `FROZEN`.
 
-The app should keep working after the scoreboard is frozen. `PATCH /users/me`, `POST /tags/pair`, `POST /collection/scan`, `POST /collection/phishing`, profile lookup, collection lookup, bootstrap, batch refresh, and mission progress continue to use and update live app data after the conference ends. These later live updates must not change the stored score and prize snapshot unless staff explicitly resumes scoring and freezes again.
+The app should keep working after the scoreboard is frozen. `PATCH /users/me`, `POST /tags/pair`, `POST /staff/replace_user_tag`, `POST /collection/scan`, `POST /collection/phishing`, profile lookup, collection lookup, bootstrap, batch refresh, and mission progress continue to use and update live app data after the conference ends. These later live updates must not change the stored score and prize snapshot unless staff explicitly resumes scoring and freezes again.
 
-The API server should provide `GET /staff/scoreboard_status` with a `STAFF_DANGER_TOKEN` so staff can inspect the current scoreboard state, current `freeze_id`, and freeze timestamps.
+The API server should provide `GET /staff/scoreboard_status` with a JWT whose `role` is `STAFF` plus `STAFF_DANGER_TOKEN` so staff can inspect the current scoreboard state, current `freeze_id`, and freeze timestamps.
 
-Also, the API server has an endpoint `POST /staff/resume_scoreboard` to resume the accidentally frozen scoreboard. Requires `STAFF_DANGER_TOKEN`, too. Resume should change `FROZEN` back to `OPEN` and invalidate the stored result snapshot for the current `freeze_id`; the next freeze will calculate a new snapshot. Resume can also recover a stale `FREEZING` state by changing it back to `OPEN` and invalidating partial results for the stale `freeze_id`.
+Also, the API server has an endpoint `POST /staff/resume_scoreboard` to resume the accidentally frozen scoreboard. It also requires a JWT whose `role` is `STAFF` plus `STAFF_DANGER_TOKEN`. Resume should change `FROZEN` back to `OPEN` and invalidate the stored result snapshot for the current `freeze_id`; the next freeze will calculate a new snapshot. Resume can also recover a stale `FREEZING` state by changing it back to `OPEN` and invalidating partial results for the stale `freeze_id`.
 
 The user can lookup their prize after the scoreboard is frozen via `GET /users/me/prize`.
+
+## After the Conference
+
+The app should show a button to unlock the nfc tag, so that after the conference the user can freely use their tag.

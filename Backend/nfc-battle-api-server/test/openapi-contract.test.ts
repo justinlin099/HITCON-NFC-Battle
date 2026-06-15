@@ -17,6 +17,7 @@ const CONTRACT_PATHS = [
   "/missions/stamp",
   "/scoreboard",
   "/staff/scoreboard_status",
+  "/staff/replace_user_tag",
   "/staff/freeze_scoreboard",
   "/staff/resume_scoreboard",
 ];
@@ -39,6 +40,7 @@ const CONTRACT_OPERATIONS = [
   { method: "GET", openapiPath: "/missions/stamp", requestPath: "/missions/stamp" },
   { method: "GET", openapiPath: "/scoreboard", requestPath: "/scoreboard" },
   { method: "GET", openapiPath: "/staff/scoreboard_status", requestPath: "/staff/scoreboard_status" },
+  { method: "POST", openapiPath: "/staff/replace_user_tag", requestPath: "/staff/replace_user_tag" },
   { method: "POST", openapiPath: "/staff/freeze_scoreboard", requestPath: "/staff/freeze_scoreboard" },
   { method: "POST", openapiPath: "/staff/resume_scoreboard", requestPath: "/staff/resume_scoreboard" },
 ];

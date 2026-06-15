@@ -1,4 +1,4 @@
-import { nowIso } from "./ids";
+import { newNfcTagKey, nowIso } from "./ids";
 import { getCollection } from "./collection-store";
 import type { UserRole } from "./types";
 
@@ -14,6 +14,7 @@ export interface UserRow {
   profile_version: number;
   collection_version: number;
   physical_id: string | null;
+  nfc_tag_key: string | null;
 }
 
 export interface ProfileUpdate {
@@ -35,13 +36,14 @@ export async function lazyInitializeUser(db: D1Database, userId: string, role: U
         emoji_icon,
         bio,
         pixel_avatar_base64,
+        nfc_tag_key,
         created_at,
         updated_at
       )
-      VALUES (?1, ?2, ?3, ?4, '', '', ?5, ?5)
+      VALUES (?1, ?2, ?3, ?4, '', '', ?5, ?6, ?6)
       `,
     )
-    .bind(userId, defaultDisplayName(userId), role, "🙂", timestamp)
+    .bind(userId, defaultDisplayName(userId), role, "🙂", newNfcTagKey(), timestamp)
     .run();
 }
 
@@ -52,6 +54,45 @@ export async function getFullProfile(db: D1Database, userId: string) {
   }
 
   return profileFromRow(db, row);
+}
+
+export async function getSelfProfile(db: D1Database, userId: string) {
+  let row = await getUserRow(db, userId);
+  if (!row) {
+    return null;
+  }
+
+  if (row.nfc_tag_key === null) {
+    row = await repairMissingNfcTagKey(db, row);
+    if (!row) {
+      return null;
+    }
+  }
+
+  return profileFromRow(db, row);
+}
+
+async function repairMissingNfcTagKey(db: D1Database, row: UserRow) {
+  const nfcTagKey = newNfcTagKey();
+  const result = await db
+    .prepare(
+      `
+      UPDATE users
+      SET nfc_tag_key = ?2
+      WHERE user_id = ?1 AND nfc_tag_key IS NULL
+      `,
+    )
+    .bind(row.user_id, nfcTagKey)
+    .run();
+
+  if (result.meta.changes > 0) {
+    return {
+      ...row,
+      nfc_tag_key: nfcTagKey,
+    };
+  }
+
+  return getUserRow(db, row.user_id);
 }
 
 export async function getUserRow(db: D1Database, userId: string) {
@@ -67,6 +108,7 @@ export async function getUserRow(db: D1Database, userId: string) {
         users.pixel_avatar_base64,
         users.profile_version,
         users.collection_version,
+        users.nfc_tag_key,
         nfc_tags.physical_id
       FROM users
       LEFT JOIN nfc_tags ON nfc_tags.user_id = users.user_id
@@ -98,6 +140,7 @@ export async function getUserRowsById(db: D1Database, userIds: string[]) {
           users.pixel_avatar_base64,
           users.profile_version,
           users.collection_version,
+          users.nfc_tag_key,
           nfc_tags.physical_id
         FROM users
         LEFT JOIN nfc_tags ON nfc_tags.user_id = users.user_id
@@ -128,6 +171,7 @@ export async function profileFromRow(db: D1Database, row: UserRow) {
     profile_version: row.profile_version,
     collection_version: row.collection_version,
     physical_id: row.physical_id,
+    nfc_tag_key: row.nfc_tag_key,
     collection,
   };
 }
@@ -198,6 +242,10 @@ export async function updateUserProfile(db: D1Database, userId: string, update: 
     nextBio !== current.bio ||
     nextPixelAvatar !== current.pixel_avatar_base64;
 
+  if (!profileChanged) {
+    return;
+  }
+
   await db
     .prepare(
       `
@@ -207,8 +255,8 @@ export async function updateUserProfile(db: D1Database, userId: string, update: 
         emoji_icon = ?3,
         bio = ?4,
         pixel_avatar_base64 = ?5,
-        profile_version = profile_version + ?6,
-        updated_at = ?7
+        profile_version = profile_version + 1,
+        updated_at = ?6
       WHERE user_id = ?1
       `,
     )
@@ -218,7 +266,6 @@ export async function updateUserProfile(db: D1Database, userId: string, update: 
       nextEmojiIcon,
       nextBio,
       nextPixelAvatar,
-      profileChanged ? 1 : 0,
       nowIso(),
     )
     .run();

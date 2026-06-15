@@ -16,24 +16,47 @@ import {
   startScoreboardFreeze,
   type GameStateRow,
 } from "./game-state";
+import { requireAuth } from "./auth";
 import { newFreezeId, nowIso } from "./ids";
-import { hasOnlyKeys, isPlainObject } from "./request";
+import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
 import { errorResponse, success, successMessage } from "./responses";
-import { requireStaffDangerToken } from "./staff";
+import { requireStaffDangerToken, requireStaffRole } from "./staff";
+import { replaceUserTag } from "./tag-store";
 import type { AppEnv } from "./types";
+import { getUserRow } from "./user-store";
 
 const staffRoutes = new Hono<AppEnv>();
 const FREEZE_SCOREBOARD_KEYS = new Set(["scoring_cutoff_at"]);
+const REPLACE_USER_TAG_KEYS = new Set(["user_id", "new_physical_id"]);
 
-staffRoutes.use("*", requireStaffDangerToken);
+staffRoutes.use("*", requireAuth, requireStaffRole);
 
-staffRoutes.get("/scoreboard_status", async (c) => {
+staffRoutes.get("/scoreboard_status", requireStaffDangerToken, async (c) => {
   const state = await getGameState(c.env.DB);
 
   return success(c, scoreboardStatusData(state));
 });
 
-staffRoutes.post("/freeze_scoreboard", async (c) => {
+staffRoutes.post("/replace_user_tag", async (c) => {
+  const request = validateReplaceUserTagRequest(await readJson(c));
+  if (!request) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
+  const user = await getUserRow(c.env.DB, request.user_id);
+  if (!user) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  const result = await replaceUserTag(c.env.DB, request.user_id, request.new_physical_id);
+  if (result.conflict) {
+    return errorResponse(c, 409, "TAG_ALREADY_PAIRED", "This NFC tag is already paired.");
+  }
+
+  return successMessage(c, "User tag replaced successfully.");
+});
+
+staffRoutes.post("/freeze_scoreboard", requireStaffDangerToken, async (c) => {
   const request = await readOptionalFreezeRequest(c.req.raw);
   if (!request) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
@@ -70,7 +93,7 @@ staffRoutes.post("/freeze_scoreboard", async (c) => {
   }
 });
 
-staffRoutes.post("/resume_scoreboard", async (c) => {
+staffRoutes.post("/resume_scoreboard", requireStaffDangerToken, async (c) => {
   const state = await getGameState(c.env.DB);
   const staleFreezing = isFreezingStale(
     state.state,
@@ -118,6 +141,23 @@ function scoreboardStatusData(state: GameStateRow) {
       state.freeze_started_at,
       state.freeze_timeout_seconds,
     ),
+  };
+}
+
+function validateReplaceUserTagRequest(value: unknown) {
+  if (!isPlainObject(value) || !hasOnlyKeys(value, REPLACE_USER_TAG_KEYS)) {
+    return null;
+  }
+
+  const userId = requiredString(value, "user_id");
+  const newPhysicalId = requiredString(value, "new_physical_id");
+  if (!userId || !newPhysicalId) {
+    return null;
+  }
+
+  return {
+    user_id: userId,
+    new_physical_id: newPhysicalId,
   };
 }
 
