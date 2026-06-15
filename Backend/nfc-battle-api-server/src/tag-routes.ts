@@ -20,17 +20,17 @@ tags.post("/pair", async (c) => {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
-  const tagOwner = await getTagOwner(c.env.DB, request.physical_id);
-  if (tagOwner) {
-    return errorResponse(c, 409, "TAG_ALREADY_PAIRED", "This NFC tag is already paired.");
-  }
-
-  const [user, userTag] = await Promise.all([
-    getUserRow(c.env.DB, authUser.userId),
-    getUserTag(c.env.DB, authUser.userId),
-  ]);
+  const user = await getUserRow(c.env.DB, authUser.userId);
   if (!user) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  const [tagOwner, userTag] = await Promise.all([
+    getTagOwner(c.env.DB, request.physical_id),
+    getUserTag(c.env.DB, authUser.userId),
+  ]);
+  if (tagOwner) {
+    return errorResponse(c, 409, "TAG_ALREADY_PAIRED", "This NFC tag is already paired.");
   }
 
   if (userTag) {

@@ -47,6 +47,21 @@ describe("tag pairing edge cases", () => {
     });
   });
 
+  it("does not reveal paired tag state to users that have not been initialized", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    const malloryAuth = await authHeaders("mallory");
+    await server.request("/users/me", { headers: aliceAuth });
+    expect((await pairTag(server, aliceAuth, "tag-alice")).status).toBe(200);
+
+    const response = await pairTag(server, malloryAuth, "tag-alice");
+
+    expect(response.status).toBe(404);
+    await expect(readJson(response)).resolves.toMatchObject({
+      code: "USER_NOT_FOUND",
+    });
+  });
+
   it("rejects pairing the same tag or pairing a user twice", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");

@@ -51,9 +51,11 @@ describe("NFC Battle API flow", () => {
       200,
     );
 
+    const malloryAuth = await authHeaders("mallory");
+    await server.request("/users/me", { headers: malloryAuth });
     const duplicatePair = await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: "tag-alice" }, await authHeaders("mallory")),
+      await jsonRequest("POST", { physical_id: "tag-alice" }, malloryAuth),
     );
     expect(duplicatePair.status).toBe(409);
 
