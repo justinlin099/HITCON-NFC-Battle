@@ -8,19 +8,26 @@
 	<body>
 		<h1>HITCON NFC Battle API</h1>
 		<p id="status">Checking backend status...</p>
+		<p id="server-time">Server time: checking...</p>
 		<script>
 			fetch('/health')
 				.then((resp) => resp.json())
 				.then((body) => {
 					const status = document.getElementById('status');
+					const serverTime = document.getElementById('server-time');
 					status.textContent =
 						body.status === 'success' && body.data.database
 							? 'Worker is healthy and D1 is bound.'
 							: 'Worker responded, but D1 is not available.';
+					serverTime.textContent = body.data.server_time
+						? `Server time: ${body.data.server_time}`
+						: 'Server time: unavailable.';
 				})
 				.catch(() => {
 					const status = document.getElementById('status');
+					const serverTime = document.getElementById('server-time');
 					status.textContent = 'Worker health check failed.';
+					serverTime.textContent = 'Server time: unavailable.';
 				});
 		</script>
 	</body>

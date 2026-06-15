@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import collectionRoutes from "./collection-routes";
 import { requireAuth } from "./auth";
+import { nowIso } from "./ids";
 import missionRoutes from "./mission-routes";
 import { success } from "./responses";
 import scoreboardRoutes from "./scoreboard-routes";
@@ -16,6 +17,7 @@ app.get("/health", (c) => {
   return success(c, {
     ok: true,
     database: Boolean(c.env.DB),
+    server_time: nowIso(),
   });
 });
 
