@@ -7,13 +7,12 @@ import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { getPrizeResult } from "./freeze-snapshot-store";
 import type { AppEnv } from "./types";
 import {
-  getFullProfile,
   getHydratedCollection,
+  getSelfProfile,
   getUserRow,
   getUserRowsById,
   getVisibleProfile,
   lazyInitializeUser,
-  repairMissingNfcTagKey,
   type ProfileUpdate,
   publicFullProfileFromRow,
   updateUserProfile,
@@ -34,9 +33,8 @@ users.use("*", requireAuth);
 users.get("/me", async (c) => {
   const authUser = c.get("authUser");
   await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
-  await repairMissingNfcTagKey(c.env.DB, authUser.userId);
 
-  const profile = await getFullProfile(c.env.DB, authUser.userId);
+  const profile = await getSelfProfile(c.env.DB, authUser.userId);
   if (!profile) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
@@ -55,7 +53,7 @@ users.patch("/me", async (c) => {
 
   await updateUserProfile(c.env.DB, authUser.userId, update);
 
-  const profile = await getFullProfile(c.env.DB, authUser.userId);
+  const profile = await getSelfProfile(c.env.DB, authUser.userId);
   if (!profile) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
@@ -97,7 +95,7 @@ users.get("/me/prize", async (c) => {
 users.get("/me/bootstrap", async (c) => {
   const authUser = c.get("authUser");
 
-  const me = await getFullProfile(c.env.DB, authUser.userId);
+  const me = await getSelfProfile(c.env.DB, authUser.userId);
   if (!me) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
