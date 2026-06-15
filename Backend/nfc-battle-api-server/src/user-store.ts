@@ -1,4 +1,4 @@
-import { nowIso } from "./ids";
+import { newNfcTagKey, nowIso } from "./ids";
 import { getCollection } from "./collection-store";
 import type { UserRole } from "./types";
 
@@ -14,6 +14,7 @@ export interface UserRow {
   profile_version: number;
   collection_version: number;
   physical_id: string | null;
+  nfc_tag_key: string;
 }
 
 export interface ProfileUpdate {
@@ -35,13 +36,14 @@ export async function lazyInitializeUser(db: D1Database, userId: string, role: U
         emoji_icon,
         bio,
         pixel_avatar_base64,
+        nfc_tag_key,
         created_at,
         updated_at
       )
-      VALUES (?1, ?2, ?3, ?4, '', '', ?5, ?5)
+      VALUES (?1, ?2, ?3, ?4, '', '', ?5, ?6, ?6)
       `,
     )
-    .bind(userId, defaultDisplayName(userId), role, "🙂", timestamp)
+    .bind(userId, defaultDisplayName(userId), role, "🙂", newNfcTagKey(), timestamp)
     .run();
 }
 
@@ -67,6 +69,7 @@ export async function getUserRow(db: D1Database, userId: string) {
         users.pixel_avatar_base64,
         users.profile_version,
         users.collection_version,
+        users.nfc_tag_key,
         nfc_tags.physical_id
       FROM users
       LEFT JOIN nfc_tags ON nfc_tags.user_id = users.user_id
@@ -98,6 +101,7 @@ export async function getUserRowsById(db: D1Database, userIds: string[]) {
           users.pixel_avatar_base64,
           users.profile_version,
           users.collection_version,
+          users.nfc_tag_key,
           nfc_tags.physical_id
         FROM users
         LEFT JOIN nfc_tags ON nfc_tags.user_id = users.user_id
@@ -128,6 +132,7 @@ export async function profileFromRow(db: D1Database, row: UserRow) {
     profile_version: row.profile_version,
     collection_version: row.collection_version,
     physical_id: row.physical_id,
+    nfc_tag_key: row.nfc_tag_key,
     collection,
   };
 }

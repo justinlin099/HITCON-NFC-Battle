@@ -41,6 +41,13 @@ info:
     events, or using cache/bootstrap APIs that expect the authenticated user row
     to already exist.
 
+    `nfc_tag_key` is a per-user random 6-byte key encoded as a 12-character
+    lowercase hex string. It is returned only in self-profile responses
+    (`GET /users/me` and the `me` object from `GET /users/me/bootstrap`). The
+    mobile app should store it locally, not show it to the user, use it to lock
+    the NFC tag after writing the tag URL, and use it to unlock the tag after
+    the conference when the app exposes that action.
+
     Staff APIs under `/staff/*` require a conference JWT whose `role` claim is
     `STAFF`. Scoreboard status, freeze, and resume APIs additionally require
     `STAFF_DANGER_TOKEN`.
@@ -1003,6 +1010,7 @@ components:
         - type: object
           required:
             - physical_id
+            - nfc_tag_key
             - collection
           properties:
             physical_id:
@@ -1010,6 +1018,11 @@ components:
               nullable: true
               description: Paired NFC tag physical ID. This is null before the user pairs an NFC tag.
               example: '04:1A:2B:3C:4D:5E:6F'
+            nfc_tag_key:
+              type: string
+              pattern: '^[0-9a-f]{12}$'
+              description: Per-user 6-byte NFC tag lock/unlock key encoded as a 12-character lowercase hex string. Returned only to the authenticated user.
+              example: a1b2c3d4e5f6
             collection:
               type: array
               description: User IDs this user has previously scanned.
@@ -1556,6 +1569,7 @@ components:
           profile_version: 3
           collection_version: 12
           physical_id: '04:1A:2B:3C:4D:5E:6F'
+          nfc_tag_key: a1b2c3d4e5f6
           collection:
             - kktix_hash_def456
 
@@ -1572,6 +1586,7 @@ components:
           profile_version: 1
           collection_version: 0
           physical_id: null
+          nfc_tag_key: 001122334455
           collection: []
 
     GetMyBootstrapResponse:
@@ -1588,6 +1603,7 @@ components:
             profile_version: 3
             collection_version: 12
             physical_id: '04:1A:2B:3C:4D:5E:6F'
+            nfc_tag_key: a1b2c3d4e5f6
             collection:
               - kktix_hash_def456
           collected_users:

@@ -160,10 +160,12 @@ describe("staff scoreboard edge cases", () => {
       data: {
         me: {
           physical_id: string;
+          nfc_tag_key: string;
         };
       };
     };
     expect(bootstrap.data.me.physical_id).toBe("tag-alice-new");
+    expect(bootstrap.data.me.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
   });
 
   it("allows a staff tag update when the new tag is already owned by the same user", async () => {

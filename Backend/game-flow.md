@@ -14,6 +14,7 @@ A user's data contains:
 * bio
 * pixel_avatar_base64: a base64-encoded 48x48 pixel avatar image
 * NFC tag's physical ID
+* nfc_tag_key: a 6-byte key, encoded as a 12-character lowercase hex string, used by the app to lock or unlock the user's NFC tag
 * profile version
 * collection version
 
@@ -39,7 +40,7 @@ The user will receive an email, containing a link like `https://game.hitcon2026.
 
 After downloading the app, the user will somehow setup the app, and somehow the app will obtain their JWT token.
 
-The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. `GET /users/me` is the only endpoint that lazy-initializes a user profile, so the app should call it before pairing tags, scanning, recording phishing events, or using cache/bootstrap APIs that expect the authenticated user row to already exist. The user can use `PATCH /users/me` to update their profile before the conference starts.
+The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. `GET /users/me` is the only endpoint that lazy-initializes a user profile, so the app should call it before pairing tags, scanning, recording phishing events, or using cache/bootstrap APIs that expect the authenticated user row to already exist. The response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts.
 
 ## When Conference Starts, at Reception Desk
 
@@ -47,7 +48,7 @@ The user will pick up a NFC tag, open the app, and scan the tag using the app. T
 
 Also, the app will write a URL `https://game.hitcon2026.online/b?u={user_id}` to the tag. Again, this is hosted elsewhere. The URL will redirect the mobile device to open the app.
 
-After the app writes the URL to the tag, it will lock (encrypt) the tag, so it is only readable. This will make sure the tag won't be accidentally overwritten.
+After the app writes the URL to the tag, it will use `nfc_tag_key` to lock the tag, so it is only readable. This will make sure the tag won't be accidentally overwritten. The app should keep the key so it can offer an unlock button after the conference.
 
 ## During the Conference
 
@@ -116,6 +117,7 @@ If the user somehow resets their app or needs a fresh installation, the app can 
 
 * the full user profile of themselves
 * the user's current NFC tag physical ID
+* the user's `nfc_tag_key`
 * the user's `profile_version` and `collection_version`
 * the full profile of every previously collected user, without each collected user's collection list
 * each collected user's `profile_version` and `collection_version`
@@ -141,3 +143,7 @@ The API server should provide `GET /staff/scoreboard_status` with a JWT whose `r
 Also, the API server has an endpoint `POST /staff/resume_scoreboard` to resume the accidentally frozen scoreboard. It also requires a JWT whose `role` is `STAFF` plus `STAFF_DANGER_TOKEN`. Resume should change `FROZEN` back to `OPEN` and invalidate the stored result snapshot for the current `freeze_id`; the next freeze will calculate a new snapshot. Resume can also recover a stale `FREEZING` state by changing it back to `OPEN` and invalidating partial results for the stale `freeze_id`.
 
 The user can lookup their prize after the scoreboard is frozen via `GET /users/me/prize`.
+
+## After the Conference
+
+The app should show a button to unlock the nfc tag, so that after the conference the user can freely use their tag.

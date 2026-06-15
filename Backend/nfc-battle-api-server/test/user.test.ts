@@ -9,6 +9,12 @@ describe("user profile behavior", () => {
 
     const aliceInit = await server.request("/users/me", { headers: aliceAuth });
     expect(aliceInit.status).toBe(200);
+    const aliceInitBody = await readJson(aliceInit) as {
+      data: {
+        nfc_tag_key: string;
+      };
+    };
+    expect(aliceInitBody.data.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
 
     const missingBob = await server.request("/users/bob", { headers: aliceAuth });
     expect(missingBob.status).toBe(404);
@@ -85,7 +91,10 @@ describe("user profile behavior", () => {
       headers: aliceAuth,
     });
     expect(fullBob.status).toBe(200);
-    await expect(readJson(fullBob)).resolves.toMatchObject({
+    const fullBobBody = await readJson(fullBob) as {
+      data: Record<string, unknown>;
+    };
+    expect(fullBobBody).toMatchObject({
       status: "success",
       data: {
         user_id: "bob",
@@ -98,6 +107,7 @@ describe("user profile behavior", () => {
         collection_version: 0,
       },
     });
+    expect(fullBobBody.data).not.toHaveProperty("nfc_tag_key");
 
     const bobUpdate = await server.request(
       "/users/me",
@@ -167,6 +177,7 @@ describe("user profile behavior", () => {
       data: {
         user_id: "alice",
         role: "ATTENDEE",
+        nfc_tag_key: expect.stringMatching(/^[0-9a-f]{12}$/),
       },
     });
 
