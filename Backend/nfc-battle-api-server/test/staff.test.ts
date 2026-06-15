@@ -228,6 +228,46 @@ describe("staff scoreboard edge cases", () => {
     ).resolves.toEqual({ physical_id: "tag-bob" });
   });
 
+  it("returns a tag conflict if another request pairs the replacement tag during the write", async () => {
+    const server = await createTestServer();
+    const alice = await initializeUser(server, "alice");
+    await initializeUser(server, "bob");
+    const staffJwt = await authHeaders("staff", "STAFF");
+    await pairTag(server, alice.headers, "tag-alice");
+    server.env.DB = new PairTagDuringReplacementWriteDb(
+      server.db,
+      "tag-race",
+      "bob",
+    ) as unknown as D1Database;
+
+    const update = await server.request(
+      "/staff/replace_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: "alice",
+          new_physical_id: "tag-race",
+        },
+        staffJwt,
+      ),
+    );
+
+    expect(update.status).toBe(409);
+    await expect(readJson(update)).resolves.toMatchObject({
+      code: "TAG_ALREADY_PAIRED",
+    });
+    await expect(
+      server.db
+        .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'alice'")
+        .first<{ physical_id: string }>(),
+    ).resolves.toEqual({ physical_id: "tag-alice" });
+    await expect(
+      server.db
+        .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'bob'")
+        .first<{ physical_id: string }>(),
+    ).resolves.toEqual({ physical_id: "tag-race" });
+  });
+
   it("rejects invalid or unknown staff tag update requests", async () => {
     const server = await createTestServer();
     const staffJwt = await authHeaders("staff", "STAFF");
@@ -567,6 +607,74 @@ describe("staff scoreboard edge cases", () => {
     });
   });
 });
+
+class PairTagDuringReplacementWriteDb {
+  private hasInsertedRaceTag = false;
+
+  constructor(
+    private readonly db: D1Database,
+    private readonly physicalId: string,
+    private readonly userId: string,
+  ) {}
+
+  prepare(query: string) {
+    const statement = this.db.prepare(query);
+    if (!query.includes("ON CONFLICT(user_id) DO UPDATE")) {
+      return statement;
+    }
+
+    return new PairTagDuringReplacementWriteStatement(
+      statement,
+      async () => {
+        if (this.hasInsertedRaceTag) {
+          return;
+        }
+
+        this.hasInsertedRaceTag = true;
+        await this.db
+          .prepare(
+            `
+            INSERT INTO nfc_tags (physical_id, user_id, paired_at, locked_at)
+            VALUES (?1, ?2, ?3, ?3)
+            `,
+          )
+          .bind(this.physicalId, this.userId, "2026-04-12T15:00:00.000Z")
+          .run();
+      },
+    );
+  }
+
+  exec(query: string) {
+    return this.db.exec(query);
+  }
+}
+
+class PairTagDuringReplacementWriteStatement {
+  constructor(
+    private readonly statement: D1PreparedStatement,
+    private readonly beforeRun: () => Promise<void>,
+  ) {}
+
+  bind(...values: unknown[]) {
+    return new PairTagDuringReplacementWriteStatement(
+      this.statement.bind(...values),
+      this.beforeRun,
+    );
+  }
+
+  async run() {
+    await this.beforeRun();
+    return this.statement.run();
+  }
+
+  first<T = unknown>() {
+    return this.statement.first<T>();
+  }
+
+  all<T = unknown>() {
+    return this.statement.all<T>();
+  }
+}
 
 async function staffDangerHeaders() {
   return {

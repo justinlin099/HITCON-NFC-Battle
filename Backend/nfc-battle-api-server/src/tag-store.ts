@@ -77,19 +77,32 @@ export async function replaceUserTag(
   }
 
   const timestamp = nowIso();
-  const result = await db
-    .prepare(
-      `
-      INSERT INTO nfc_tags (physical_id, user_id, paired_at, locked_at)
-      VALUES (?1, ?2, ?3, ?3)
-      ON CONFLICT(user_id) DO UPDATE SET
-        physical_id = excluded.physical_id,
-        paired_at = excluded.paired_at,
-        locked_at = excluded.locked_at
-      `,
-    )
-    .bind(newPhysicalId, userId, timestamp)
-    .run();
+  let result: D1Result;
+  try {
+    result = await db
+      .prepare(
+        `
+        INSERT INTO nfc_tags (physical_id, user_id, paired_at, locked_at)
+        VALUES (?1, ?2, ?3, ?3)
+        ON CONFLICT(user_id) DO UPDATE SET
+          physical_id = excluded.physical_id,
+          paired_at = excluded.paired_at,
+          locked_at = excluded.locked_at
+        `,
+      )
+      .bind(newPhysicalId, userId, timestamp)
+      .run();
+  } catch (error) {
+    const ownerAfterFailedWrite = await getTagOwner(db, newPhysicalId);
+    if (ownerAfterFailedWrite && ownerAfterFailedWrite.user_id !== userId) {
+      return {
+        replaced: false,
+        conflict: true,
+      };
+    }
+
+    throw error;
+  }
 
   return {
     replaced: result.meta.changes > 0,
