@@ -60,7 +60,11 @@ collection.post("/phishing", async (c) => {
     getUserRow(c.env.DB, request.victim),
     getUserRow(c.env.DB, request.attacker),
   ]);
-  if (!victim || !attacker) {
+  if (!victim) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  if (!attacker) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
