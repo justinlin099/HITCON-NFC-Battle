@@ -47,6 +47,19 @@ export async function lazyInitializeUser(db: D1Database, userId: string, role: U
     .run();
 }
 
+export async function repairMissingNfcTagKey(db: D1Database, userId: string) {
+  await db
+    .prepare(
+      `
+      UPDATE users
+      SET nfc_tag_key = ?2
+      WHERE user_id = ?1 AND nfc_tag_key IS NULL
+      `,
+    )
+    .bind(userId, newNfcTagKey())
+    .run();
+}
+
 export async function getFullProfile(db: D1Database, userId: string) {
   const row = await getUserRow(db, userId);
   if (!row) {

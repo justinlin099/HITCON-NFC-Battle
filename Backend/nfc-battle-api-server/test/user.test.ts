@@ -211,6 +211,42 @@ describe("user profile behavior", () => {
     expect(prizeResult.status).toBe(409);
   });
 
+  it("repairs missing NFC tag keys for imported user rows", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+
+    await server.db
+      .prepare(
+        `
+        INSERT INTO users (
+          user_id,
+          display_name,
+          role,
+          emoji_icon,
+          bio,
+          pixel_avatar_base64
+        )
+        VALUES ('alice', 'Imported Alice', 'ATTENDEE', '🙂', '', '')
+        `,
+      )
+      .run();
+
+    const response = await server.request("/users/me", { headers: aliceAuth });
+
+    expect(response.status).toBe(200);
+    const body = await readJson(response) as {
+      data: {
+        nfc_tag_key: string;
+      };
+    };
+    expect(body.data.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
+    await expect(
+      server.db
+        .prepare("SELECT nfc_tag_key FROM users WHERE user_id = 'alice'")
+        .first<{ nfc_tag_key: string }>(),
+    ).resolves.toEqual({ nfc_tag_key: body.data.nfc_tag_key });
+  });
+
   it("supports cacheable batch, profile, and collection reads", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");

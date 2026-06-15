@@ -13,6 +13,7 @@ import {
   getUserRowsById,
   getVisibleProfile,
   lazyInitializeUser,
+  repairMissingNfcTagKey,
   type ProfileUpdate,
   publicFullProfileFromRow,
   updateUserProfile,
@@ -33,6 +34,7 @@ users.use("*", requireAuth);
 users.get("/me", async (c) => {
   const authUser = c.get("authUser");
   await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
+  await repairMissingNfcTagKey(c.env.DB, authUser.userId);
 
   const profile = await getFullProfile(c.env.DB, authUser.userId);
   if (!profile) {
