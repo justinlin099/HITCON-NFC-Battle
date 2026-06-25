@@ -1,14 +1,17 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:nfc_manager/nfc_manager.dart';
-import 'dart:convert';
 
 import 'pixel_theme.dart';
 import 'pixel_card_face.dart';
 import 'pixel_link_dialog.dart';
 import '../../services/auth_service.dart';
+import '../../services/nfc_session_controller.dart';
 
 typedef PixelGrid = List<List<Color?>>;
 
@@ -235,6 +238,7 @@ class _NtagScanPageState extends State<_NtagScanPage> {
   String _userId = '';
   bool _isReading = false;
   bool _isStoppingSession = false;
+  NfcSessionLease? _nfcLease;
 
   @override
   void initState() {
@@ -270,11 +274,20 @@ class _NtagScanPageState extends State<_NtagScanPage> {
       _status = '等待 NFC 標籤...';
     });
 
+    final NfcSessionLease? lease = await _acquireNfcLease();
+    if (lease == null) {
+      return;
+    }
+
     try {
       await NfcManager.instance.startSession(
         pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
         alertMessage: '請將 NTag 靠近 iPhone 頂部',
         onDiscovered: (NfcTag tag) async {
+          if (!lease.isActive) {
+            return;
+          }
+
           final Map<String, dynamic> data = tag.data;
           final dynamic idBytes =
               data['nfca']?['identifier'] ??
@@ -303,6 +316,7 @@ class _NtagScanPageState extends State<_NtagScanPage> {
             await NfcManager.instance.stopSession(alertMessage: 'NTag 配對完成');
           } finally {
             _isStoppingSession = false;
+            _releaseNfcLease(lease);
           }
 
           if (writeSuccess) {
@@ -311,14 +325,17 @@ class _NtagScanPageState extends State<_NtagScanPage> {
         },
         onError: (NfcError error) async {
           if (!mounted) {
+            _releaseNfcLease(lease);
             return;
           }
 
           if (_isStoppingSession) {
             _isStoppingSession = false;
+            _releaseNfcLease(lease);
             return;
           }
 
+          _releaseNfcLease(lease);
           setState(() {
             _status = error.type == NfcErrorType.userCanceled
                 ? 'NFC 掃描已關閉'
@@ -329,6 +346,7 @@ class _NtagScanPageState extends State<_NtagScanPage> {
       );
     } catch (e) {
       if (!mounted) {
+        _releaseNfcLease(lease);
         return;
       }
 
@@ -336,7 +354,64 @@ class _NtagScanPageState extends State<_NtagScanPage> {
         _status = 'NFC session 啟動失敗: $e';
         _isReading = false;
       });
+      _releaseNfcLease(lease);
     }
+  }
+
+  Future<NfcSessionLease?> _acquireNfcLease() async {
+    final NfcSessionLease? lease = await NfcSessionController.instance.acquire(
+      NfcSessionOwner.badgePairing,
+      preemptExisting: true,
+      onPreempt: _stopForPreempt,
+    );
+
+    if (lease == null) {
+      if (!mounted) {
+        return null;
+      }
+
+      final String activeOwner =
+          NfcSessionController.instance.activeOwner?.label ?? '其他 NFC 流程';
+      setState(() {
+        _status = 'NFC 正在由 $activeOwner 使用中';
+        _isReading = false;
+      });
+      return null;
+    }
+
+    _nfcLease = lease;
+    return lease;
+  }
+
+  void _releaseNfcLease([NfcSessionLease? lease]) {
+    final NfcSessionLease? target = lease ?? _nfcLease;
+    if (target == null) {
+      return;
+    }
+
+    if (identical(_nfcLease, target)) {
+      _nfcLease = null;
+    }
+    target.release();
+  }
+
+  Future<void> _stopForPreempt() async {
+    _nfcLease = null;
+    _isStoppingSession = true;
+    try {
+      await NfcManager.instance.stopSession();
+    } finally {
+      _isStoppingSession = false;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _status = 'NFC session 已由其他流程接管';
+      _isReading = false;
+    });
   }
 
   String _formatNfcError(dynamic error) {
@@ -418,7 +493,14 @@ class _NtagScanPageState extends State<_NtagScanPage> {
 
   @override
   void dispose() {
-    NfcManager.instance.stopSession();
+    final NfcSessionLease? lease = _nfcLease;
+    _nfcLease = null;
+    unawaited(
+      NfcManager.instance
+          .stopSession()
+          .catchError((_) {})
+          .whenComplete(() => lease?.release()),
+    );
     super.dispose();
   }
 

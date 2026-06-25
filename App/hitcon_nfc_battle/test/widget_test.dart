@@ -1,17 +1,25 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hitcon_nfc_battle/main.dart';
 
 void main() {
-  testWidgets('NTag reader page renders', (WidgetTester tester) async {
+  testWidgets('mock login page renders as initial route', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(const MyApp());
+
+    expect(find.text('🧪 角色測試面板'), findsOneWidget);
+    expect(find.text('🔴 測試模式已啟用'), findsOneWidget);
+    expect(find.text('🔧 管理者'), findsOneWidget);
+    expect(find.text('🎮 玩家'), findsOneWidget);
+  });
+
+  testWidgets('NTag reader route renders', (WidgetTester tester) async {
+    await tester.pumpWidget(const MyApp());
+
+    tester.state<NavigatorState>(find.byType(Navigator)).pushNamed('/home');
+    await tester.pumpAndSettle();
 
     expect(find.text('NTag Reader'), findsOneWidget);
     expect(find.textContaining('狀態：'), findsOneWidget);

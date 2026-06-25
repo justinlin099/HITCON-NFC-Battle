@@ -11,6 +11,7 @@ import 'pages/user/card_collection_page.dart';
 import 'pages/user/card_detail_page.dart';
 import 'pages/debug/test_login_page.dart';
 import 'services/auth_service.dart';
+import 'services/nfc_session_controller.dart';
 
 void main() {
   runApp(const MyApp());
@@ -70,11 +71,14 @@ class _AutoNtagScanner {
   final GlobalKey<NavigatorState> navigatorKey;
   bool _isScanning = false;
   bool _isHandling = false;
+  bool _isDisposed = false;
+  bool _isStoppingSession = false;
+  NfcSessionLease? _nfcLease;
   String _lastTagId = '';
   DateTime _lastReadTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   Future<void> start() async {
-    if (_isScanning) {
+    if (_isDisposed || _isScanning) {
       return;
     }
 
@@ -83,43 +87,77 @@ class _AutoNtagScanner {
       return;
     }
 
-    _isScanning = true;
-    await NfcManager.instance.startSession(
-      pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
-      onDiscovered: (NfcTag tag) async {
-        if (_isHandling) {
-          return;
-        }
-
-        final String uid = _readTagId(tag);
-        final DateTime now = DateTime.now();
-        final bool isDuplicate =
-            uid.isNotEmpty &&
-            uid == _lastTagId &&
-            now.difference(_lastReadTime).inMilliseconds < 1200;
-        if (isDuplicate) {
-          return;
-        }
-
-        _lastTagId = uid;
-        _lastReadTime = now;
-        _isHandling = true;
-
-        await NfcManager.instance.stopSession();
-        _isScanning = false;
-
-        await _handleScan(uid);
-        _isHandling = false;
-        await Future<void>.delayed(const Duration(milliseconds: 350));
-        await start();
-      },
-      onError: (_) async {
-        await NfcManager.instance.stopSession();
-        _isScanning = false;
-        await Future<void>.delayed(const Duration(milliseconds: 800));
-        await start();
-      },
+    final NfcSessionLease? lease = await NfcSessionController.instance.acquire(
+      NfcSessionOwner.appWideScanner,
+      onPreempt: _stopForPreempt,
     );
+    if (lease == null) {
+      await _restartLater(const Duration(milliseconds: 800));
+      return;
+    }
+
+    _nfcLease = lease;
+    _isScanning = true;
+
+    try {
+      await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
+        onDiscovered: (NfcTag tag) async {
+          if (!lease.isActive || _isHandling) {
+            return;
+          }
+
+          final String uid = _readTagId(tag);
+          final DateTime now = DateTime.now();
+          final bool isDuplicate =
+              uid.isNotEmpty &&
+              uid == _lastTagId &&
+              now.difference(_lastReadTime).inMilliseconds < 1200;
+          if (isDuplicate) {
+            return;
+          }
+
+          _lastTagId = uid;
+          _lastReadTime = now;
+          _isHandling = true;
+
+          try {
+            _isStoppingSession = true;
+            try {
+              await NfcManager.instance.stopSession();
+            } finally {
+              _isStoppingSession = false;
+              _isScanning = false;
+              _releaseLease(lease);
+            }
+            await _handleScan(uid);
+          } finally {
+            _isStoppingSession = false;
+            _isHandling = false;
+          }
+
+          await _restartLater(const Duration(milliseconds: 350));
+        },
+        onError: (_) async {
+          if (_isStoppingSession) {
+            return;
+          }
+
+          if (!lease.isActive) {
+            return;
+          }
+
+          await NfcManager.instance.stopSession();
+          _isScanning = false;
+          _releaseLease(lease);
+          await _restartLater(const Duration(milliseconds: 800));
+        },
+      );
+    } catch (_) {
+      _isScanning = false;
+      _releaseLease(lease);
+      await _restartLater(const Duration(milliseconds: 800));
+    }
   }
 
   Future<void> _handleScan(String uid) async {
@@ -245,7 +283,43 @@ class _AutoNtagScanner {
   }
 
   void dispose() {
-    NfcManager.instance.stopSession();
+    _isDisposed = true;
+    final NfcSessionLease? lease = _nfcLease;
+    _nfcLease = null;
+    unawaited(
+      NfcManager.instance
+          .stopSession()
+          .catchError((_) {})
+          .whenComplete(() => lease?.release()),
+    );
+  }
+
+  Future<void> _stopForPreempt() async {
+    _isScanning = false;
+    _isHandling = false;
+    _nfcLease = null;
+    _isStoppingSession = true;
+    try {
+      await NfcManager.instance.stopSession();
+    } finally {
+      _isStoppingSession = false;
+    }
+  }
+
+  Future<void> _restartLater(Duration delay) async {
+    if (_isDisposed) {
+      return;
+    }
+
+    await Future<void>.delayed(delay);
+    await start();
+  }
+
+  void _releaseLease(NfcSessionLease lease) {
+    if (identical(_nfcLease, lease)) {
+      _nfcLease = null;
+    }
+    lease.release();
   }
 }
 
@@ -276,6 +350,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   bool _isReading = false;
   bool _autoWriteEnabled = true;
   bool _isStoppingSession = false;
+  NfcSessionLease? _nfcLease;
   String _lastTagId = '';
   DateTime _lastReadTime = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -331,6 +406,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
         final String type = args['type'] as String? ?? 'unknown';
         final String message = args['message'] as String? ?? '';
 
+        _releaseNfcLease();
         setState(() {
           _status = type == 'userCanceled'
               ? 'NFC 掃描已關閉'
@@ -485,8 +561,73 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
     return defaultTargetPlatform == TargetPlatform.iOS;
   }
 
+  Future<NfcSessionLease?> _acquireNfcLease() async {
+    final NfcSessionLease? lease = await NfcSessionController.instance.acquire(
+      NfcSessionOwner.ntagReader,
+      preemptExisting: true,
+      onPreempt: _stopForPreempt,
+    );
+
+    if (lease == null) {
+      if (!mounted) {
+        return null;
+      }
+
+      final String activeOwner =
+          NfcSessionController.instance.activeOwner?.label ?? '其他 NFC 流程';
+      setState(() {
+        _status = 'NFC 正在由 $activeOwner 使用中';
+        _isReading = false;
+      });
+      return null;
+    }
+
+    _nfcLease = lease;
+    return lease;
+  }
+
+  void _releaseNfcLease([NfcSessionLease? lease]) {
+    final NfcSessionLease? target = lease ?? _nfcLease;
+    if (target == null) {
+      return;
+    }
+
+    if (identical(_nfcLease, target)) {
+      _nfcLease = null;
+    }
+    target.release();
+  }
+
+  Future<void> _stopForPreempt() async {
+    _nfcLease = null;
+    _isStoppingSession = true;
+    try {
+      if (_usesNativeNfcWriter) {
+        await _nativeNfcWriterChannel.invokeMethod<void>('stop');
+      } else {
+        await NfcManager.instance.stopSession();
+      }
+    } finally {
+      _isStoppingSession = false;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _status = 'NFC session 已由其他流程接管';
+      _isReading = false;
+    });
+  }
+
   Future<void> _startNativeContinuousWrite() async {
     if (_isReading) {
+      return;
+    }
+
+    final NfcSessionLease? lease = await _acquireNfcLease();
+    if (lease == null) {
       return;
     }
 
@@ -505,6 +646,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
       });
     } on PlatformException catch (e) {
       if (!mounted) {
+        _releaseNfcLease(lease);
         return;
       }
 
@@ -512,8 +654,10 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
         _status = 'NFC session 啟動失敗: ${e.message ?? e.code}';
         _isReading = false;
       });
+      _releaseNfcLease(lease);
     } catch (e) {
       if (!mounted) {
+        _releaseNfcLease(lease);
         return;
       }
 
@@ -521,6 +665,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
         _status = 'NFC session 啟動失敗: $e';
         _isReading = false;
       });
+      _releaseNfcLease(lease);
     }
   }
 
@@ -543,6 +688,11 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
       return;
     }
 
+    final NfcSessionLease? lease = await _acquireNfcLease();
+    if (lease == null) {
+      return;
+    }
+
     setState(() {
       _isReading = true;
       _status = '自動感應中... 請將 NTag 貼近手機';
@@ -555,6 +705,10 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
         pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
         alertMessage: '請將 NTag 靠近 iPhone 頂部',
         onDiscovered: (NfcTag tag) async {
+          if (!lease.isActive) {
+            return;
+          }
+
           final Map<String, dynamic> data = tag.data;
           final dynamic idBytes =
               data['nfca']?['identifier'] ??
@@ -630,8 +784,12 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
           });
 
           _isStoppingSession = true;
-          await NfcManager.instance.stopSession(alertMessage: 'NTag 處理完成');
-          _isStoppingSession = false;
+          try {
+            await NfcManager.instance.stopSession(alertMessage: 'NTag 處理完成');
+          } finally {
+            _isStoppingSession = false;
+            _releaseNfcLease(lease);
+          }
 
           if (!mounted) {
             return;
@@ -643,15 +801,18 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
         },
         onError: (NfcError error) async {
           if (!mounted) {
+            _releaseNfcLease(lease);
             return;
           }
 
           if (_isStoppingSession) {
             _isStoppingSession = false;
+            _releaseNfcLease(lease);
             return;
           }
 
           if (error.type == NfcErrorType.userCanceled) {
+            _releaseNfcLease(lease);
             setState(() {
               _status = 'NFC 掃描已關閉';
               _isReading = false;
@@ -663,10 +824,12 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
             _status = 'NFC session 結束: ${error.type.name} ${error.message}';
             _isReading = false;
           });
+          _releaseNfcLease(lease);
         },
       );
     } catch (e) {
       if (!mounted) {
+        _releaseNfcLease(lease);
         return;
       }
 
@@ -674,6 +837,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
         _status = 'NFC session 啟動失敗: $e';
         _isReading = false;
       });
+      _releaseNfcLease(lease);
     }
   }
 
@@ -748,17 +912,28 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   @override
   void dispose() {
     _nativeNfcWriterChannel.setMethodCallHandler(null);
+    final NfcSessionLease? lease = _nfcLease;
+    _nfcLease = null;
+
     if (_usesNativeNfcWriter) {
       unawaited(
-        _nativeNfcWriterChannel.invokeMethod<void>('stop').catchError((_) {}),
+        _nativeNfcWriterChannel
+            .invokeMethod<void>('stop')
+            .catchError((_) {})
+            .whenComplete(() => lease?.release()),
+      );
+    } else {
+      unawaited(
+        NfcManager.instance
+            .stopSession()
+            .catchError((_) {})
+            .whenComplete(() => lease?.release()),
       );
     }
+
     _linkSubscription?.cancel();
     _userIdController.dispose();
     _secretKeyController.dispose();
-    if (!_usesNativeNfcWriter) {
-      NfcManager.instance.stopSession();
-    }
     super.dispose();
   }
 
