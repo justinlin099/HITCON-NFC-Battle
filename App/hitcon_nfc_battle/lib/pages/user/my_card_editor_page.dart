@@ -234,6 +234,7 @@ class _NtagScanPageState extends State<_NtagScanPage> {
   String _tagId = '-';
   String _userId = '';
   bool _isReading = false;
+  bool _isStoppingSession = false;
 
   @override
   void initState() {
@@ -269,46 +270,80 @@ class _NtagScanPageState extends State<_NtagScanPage> {
       _status = '等待 NFC 標籤...';
     });
 
-    await NfcManager.instance.startSession(
-      pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
-      onDiscovered: (NfcTag tag) async {
-        final Map<String, dynamic> data = tag.data;
-        final dynamic idBytes =
-            data['nfca']?['identifier'] ??
-            data['mifare']?['identifier'] ??
-            data['mifareclassic']?['identifier'] ??
-            data['mifareultralight']?['identifier'];
+    try {
+      await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
+        alertMessage: '請將 NTag 靠近 iPhone 頂部',
+        onDiscovered: (NfcTag tag) async {
+          final Map<String, dynamic> data = tag.data;
+          final dynamic idBytes =
+              data['nfca']?['identifier'] ??
+              data['mifare']?['identifier'] ??
+              data['mifareclassic']?['identifier'] ??
+              data['mifareultralight']?['identifier'] ??
+              data['iso7816']?['identifier'] ??
+              data['iso15693']?['identifier'];
 
-        final String parsedTagId = _toHexString(idBytes);
+          final String parsedTagId = _toHexString(idBytes);
 
-        final bool writeSuccess = await _writeUserIdToTag(tag, _userId);
+          final bool writeSuccess = await _writeUserIdToTag(tag, _userId);
 
-        if (!mounted) {
-          return;
-        }
+          if (!mounted) {
+            return;
+          }
 
-        setState(() {
-          _tagId = parsedTagId.isEmpty ? '(讀不到 Tag ID)' : parsedTagId;
-          _status = writeSuccess ? '已寫入 user_id，配對完成' : '寫入失敗：此 Tag 不支援寫入';
-        });
+          setState(() {
+            _tagId = parsedTagId.isEmpty ? '(讀不到 Tag ID)' : parsedTagId;
+            _status = writeSuccess ? '已寫入 user_id，配對完成' : '寫入失敗：此 Tag 不支援寫入';
+          });
 
-        final NavigatorState navigator = Navigator.of(context);
-        await NfcManager.instance.stopSession();
-        if (writeSuccess) {
-          navigator.pop(_tagId);
-        }
-      },
-      onError: (dynamic error) async {
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          _status = '讀取失敗: $error';
-          _isReading = false;
-        });
-        await NfcManager.instance.stopSession();
-      },
-    );
+          final NavigatorState navigator = Navigator.of(context);
+          _isStoppingSession = true;
+          try {
+            await NfcManager.instance.stopSession(alertMessage: 'NTag 配對完成');
+          } finally {
+            _isStoppingSession = false;
+          }
+
+          if (writeSuccess) {
+            navigator.pop(_tagId);
+          }
+        },
+        onError: (NfcError error) async {
+          if (!mounted) {
+            return;
+          }
+
+          if (_isStoppingSession) {
+            _isStoppingSession = false;
+            return;
+          }
+
+          setState(() {
+            _status = error.type == NfcErrorType.userCanceled
+                ? 'NFC 掃描已關閉'
+                : '讀取失敗: ${_formatNfcError(error)}';
+            _isReading = false;
+          });
+        },
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _status = 'NFC session 啟動失敗: $e';
+        _isReading = false;
+      });
+    }
+  }
+
+  String _formatNfcError(dynamic error) {
+    if (error is NfcError) {
+      return error.message.isEmpty ? error.type.name : error.message;
+    }
+    return error.toString();
   }
 
   Future<bool> _writeUserIdToTag(NfcTag tag, String userId) async {
@@ -451,6 +486,12 @@ class _NtagScanPageState extends State<_NtagScanPage> {
                 Text(
                   'user_id: ${_userId.isEmpty ? '-' : _userId}',
                   style: TextStyle(color: PixelTheme.textWhite, fontSize: 12),
+                ),
+                const SizedBox(height: 14),
+                ElevatedButton.icon(
+                  onPressed: _isReading ? null : _startSession,
+                  icon: const Icon(Icons.nfc_rounded),
+                  label: Text(_isReading ? '掃描中...' : '重新開始掃描'),
                 ),
               ],
             ),
