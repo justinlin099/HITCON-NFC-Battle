@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 import 'config/app_config.dart';
 import 'pages/user/card_collection_page.dart';
@@ -24,20 +25,23 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-  late final _AutoNtagScanner _autoScanner;
+  static final bool _enableAppWideScanner = false;
+  _AutoNtagScanner? _autoScanner;
 
   @override
   void initState() {
     super.initState();
-    _autoScanner = _AutoNtagScanner(navigatorKey: _navigatorKey);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _autoScanner.start();
-    });
+    if (_enableAppWideScanner) {
+      _autoScanner = _AutoNtagScanner(navigatorKey: _navigatorKey);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _autoScanner?.start();
+      });
+    }
   }
 
   @override
   void dispose() {
-    _autoScanner.dispose();
+    _autoScanner?.dispose();
     super.dispose();
   }
 
@@ -81,6 +85,7 @@ class _AutoNtagScanner {
 
     _isScanning = true;
     await NfcManager.instance.startSession(
+      pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
       onDiscovered: (NfcTag tag) async {
         if (_isHandling) {
           return;
@@ -199,6 +204,7 @@ class _AutoNtagScanner {
     final Map<String, dynamic> data = tag.data;
     final dynamic idBytes =
         data['nfca']?['identifier'] ??
+        data['mifare']?['identifier'] ??
         data['mifareclassic']?['identifier'] ??
         data['mifareultralight']?['identifier'];
 
@@ -251,6 +257,9 @@ class NTagReaderPage extends StatefulWidget {
 }
 
 class _NTagReaderPageState extends State<NTagReaderPage> {
+  static const MethodChannel _nativeNfcWriterChannel = MethodChannel(
+    'hitcon_nfc_battle/native_nfc_writer',
+  );
   static const String _targetHost = 'game.hitcon2026.online';
   static const String _targetPath = '/b';
 
@@ -266,16 +275,72 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   String _lastIncomingUri = '-';
   bool _isReading = false;
   bool _autoWriteEnabled = true;
+  bool _isStoppingSession = false;
   String _lastTagId = '';
   DateTime _lastReadTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
     super.initState();
+    _nativeNfcWriterChannel.setMethodCallHandler(_handleNativeNfcWriterCall);
     _initAppLinks();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startAutoRead();
     });
+  }
+
+  Future<dynamic> _handleNativeNfcWriterCall(MethodCall call) async {
+    if (!mounted) {
+      return null;
+    }
+
+    final Map<String, dynamic> args = Map<String, dynamic>.from(
+      call.arguments as Map<dynamic, dynamic>? ?? <dynamic, dynamic>{},
+    );
+
+    switch (call.method) {
+      case 'onSessionActive':
+        setState(() {
+          _status = '自動感應中... 請將 NTag 貼近手機';
+          _isReading = true;
+        });
+        break;
+      case 'onScan':
+        final String uid = args['uid'] as String? ?? '';
+        final List<String> records =
+            (args['records'] as List<dynamic>? ?? <dynamic>[])
+                .whereType<String>()
+                .toList();
+        final String writeMessage = args['writeMessage'] as String? ?? '';
+
+        if (uid.isNotEmpty) {
+          _lastTagId = uid;
+          _lastReadTime = DateTime.now();
+        }
+
+        setState(() {
+          _tagId = uid.isEmpty ? '(讀不到 Tag ID)' : uid;
+          _records = records;
+          _status = records.isEmpty
+              ? '已讀取 NTag（無可解析 NDEF）$writeMessage，等待下一張'
+              : '已讀取 NTag$writeMessage，等待下一張';
+          _isReading = true;
+        });
+        break;
+      case 'onSessionEnded':
+        final String type = args['type'] as String? ?? 'unknown';
+        final String message = args['message'] as String? ?? '';
+
+        setState(() {
+          _status = type == 'userCanceled'
+              ? 'NFC 掃描已關閉'
+              : 'NFC session 結束: $type $message';
+          _isReading = false;
+        });
+        break;
+    }
+
+    return null;
   }
 
   Future<void> _initAppLinks() async {
@@ -393,17 +458,17 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   NdefRecord _buildTextRecord(String identifier, String text) {
     // 構建 NDEF Text record (TNF = NFC Well-known, Type = 'T')
     // Payload: [狀態碼][語言碼][文本]
-    // 狀態碼：0x65 = UTF-8 編碼 + 語言碼長度 2 ("en")
+    // 狀態碼：0x02 = UTF-8 編碼 + 語言碼長度 2 ("en")
     final List<int> encodedText = utf8.encode(text);
     final List<int> identifierBytes = utf8.encode(identifier);
     final List<int> languageCode = utf8.encode('en'); // 語言代碼 "en"
 
     // Payload 結構：
-    // Byte 0-5: 狀態碼 (0x65 = UTF-8, 語言碼長度為 2)
+    // Byte 0: 狀態碼 (0x02 = UTF-8, 語言碼長度為 2)
     // Bytes 1-2: 語言碼 ('en')
     // Bytes 3+: 文本內容
     final List<int> payload = <int>[
-      0x65, // UTF-8 編碼，語言碼長度 2
+      0x02, // UTF-8 編碼，語言碼長度 2
       ...languageCode,
       ...encodedText,
     ];
@@ -416,7 +481,55 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
     );
   }
 
+  bool get _usesNativeNfcWriter {
+    return defaultTargetPlatform == TargetPlatform.iOS;
+  }
+
+  Future<void> _startNativeContinuousWrite() async {
+    if (_isReading) {
+      return;
+    }
+
+    setState(() {
+      _isReading = true;
+      _status = '自動感應中... 請將 NTag 貼近手機';
+      _tagId = '-';
+      _records = <String>[];
+    });
+
+    try {
+      await _nativeNfcWriterChannel.invokeMethod<void>('startContinuousWrite', {
+        'uri': _buildTargetUri(),
+        'secretKey': _secretKeyController.text.trim(),
+        'autoWrite': _autoWriteEnabled,
+      });
+    } on PlatformException catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _status = 'NFC session 啟動失敗: ${e.message ?? e.code}';
+        _isReading = false;
+      });
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _status = 'NFC session 啟動失敗: $e';
+        _isReading = false;
+      });
+    }
+  }
+
   Future<void> _startAutoRead() async {
+    if (_usesNativeNfcWriter) {
+      await _startNativeContinuousWrite();
+      return;
+    }
+
     final bool isAvailable = await NfcManager.instance.isAvailable();
     if (!isAvailable) {
       setState(() {
@@ -437,85 +550,131 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
       _records = <String>[];
     });
 
-    await NfcManager.instance.startSession(
-      onDiscovered: (NfcTag tag) async {
-        final Map<String, dynamic> data = tag.data;
-        final dynamic idBytes =
-            data['nfca']?['identifier'] ??
-            data['mifareclassic']?['identifier'] ??
-            data['mifareultralight']?['identifier'];
+    try {
+      await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
+        alertMessage: '請將 NTag 靠近 iPhone 頂部',
+        onDiscovered: (NfcTag tag) async {
+          final Map<String, dynamic> data = tag.data;
+          final dynamic idBytes =
+              data['nfca']?['identifier'] ??
+              data['mifare']?['identifier'] ??
+              data['mifareclassic']?['identifier'] ??
+              data['mifareultralight']?['identifier'];
 
-        final String parsedTagId = _toHexString(idBytes);
-        final DateTime now = DateTime.now();
-        final bool isDuplicateRead =
-            parsedTagId.isNotEmpty &&
-            parsedTagId == _lastTagId &&
-            now.difference(_lastReadTime).inMilliseconds < 1200;
+          final String parsedTagId = _toHexString(idBytes);
+          final DateTime now = DateTime.now();
+          final bool isDuplicateRead =
+              parsedTagId.isNotEmpty &&
+              parsedTagId == _lastTagId &&
+              now.difference(_lastReadTime).inMilliseconds < 1200;
 
-        if (isDuplicateRead) {
-          return;
-        }
+          if (isDuplicateRead) {
+            return;
+          }
 
-        _lastTagId = parsedTagId;
-        _lastReadTime = now;
+          _lastTagId = parsedTagId;
+          _lastReadTime = now;
 
-        final Ndef? ndef = Ndef.from(tag);
-        final List<String> parsedRecords = <String>[];
-        final List<String> existingSecrets = <String>[];
+          final Ndef? ndef = Ndef.from(tag);
+          final List<String> parsedRecords = <String>[];
+          final List<String> existingSecrets = <String>[];
 
-        if (ndef != null) {
-          final NdefMessage? message = ndef.cachedMessage;
-          if (message != null) {
-            for (final NdefRecord record in message.records) {
-              parsedRecords.add(_parseRecord(record));
-              final String? secret = _extractSecretKeyFromRecord(record);
-              if (secret != null) {
-                existingSecrets.add(secret);
+          if (ndef != null) {
+            final NdefMessage? message = ndef.cachedMessage;
+            if (message != null) {
+              for (final NdefRecord record in message.records) {
+                parsedRecords.add(_parseRecord(record));
+                final String? secret = _extractSecretKeyFromRecord(record);
+                if (secret != null) {
+                  existingSecrets.add(secret);
+                }
               }
             }
           }
-        }
 
-        String writeMessage = '';
-        if (_autoWriteEnabled) {
-          final String targetUri = _buildTargetUri();
-          final String targetSecret = _secretKeyController.text.trim();
-          final bool uriMatches = parsedRecords.contains(targetUri);
-          final bool secretMatches = targetSecret.isEmpty
-              ? existingSecrets.isEmpty
-              : existingSecrets.length == 1 &&
-                    existingSecrets.first == targetSecret;
+          String writeMessage = '';
+          if (_autoWriteEnabled) {
+            final String targetUri = _buildTargetUri();
+            final String targetSecret = _secretKeyController.text.trim();
+            final bool uriMatches = parsedRecords.contains(targetUri);
+            final bool secretMatches = targetSecret.isEmpty
+                ? existingSecrets.isEmpty
+                : existingSecrets.length == 1 &&
+                      existingSecrets.first == targetSecret;
 
-          if (uriMatches && secretMatches) {
-            writeMessage = targetSecret.isEmpty
-                ? '（Tag 已是目標 URI，略過寫入）'
-                : '（Tag 已是目標 URI + secret，略過寫入）';
-          } else {
-            try {
-              final bool writeSuccess = await _writeUriToTag(tag, targetUri);
-              writeMessage = writeSuccess ? '（已寫入 URI）' : '（無法寫入：Tag 不支援寫入）';
-            } catch (e) {
-              writeMessage = '（寫入失敗：$e）';
+            if (uriMatches && secretMatches) {
+              writeMessage = targetSecret.isEmpty
+                  ? '（Tag 已是目標 URI，略過寫入）'
+                  : '（Tag 已是目標 URI + secret，略過寫入）';
+            } else {
+              try {
+                final bool writeSuccess = await _writeUriToTag(tag, targetUri);
+                writeMessage = writeSuccess ? '（已寫入 URI）' : '（無法寫入：Tag 不支援寫入）';
+              } catch (e) {
+                writeMessage = '（寫入失敗：$e）';
+              }
             }
           }
-        }
 
-        setState(() {
-          _tagId = parsedTagId.isEmpty ? '(讀不到 Tag ID)' : parsedTagId;
-          _records = parsedRecords;
-          _status = parsedRecords.isEmpty
-              ? '已讀取，等待下一張 NTag（無可解析 NDEF）$writeMessage'
-              : '已讀取，等待下一張 NTag$writeMessage';
-        });
-      },
-      onError: (dynamic error) async {
-        setState(() {
-          _status = '讀取失敗: $error';
-          _isReading = false;
-        });
-        await NfcManager.instance.stopSession();
-      },
-    );
+          if (!mounted) {
+            return;
+          }
+
+          setState(() {
+            _tagId = parsedTagId.isEmpty ? '(讀不到 Tag ID)' : parsedTagId;
+            _records = parsedRecords;
+            _status = parsedRecords.isEmpty
+                ? '已讀取 NTag（無可解析 NDEF）$writeMessage'
+                : '已讀取 NTag$writeMessage';
+          });
+
+          _isStoppingSession = true;
+          await NfcManager.instance.stopSession(alertMessage: 'NTag 處理完成');
+          _isStoppingSession = false;
+
+          if (!mounted) {
+            return;
+          }
+
+          setState(() {
+            _isReading = false;
+          });
+        },
+        onError: (NfcError error) async {
+          if (!mounted) {
+            return;
+          }
+
+          if (_isStoppingSession) {
+            _isStoppingSession = false;
+            return;
+          }
+
+          if (error.type == NfcErrorType.userCanceled) {
+            setState(() {
+              _status = 'NFC 掃描已關閉';
+              _isReading = false;
+            });
+            return;
+          }
+
+          setState(() {
+            _status = 'NFC session 結束: ${error.type.name} ${error.message}';
+            _isReading = false;
+          });
+        },
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _status = 'NFC session 啟動失敗: $e';
+        _isReading = false;
+      });
+    }
   }
 
   String _toHexString(dynamic bytes) {
@@ -588,10 +747,18 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
   @override
   void dispose() {
+    _nativeNfcWriterChannel.setMethodCallHandler(null);
+    if (_usesNativeNfcWriter) {
+      unawaited(
+        _nativeNfcWriterChannel.invokeMethod<void>('stop').catchError((_) {}),
+      );
+    }
     _linkSubscription?.cancel();
     _userIdController.dispose();
     _secretKeyController.dispose();
-    NfcManager.instance.stopSession();
+    if (!_usesNativeNfcWriter) {
+      NfcManager.instance.stopSession();
+    }
     super.dispose();
   }
 
@@ -644,6 +811,12 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
             Text(
               '目標 URI: ${_buildTargetUri()}',
               style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _isReading ? null : _startAutoRead,
+              icon: const Icon(Icons.nfc_rounded),
+              label: Text(_isReading ? '掃描中' : '重新開始掃描'),
             ),
             const SizedBox(height: 20),
             Text('NDEF 內容', style: Theme.of(context).textTheme.titleLarge),

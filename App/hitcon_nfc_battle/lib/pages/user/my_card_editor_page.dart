@@ -270,10 +270,12 @@ class _NtagScanPageState extends State<_NtagScanPage> {
     });
 
     await NfcManager.instance.startSession(
+      pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
       onDiscovered: (NfcTag tag) async {
         final Map<String, dynamic> data = tag.data;
         final dynamic idBytes =
             data['nfca']?['identifier'] ??
+            data['mifare']?['identifier'] ??
             data['mifareclassic']?['identifier'] ??
             data['mifareultralight']?['identifier'];
 
@@ -358,7 +360,7 @@ class _NtagScanPageState extends State<_NtagScanPage> {
     final List<int> identifierBytes = utf8.encode(identifier);
     final List<int> languageCode = utf8.encode('en');
 
-    final List<int> payload = <int>[0x65, ...languageCode, ...encodedText];
+    final List<int> payload = <int>[0x02, ...languageCode, ...encodedText];
 
     return NdefRecord(
       typeNameFormat: NdefTypeNameFormat.nfcWellknown,
