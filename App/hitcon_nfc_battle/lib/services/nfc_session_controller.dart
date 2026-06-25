@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-enum NfcSessionOwner { appWideScanner, ntagReader, badgePairing }
+enum NfcSessionOwner { collectionScanner, ntagReader, badgePairing }
 
 extension NfcSessionOwnerLabel on NfcSessionOwner {
   String get label {
     switch (this) {
-      case NfcSessionOwner.appWideScanner:
-        return '全域遊戲掃描';
+      case NfcSessionOwner.collectionScanner:
+        return '玩家集卡掃描';
       case NfcSessionOwner.ntagReader:
         return 'NTag 讀寫工具';
       case NfcSessionOwner.badgePairing:
@@ -18,7 +18,7 @@ extension NfcSessionOwnerLabel on NfcSessionOwner {
 
   int get priority {
     switch (this) {
-      case NfcSessionOwner.appWideScanner:
+      case NfcSessionOwner.collectionScanner:
         return 0;
       case NfcSessionOwner.ntagReader:
       case NfcSessionOwner.badgePairing:

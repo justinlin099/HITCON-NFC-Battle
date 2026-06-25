@@ -9,6 +9,7 @@ import 'pixel_theme.dart';
 import 'score_board_page.dart';
 
 import '../../services/auth_service.dart';
+import '../../services/collection_ntag_scanner.dart';
 import '../../services/mock_api_service.dart';
 
 class CardCollectionPage extends StatefulWidget {
@@ -22,6 +23,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   static const int _prizeRequirement = 9;
 
   final AuthService _authService = AuthService();
+  late final CollectionNtagScanner _collectionScanner;
 
   PixelScheme _selectedScheme = PixelTheme.defaultScheme;
   int _selectedTabIndex = 0;
@@ -33,7 +35,19 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   @override
   void initState() {
     super.initState();
+    _collectionScanner = CollectionNtagScanner(
+      onTagDiscovered: _handleScannedUid,
+    );
     _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _collectionScanner.start();
+    });
+  }
+
+  @override
+  void dispose() {
+    _collectionScanner.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -76,6 +90,57 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       _collectionData?['total_collected'] as int? ?? _cards.length;
 
   bool get _isComplete => _totalCollected >= _prizeRequirement;
+
+  Future<void> _handleScannedUid(String uid) async {
+    if (uid.isEmpty) {
+      return;
+    }
+
+    await _authService.pairNfcTag(uid);
+    final Map<String, dynamic>? collectionResult = await _authService
+        .fetchCollectionRecords();
+
+    if (collectionResult == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _collectionData = collectionResult;
+    });
+
+    final List<dynamic> raw =
+        collectionResult['collection'] as List<dynamic>? ?? <dynamic>[];
+    final List<Map<String, dynamic>> cards = raw
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    final int index = cards.indexWhere((card) => card['physical_uid'] == uid);
+    if (index == -1) {
+      return;
+    }
+
+    final Map<String, dynamic> card = cards[index];
+    final String title =
+        card['card_title'] as String? ??
+        card['tag_name'] as String? ??
+        'Unknown';
+    final String attributeEmoji = card['attribute_emoji'] as String? ?? '❓';
+    final String attributeLabel =
+        card['attribute_label'] as String? ?? 'UNKNOWN';
+    final String rawLink = card['link'] as String? ?? '';
+    final String link = rawLink.trim().isEmpty ? 'https://hitcon.org' : rawLink;
+
+    await _openCardDetail(
+      heroTag: 'scan-$uid',
+      title: title,
+      attributeEmoji: attributeEmoji,
+      attributeLabel: attributeLabel,
+      link: link,
+      uid: card['physical_uid'] as String? ?? uid,
+      collectedAt: card['collected_at'] as String? ?? '',
+      cardColor: _PixelCard.colorForIndex(index),
+      imageAsset: _PixelCard.imageAssetForIndex(index),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

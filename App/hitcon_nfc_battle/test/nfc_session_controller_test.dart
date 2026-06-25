@@ -13,28 +13,28 @@ void main() {
     controller.resetForTest();
   });
 
-  test('blocks app-wide scanner while a tool owns NFC', () async {
+  test('blocks collection scanner while a tool owns NFC', () async {
     final NfcSessionLease? toolLease = await controller.acquire(
       NfcSessionOwner.ntagReader,
     );
 
-    final NfcSessionLease? appWideLease = await controller.acquire(
-      NfcSessionOwner.appWideScanner,
+    final NfcSessionLease? collectionLease = await controller.acquire(
+      NfcSessionOwner.collectionScanner,
     );
 
     expect(toolLease, isNotNull);
     expect(toolLease!.isActive, isTrue);
-    expect(appWideLease, isNull);
+    expect(collectionLease, isNull);
     expect(controller.activeOwner, NfcSessionOwner.ntagReader);
   });
 
-  test('lets foreground tools preempt app-wide scanner', () async {
-    var appWideWasPreempted = false;
+  test('lets foreground tools preempt collection scanner', () async {
+    var collectionScannerWasPreempted = false;
 
-    final NfcSessionLease? appWideLease = await controller.acquire(
-      NfcSessionOwner.appWideScanner,
+    final NfcSessionLease? collectionLease = await controller.acquire(
+      NfcSessionOwner.collectionScanner,
       onPreempt: () {
-        appWideWasPreempted = true;
+        collectionScannerWasPreempted = true;
       },
     );
 
@@ -43,24 +43,24 @@ void main() {
       preemptExisting: true,
     );
 
-    expect(appWideLease, isNotNull);
-    expect(appWideLease!.isActive, isFalse);
-    expect(appWideWasPreempted, isTrue);
+    expect(collectionLease, isNotNull);
+    expect(collectionLease!.isActive, isFalse);
+    expect(collectionScannerWasPreempted, isTrue);
     expect(toolLease, isNotNull);
     expect(toolLease!.isActive, isTrue);
     expect(controller.activeOwner, NfcSessionOwner.ntagReader);
   });
 
   test('does not let an old lease release the new owner', () async {
-    final NfcSessionLease? appWideLease = await controller.acquire(
-      NfcSessionOwner.appWideScanner,
+    final NfcSessionLease? collectionLease = await controller.acquire(
+      NfcSessionOwner.collectionScanner,
     );
     final NfcSessionLease? toolLease = await controller.acquire(
       NfcSessionOwner.badgePairing,
       preemptExisting: true,
     );
 
-    appWideLease!.release();
+    collectionLease!.release();
 
     expect(toolLease, isNotNull);
     expect(toolLease!.isActive, isTrue);
