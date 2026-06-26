@@ -7,10 +7,14 @@ import 'nfc_session_controller.dart';
 typedef CollectionNtagHandler = Future<void> Function(String uid);
 
 class CollectionNtagScanner {
-  CollectionNtagScanner({required CollectionNtagHandler onTagDiscovered})
-    : _onTagDiscovered = onTagDiscovered;
+  CollectionNtagScanner({
+    required CollectionNtagHandler onTagDiscovered,
+    bool autoRestart = true,
+  }) : _onTagDiscovered = onTagDiscovered,
+       _autoRestart = autoRestart;
 
   final CollectionNtagHandler _onTagDiscovered;
+  final bool _autoRestart;
 
   bool _isScanning = false;
   bool _isHandling = false;
@@ -35,7 +39,7 @@ class CollectionNtagScanner {
       onPreempt: _stopForPreempt,
     );
     if (lease == null) {
-      await _restartLater(const Duration(milliseconds: 800));
+      await _restartLaterIfEnabled(const Duration(milliseconds: 800));
       return;
     }
 
@@ -45,6 +49,7 @@ class CollectionNtagScanner {
     try {
       await NfcManager.instance.startSession(
         pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
+        alertMessage: '請將卡片靠近 iPhone 頂部',
         onDiscovered: (NfcTag tag) async {
           if (!lease.isActive || _isHandling || _isDisposed) {
             return;
@@ -84,7 +89,7 @@ class CollectionNtagScanner {
             _isHandling = false;
           }
 
-          await _restartLater(const Duration(milliseconds: 350));
+          await _restartLaterIfEnabled(const Duration(milliseconds: 350));
         },
         onError: (_) async {
           if (_isStoppingSession || !lease.isActive || _isDisposed) {
@@ -94,13 +99,13 @@ class CollectionNtagScanner {
           await NfcManager.instance.stopSession();
           _isScanning = false;
           _releaseLease(lease);
-          await _restartLater(const Duration(milliseconds: 800));
+          await _restartLaterIfEnabled(const Duration(milliseconds: 800));
         },
       );
     } catch (_) {
       _isScanning = false;
       _releaseLease(lease);
-      await _restartLater(const Duration(milliseconds: 800));
+      await _restartLaterIfEnabled(const Duration(milliseconds: 800));
     }
   }
 
@@ -127,7 +132,17 @@ class CollectionNtagScanner {
       _isStoppingSession = false;
     }
 
-    unawaited(_restartLater(const Duration(milliseconds: 800)));
+    if (_autoRestart) {
+      unawaited(_restartLater(const Duration(milliseconds: 800)));
+    }
+  }
+
+  Future<void> _restartLaterIfEnabled(Duration delay) async {
+    if (!_autoRestart) {
+      return;
+    }
+
+    await _restartLater(delay);
   }
 
   Future<void> _restartLater(Duration delay) async {

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'my_card_editor_page.dart';
@@ -37,11 +38,14 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     super.initState();
     _collectionScanner = CollectionNtagScanner(
       onTagDiscovered: _handleScannedUid,
+      autoRestart: !_usesManualCollectionScan,
     );
     _loadData();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _collectionScanner.start();
-    });
+    if (!_usesManualCollectionScan) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _collectionScanner.start();
+      });
+    }
   }
 
   @override
@@ -90,6 +94,14 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       _collectionData?['total_collected'] as int? ?? _cards.length;
 
   bool get _isComplete => _totalCollected >= _prizeRequirement;
+
+  bool get _usesManualCollectionScan {
+    return defaultTargetPlatform == TargetPlatform.iOS;
+  }
+
+  Future<void> _startCollectionScan() async {
+    await _collectionScanner.start();
+  }
 
   Future<void> _handleScannedUid(String uid) async {
     if (uid.isEmpty) {
@@ -202,12 +214,27 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                 _PixelButton(onPressed: _loadData, label: '↻', tooltip: '重新整理'),
             ],
           ),
-          body: IndexedStack(
-            index: _selectedTabIndex,
+          body: Stack(
+            fit: StackFit.expand,
             children: [
-              _buildCollectionBody(),
-              MyCardEditorPage(scheme: _selectedScheme),
-              ScoreBoardPage(scheme: _selectedScheme),
+              IndexedStack(
+                index: _selectedTabIndex,
+                children: [
+                  _buildCollectionBody(),
+                  MyCardEditorPage(scheme: _selectedScheme),
+                  ScoreBoardPage(scheme: _selectedScheme),
+                ],
+              ),
+              if (_usesManualCollectionScan && _selectedTabIndex == 0)
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: _PixelIconButton(
+                    onPressed: _startCollectionScan,
+                    icon: Icons.nfc_rounded,
+                    tooltip: '掃描卡片',
+                  ),
+                ),
             ],
           ),
           bottomNavigationBar: NavigationBarTheme(
@@ -377,7 +404,12 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
           ),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 32),
+              padding: EdgeInsets.fromLTRB(
+                12,
+                0,
+                12,
+                _usesManualCollectionScan ? 88 : 32,
+              ),
               child: _PrizePanel(
                 totalCollected: _totalCollected,
                 requiredCount: _prizeRequirement,
@@ -1159,6 +1191,77 @@ class _PrizePanel extends StatelessWidget {
 }
 
 /// 像素風按鈕
+class _PixelIconButton extends StatefulWidget {
+  const _PixelIconButton({
+    required this.onPressed,
+    required this.icon,
+    required this.tooltip,
+  });
+
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final String tooltip;
+
+  @override
+  State<_PixelIconButton> createState() => _PixelIconButtonState();
+}
+
+class _PixelIconButtonState extends State<_PixelIconButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool enabled = widget.onPressed != null;
+    final Color color = enabled ? PixelTheme.accent : PixelTheme.textGray;
+    final Color bgColor = enabled
+        ? PixelTheme.bgDark
+        : PixelTheme.bgMid.withValues(alpha: 0.5);
+
+    return GestureDetector(
+      onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+      onTapUp: enabled
+          ? (_) {
+              setState(() => _pressed = false);
+              widget.onPressed?.call();
+            }
+          : null,
+      onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        label: widget.tooltip,
+        child: Tooltip(
+          message: widget.tooltip,
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: bgColor,
+              border: Border.all(color: color, width: 2),
+              boxShadow: [
+                if (_pressed && enabled)
+                  const BoxShadow(
+                    color: Colors.black,
+                    blurRadius: 0,
+                    offset: Offset(1, 1),
+                  )
+                else if (enabled)
+                  const BoxShadow(
+                    color: Colors.black,
+                    blurRadius: 0,
+                    offset: Offset(3, 3),
+                  ),
+              ],
+            ),
+            alignment: Alignment.center,
+            child: Icon(widget.icon, color: color, size: 24),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PixelButton extends StatefulWidget {
   const _PixelButton({
     required this.onPressed,
