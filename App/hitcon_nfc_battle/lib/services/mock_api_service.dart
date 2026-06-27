@@ -238,6 +238,7 @@ class MockApiService {
         'uid': uid,
         'owner': userId,
         'name': 'Card_${_mockTags.length + 1}',
+        'link': 'https://hitcon.org',
         'collected_at': DateTime.now().toIso8601String(),
       });
     }
@@ -270,6 +271,7 @@ class MockApiService {
             'image_file': tag['image_file'],
             'attribute_emoji': tag['attribute_emoji'],
             'attribute_label': tag['attribute_label'],
+            'link': tag['link'],
             'physical_uid': tag['uid'],
           },
         )
