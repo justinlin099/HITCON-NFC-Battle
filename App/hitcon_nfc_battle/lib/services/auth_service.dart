@@ -224,7 +224,7 @@ class AuthService {
     required Map<String, dynamic> metadata,
   }) async {
     if (_currentUserId == null) {
-      _log('??  No user logged in');
+      _log('Warning: No user logged in');
       return null;
     }
 
@@ -242,7 +242,7 @@ class AuthService {
         // TODO: POST PNG multipart to /card-print-orders.
       }
     } catch (e) {
-      _log('??Error submitting card print order: $e');
+      _log('Error submitting card print order: $e');
     }
 
     return null;

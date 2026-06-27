@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,10 +37,10 @@ Widget _withUnifont(BuildContext context, Widget child) {
 }
 
 enum _EditorTool {
-  brush('Brush'),
-  eraser('Erase'),
-  bucket('Fill'),
-  picker('Pick');
+  brush('筆刷'),
+  eraser('橡皮擦'),
+  bucket('填滿'),
+  picker('吸色');
 
   const _EditorTool(this.label);
   final String label;
@@ -1525,7 +1526,7 @@ class _BarcodeCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${order.format} 繚 ${order.fileName}',
+            '${order.format} - ${order.fileName}',
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.black,
@@ -2411,7 +2412,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                           side: BorderSide(color: PixelTheme.accent, width: 2),
                         ),
                         icon: const Icon(Icons.tune_rounded),
-                        label: const Text('?芾?憿 (RGB)'),
+                        label: const Text('自訂顏色 (RGB)'),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -2427,7 +2428,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                       ),
                       alignment: Alignment.center,
                       child: Text(
-                        '?汗?脣?\n#${_hex6(_selectedColor)}',
+                        '目前顏色\n#${_hex6(_selectedColor)}',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: _selectedColor.computeLuminance() > 0.5
@@ -2450,7 +2451,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                             backgroundColor: PixelTheme.accent,
                             foregroundColor: PixelTheme.bgDark,
                           ),
-                          child: const Text('憟憿'),
+                          child: const Text('套用顏色'),
                         ),
                       ),
                     ),
@@ -2483,13 +2484,13 @@ class _PixelEditorScreen extends StatefulWidget {
 class _PixelEditorScreenState extends State<_PixelEditorScreen> {
   static const double _canvasViewSize = 360;
 
-  final ScrollController _scrollController = ScrollController();
   late PixelGrid _pixels;
   late Color _brushColor;
   _EditorTool _tool = _EditorTool.brush;
   int _brushSize = 1;
   bool _showGrid = true;
   bool _strokeInProgress = false;
+  ({int x, int y})? _lastPaintCell;
   final List<PixelGrid> _undoStack = <PixelGrid>[];
   final List<PixelGrid> _redoStack = <PixelGrid>[];
   String _status = '初始化中...';
@@ -2541,6 +2542,33 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     }
   }
 
+  void _paintLine(int startX, int startY, int endX, int endY) {
+    int x = startX;
+    int y = startY;
+    final int dx = (endX - startX).abs();
+    final int dy = -(endY - startY).abs();
+    final int stepX = startX < endX ? 1 : -1;
+    final int stepY = startY < endY ? 1 : -1;
+    int error = dx + dy;
+
+    while (true) {
+      _paintCell(x, y);
+      if (x == endX && y == endY) {
+        break;
+      }
+
+      final int doubledError = 2 * error;
+      if (doubledError >= dy) {
+        error += dy;
+        x += stepX;
+      }
+      if (doubledError <= dx) {
+        error += dx;
+        y += stepY;
+      }
+    }
+  }
+
   void _handleCanvasTouch(
     Offset localPosition,
     Size size, {
@@ -2562,34 +2590,98 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
       case _EditorTool.brush:
       case _EditorTool.eraser:
         setState(() {
-          _paintCell(x, y);
+          final ({int x, int y})? lastPaintCell = _lastPaintCell;
+          if (lastPaintCell == null) {
+            _paintCell(x, y);
+          } else {
+            _paintLine(lastPaintCell.x, lastPaintCell.y, x, y);
+          }
+          _lastPaintCell = (x: x, y: y);
         });
         break;
       case _EditorTool.bucket:
+        if (!beginStroke) {
+          return;
+        }
         setState(() {
           _bucketFill(x, y, _brushColor);
         });
         _strokeInProgress = false;
+        _lastPaintCell = null;
         break;
       case _EditorTool.picker:
+        if (!beginStroke) {
+          return;
+        }
         final Color? picked = _pixels[y][x];
         if (picked != null) {
           setState(() {
             _brushColor = picked;
             _tool = _EditorTool.brush;
-            _status = '匯入圖片失敗';
+            _status = '已吸取顏色';
           });
         }
         _strokeInProgress = false;
+        _lastPaintCell = null;
         break;
     }
+  }
+
+  void _finishCanvasPointer() {
+    if (!_strokeInProgress && _lastPaintCell == null) {
+      return;
+    }
+
+    setState(() {
+      _strokeInProgress = false;
+      _lastPaintCell = null;
+    });
+  }
+
+  Future<void> _confirmClearCanvas() async {
+    final bool? shouldClear = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return _withUnifont(
+          context,
+          AlertDialog(
+            backgroundColor: PixelTheme.bgMid,
+            title: Text('清空畫布', style: TextStyle(color: PixelTheme.textWhite)),
+            content: Text(
+              '目前的像素圖會被清空。你仍可用「復原」找回上一個版本。',
+              style: TextStyle(color: PixelTheme.textWhite),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: PixelTheme.warning,
+                  foregroundColor: PixelTheme.textWhite,
+                ),
+                child: const Text('清空'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted || shouldClear != true) {
+      return;
+    }
+
+    _clearCanvas();
   }
 
   void _clearCanvas() {
     _pushHistory();
     setState(() {
       _pixels = _createEmptyGrid(widget.canvasSize);
-      _status = 'Unsupported image format';
+      _status = '畫布已清空';
     });
   }
 
@@ -2605,6 +2697,11 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
 
     final img.Image? decoded = img.decodeImage(bytes);
     if (decoded == null) {
+      if (mounted) {
+        setState(() {
+          _status = '匯入圖片失敗：不支援的圖片格式';
+        });
+      }
       return;
     }
 
@@ -2638,8 +2735,8 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     setState(() {
       _pixels = nextPixels;
       _status = preprocessed.usedBackgroundColor
-          ? 'Imported ${preprocessed.sourceName} (${preprocessed.sourceFormat}); transparent background filled white.'
-          : 'Imported ${preprocessed.sourceName} (${preprocessed.sourceFormat}).';
+          ? '已匯入 ${preprocessed.sourceName} (${preprocessed.sourceFormat})，透明背景已填白'
+          : '已匯入 ${preprocessed.sourceName} (${preprocessed.sourceFormat})';
     });
   }
 
@@ -2658,7 +2755,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     setState(() {
       _redoStack.add(_cloneGrid(_pixels));
       _pixels = _undoStack.removeLast();
-      _status = 'Undo';
+      _status = '已復原';
     });
   }
 
@@ -2669,7 +2766,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     setState(() {
       _undoStack.add(_cloneGrid(_pixels));
       _pixels = _redoStack.removeLast();
-      _status = 'Redo';
+      _status = '已重做';
     });
   }
 
@@ -2719,13 +2816,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
       }
     }
 
-    _status = 'Canvas cleared';
-  }
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
+    _status = '已填滿';
   }
 
   @override
@@ -2741,268 +2832,278 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
         ),
         body: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
-            final double size = constraints.maxWidth < _canvasViewSize
-                ? constraints.maxWidth
-                : _canvasViewSize;
             return Column(
               children: [
                 Expanded(
-                  child: SingleChildScrollView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(12),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minHeight: constraints.maxHeight - 24,
-                      ),
-                      child: Column(
-                        children: [
-                          Center(
-                            child: SizedBox(
-                              width: size,
-                              height: size,
-                              child: GestureDetector(
-                                onPanDown: (DragDownDetails details) =>
-                                    _handleCanvasTouch(
-                                      details.localPosition,
-                                      Size(size, size),
-                                      beginStroke: true,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder:
+                                (
+                                  BuildContext context,
+                                  BoxConstraints canvasConstraints,
+                                ) {
+                                  final double size = math.min(
+                                    _canvasViewSize,
+                                    math.min(
+                                      canvasConstraints.maxWidth,
+                                      canvasConstraints.maxHeight,
                                     ),
-                                onPanUpdate: (DragUpdateDetails details) =>
-                                    _handleCanvasTouch(
-                                      details.localPosition,
-                                      Size(size, size),
-                                      beginStroke: false,
-                                    ),
-                                onPanEnd: (_) {
-                                  _strokeInProgress = false;
-                                },
-                                onTapDown: (TapDownDetails details) {
-                                  _handleCanvasTouch(
-                                    details.localPosition,
-                                    Size(size, size),
-                                    beginStroke: true,
                                   );
-                                  _strokeInProgress = false;
-                                },
-                                child: CustomPaint(
-                                  painter: _PixelCanvasPainter(
-                                    pixels: _pixels,
-                                    showGrid: _showGrid,
-                                  ),
-                                  child: const SizedBox.expand(),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            '$_status | 撌亙: ${_tool.label} | 蝑: $_brushSize',
-                            style: TextStyle(color: PixelTheme.accentBlue),
-                          ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            height: 86,
-                            child: ListView(
-                              scrollDirection: Axis.horizontal,
-                              children: [
-                                _PixelToolButton(
-                                  iconPattern: _iconImport,
-                                  label: '?臬',
-                                  onPressed: _importImage,
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconClear,
-                                  label: '匯入圖片',
-                                  onPressed: _clearCanvas,
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconBrush,
-                                  label: _tool == _EditorTool.brush
-                                      ? '?怎? ON'
-                                      : '?怎?',
-                                  selected: _tool == _EditorTool.brush,
-                                  onPressed: () {
-                                    setState(() {
-                                      _tool = _EditorTool.brush;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconEraser,
-                                  label: _tool == _EditorTool.eraser
-                                      ? '璈∠??ON'
-                                      : '復原',
-                                  selected: _tool == _EditorTool.eraser,
-                                  onPressed: () {
-                                    setState(() {
-                                      _tool = _EditorTool.eraser;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconBucket,
-                                  label: _tool == _EditorTool.bucket
-                                      ? '瘝寞?獢?ON'
-                                      : '重做',
-                                  selected: _tool == _EditorTool.bucket,
-                                  onPressed: () {
-                                    setState(() {
-                                      _tool = _EditorTool.bucket;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconPicker,
-                                  label: _tool == _EditorTool.picker
-                                      ? '?貊恣 ON'
-                                      : '?貊恣',
-                                  selected: _tool == _EditorTool.picker,
-                                  onPressed: () {
-                                    setState(() {
-                                      _tool = _EditorTool.picker;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconUndo,
-                                  label: '敺拙?',
-                                  onPressed: _undo,
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconRedo,
-                                  label: '??',
-                                  onPressed: _redo,
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconGrid,
-                                  label: _showGrid ? '?潛? ON' : '?潛? OFF',
-                                  selected: _showGrid,
-                                  onPressed: () {
-                                    setState(() {
-                                      _showGrid = !_showGrid;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconMinus,
-                                  label: '蝑-',
-                                  onPressed: () {
-                                    setState(() {
-                                      if (_brushSize > 1) {
-                                        _brushSize--;
-                                      }
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconPlus,
-                                  label: '蝑+',
-                                  onPressed: () {
-                                    setState(() {
-                                      if (_brushSize < 3) {
-                                        _brushSize++;
-                                      }
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            height: 48,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: _swatches.length + 1,
-                              separatorBuilder:
-                                  (BuildContext context, int index) =>
-                                      const SizedBox(width: 8),
-                              itemBuilder: (BuildContext context, int index) {
-                                if (index == _swatches.length) {
-                                  return GestureDetector(
-                                    onTap: () async {
-                                      final Color? custom =
-                                          await _showCustomColorDialog(
-                                            context,
-                                            initialColor: _brushColor,
-                                            title: '?芾?蝑憿',
-                                          );
-                                      if (custom == null) {
-                                        return;
-                                      }
-                                      setState(() {
-                                        _brushColor = custom;
-                                        if (_tool == _EditorTool.eraser ||
-                                            _tool == _EditorTool.picker) {
-                                          _tool = _EditorTool.brush;
-                                        }
-                                        _status = 'Color picked';
-                                      });
-                                    },
-                                    child: Container(
-                                      width: 48,
-                                      height: 48,
-                                      decoration: BoxDecoration(
-                                        color: PixelTheme.bgMid,
-                                        border: Border.all(
-                                          color: PixelTheme.accent,
-                                          width: 2,
+                                  return Center(
+                                    child: SizedBox(
+                                      width: size,
+                                      height: size,
+                                      child: Listener(
+                                        behavior: HitTestBehavior.opaque,
+                                        onPointerDown:
+                                            (PointerDownEvent event) {
+                                              _handleCanvasTouch(
+                                                event.localPosition,
+                                                Size(size, size),
+                                                beginStroke: true,
+                                              );
+                                            },
+                                        onPointerMove:
+                                            (PointerMoveEvent event) =>
+                                                _handleCanvasTouch(
+                                                  event.localPosition,
+                                                  Size(size, size),
+                                                  beginStroke: false,
+                                                ),
+                                        onPointerUp: (_) =>
+                                            _finishCanvasPointer(),
+                                        onPointerCancel: (_) =>
+                                            _finishCanvasPointer(),
+                                        child: CustomPaint(
+                                          painter: _PixelCanvasPainter(
+                                            pixels: _pixels,
+                                            showGrid: _showGrid,
+                                          ),
+                                          child: const SizedBox.expand(),
                                         ),
                                       ),
-                                      child: Icon(
-                                        Icons.add_rounded,
-                                        color: PixelTheme.accent,
-                                      ),
                                     ),
                                   );
-                                }
-                                final Color color = _swatches[index];
+                                },
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '$_status | 工具: ${_tool.label} | 筆刷: $_brushSize',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: PixelTheme.accentBlue),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 86,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            children: [
+                              _PixelToolButton(
+                                iconPattern: _iconImport,
+                                label: '匯入圖片',
+                                onPressed: _importImage,
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconClear,
+                                label: '清空畫布',
+                                onPressed: () {
+                                  unawaited(_confirmClearCanvas());
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconBrush,
+                                label: _tool == _EditorTool.brush
+                                    ? '筆刷 ON'
+                                    : '筆刷',
+                                selected: _tool == _EditorTool.brush,
+                                onPressed: () {
+                                  setState(() {
+                                    _tool = _EditorTool.brush;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconEraser,
+                                label: _tool == _EditorTool.eraser
+                                    ? '橡皮擦 ON'
+                                    : '橡皮擦',
+                                selected: _tool == _EditorTool.eraser,
+                                onPressed: () {
+                                  setState(() {
+                                    _tool = _EditorTool.eraser;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconBucket,
+                                label: _tool == _EditorTool.bucket
+                                    ? '填滿 ON'
+                                    : '填滿',
+                                selected: _tool == _EditorTool.bucket,
+                                onPressed: () {
+                                  setState(() {
+                                    _tool = _EditorTool.bucket;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconPicker,
+                                label: _tool == _EditorTool.picker
+                                    ? '吸色 ON'
+                                    : '吸色',
+                                selected: _tool == _EditorTool.picker,
+                                onPressed: () {
+                                  setState(() {
+                                    _tool = _EditorTool.picker;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconUndo,
+                                label: '復原',
+                                onPressed: _undo,
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconRedo,
+                                label: '重做',
+                                onPressed: _redo,
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconGrid,
+                                label: _showGrid ? '網格 ON' : '網格 OFF',
+                                selected: _showGrid,
+                                onPressed: () {
+                                  setState(() {
+                                    _showGrid = !_showGrid;
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconMinus,
+                                label: '筆刷-',
+                                onPressed: () {
+                                  setState(() {
+                                    if (_brushSize > 1) {
+                                      _brushSize--;
+                                    }
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _PixelToolButton(
+                                iconPattern: _iconPlus,
+                                label: '筆刷+',
+                                onPressed: () {
+                                  setState(() {
+                                    if (_brushSize < 3) {
+                                      _brushSize++;
+                                    }
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 48,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _swatches.length + 1,
+                            separatorBuilder:
+                                (BuildContext context, int index) =>
+                                    const SizedBox(width: 8),
+                            itemBuilder: (BuildContext context, int index) {
+                              if (index == _swatches.length) {
                                 return GestureDetector(
-                                  onTap: () {
+                                  onTap: () async {
+                                    final Color? custom =
+                                        await _showCustomColorDialog(
+                                          context,
+                                          initialColor: _brushColor,
+                                          title: '自訂筆刷顏色',
+                                        );
+                                    if (custom == null) {
+                                      return;
+                                    }
                                     setState(() {
-                                      _brushColor = color;
+                                      _brushColor = custom;
                                       if (_tool == _EditorTool.eraser ||
                                           _tool == _EditorTool.picker) {
                                         _tool = _EditorTool.brush;
                                       }
+                                      _status = '已選擇顏色';
                                     });
                                   },
                                   child: Container(
                                     width: 48,
                                     height: 48,
                                     decoration: BoxDecoration(
-                                      color: color,
+                                      color: PixelTheme.bgMid,
                                       border: Border.all(
-                                        color:
-                                            _brushColor == color &&
-                                                _tool != _EditorTool.eraser
-                                            ? PixelTheme.textWhite
-                                            : PixelTheme.border,
-                                        width:
-                                            _brushColor == color &&
-                                                _tool != _EditorTool.eraser
-                                            ? 3
-                                            : 1,
+                                        color: PixelTheme.accent,
+                                        width: 2,
                                       ),
+                                    ),
+                                    child: Icon(
+                                      Icons.add_rounded,
+                                      color: PixelTheme.accent,
                                     ),
                                   ),
                                 );
-                              },
-                            ),
+                              }
+                              final Color color = _swatches[index];
+                              return GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _brushColor = color;
+                                    if (_tool == _EditorTool.eraser ||
+                                        _tool == _EditorTool.picker) {
+                                      _tool = _EditorTool.brush;
+                                    }
+                                    _status = '已選擇顏色';
+                                  });
+                                },
+                                child: Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    border: Border.all(
+                                      color:
+                                          _brushColor == color &&
+                                              _tool != _EditorTool.eraser
+                                          ? PixelTheme.textWhite
+                                          : PixelTheme.border,
+                                      width:
+                                          _brushColor == color &&
+                                              _tool != _EditorTool.eraser
+                                          ? 3
+                                          : 1,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
-                          const SizedBox(height: 12),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                     ),
                   ),
                 ),
@@ -3168,9 +3269,7 @@ class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: Text(
-            '?臬????- ${widget.sourceName} (${widget.sourceFormat})',
-          ),
+          title: Text('匯入圖片 - ${widget.sourceName} (${widget.sourceFormat})'),
         ),
         body: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
@@ -3190,9 +3289,7 @@ class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
                         color: PixelTheme.bgMid,
                         border: Border.all(color: PixelTheme.border, width: 2),
                       ),
-                      child: const Text(
-                        'Drag or pinch the image to choose the crop area.',
-                      ),
+                      child: const Text('拖曳或雙指縮放圖片，選擇要轉換成像素圖的範圍。'),
                     ),
                     const SizedBox(height: 12),
                     Center(
@@ -3515,7 +3612,8 @@ class _PixelToolButton extends StatelessWidget {
       onTap: onPressed,
       child: Container(
         width: 90,
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        height: 76,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
         decoration: BoxDecoration(
           color: selected ? PixelTheme.accent : PixelTheme.bgMid,
           border: Border.all(
@@ -3527,7 +3625,8 @@ class _PixelToolButton extends StatelessWidget {
           ],
         ),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             SizedBox(
               width: 28,
@@ -3539,14 +3638,22 @@ class _PixelToolButton extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: selected ? PixelTheme.bgDark : PixelTheme.textWhite,
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
+            const SizedBox(height: 4),
+            SizedBox(
+              height: 24,
+              child: Center(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? PixelTheme.bgDark : PixelTheme.textWhite,
+                    fontSize: 9,
+                    height: 1.05,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
             ),
           ],
@@ -3752,7 +3859,7 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'HEX ?脩Ⅳ (#RRGGBB)',
+                      'HEX 色碼 (#RRGGBB)',
                       style: TextStyle(
                         color: _previewTextColor,
                         fontWeight: FontWeight.w900,
@@ -3854,7 +3961,7 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('??'),
+            child: const Text('取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(_preview),
@@ -3862,7 +3969,7 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
               backgroundColor: PixelTheme.accent,
               foregroundColor: PixelTheme.bgDark,
             ),
-            child: const Text('取消'),
+            child: const Text('套用'),
           ),
         ],
       ),

@@ -447,7 +447,7 @@ class MockApiService {
     required Map<String, dynamic> metadata,
   }) async {
     _log(
-      '?? Mock: POST /card-print-orders user=$userId bytes=${artworkPng.length}',
+      'Mock: POST /card-print-orders user=$userId bytes=${artworkPng.length}',
     );
     await Future.delayed(
       Duration(milliseconds: AppConfig.mockNetworkDelay + 350),
