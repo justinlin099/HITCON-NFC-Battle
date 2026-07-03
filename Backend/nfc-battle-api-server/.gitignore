@@ -14,11 +14,14 @@ dist/
 # deps
 node_modules/
 .wrangler
+.wrangler-config
 
 # env
 .env
 .env.*
+.cloudflare.env
 .dev.vars
+!.cloudflare.env.example
 
 # logs
 logs/
