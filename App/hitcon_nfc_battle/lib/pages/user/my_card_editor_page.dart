@@ -2787,6 +2787,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
   int _brushSize = 1;
   bool _showGrid = true;
   bool _strokeInProgress = false;
+  ({int x, int y})? _lastPaintCell;
   final List<PixelGrid> _undoStack = <PixelGrid>[];
   final List<PixelGrid> _redoStack = <PixelGrid>[];
   String _status = '準備畫圖...';
@@ -2838,6 +2839,32 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     }
   }
 
+  void _paintLine(int x0, int y0, int x1, int y1) {
+    int dx = (x1 - x0).abs();
+    int dy = -(y1 - y0).abs();
+    final int stepX = x0 < x1 ? 1 : -1;
+    final int stepY = y0 < y1 ? 1 : -1;
+    int error = dx + dy;
+    int x = x0;
+    int y = y0;
+
+    while (true) {
+      _paintCell(x, y);
+      if (x == x1 && y == y1) {
+        break;
+      }
+      final int twiceError = 2 * error;
+      if (twiceError >= dy) {
+        error += dy;
+        x += stepX;
+      }
+      if (twiceError <= dx) {
+        error += dx;
+        y += stepY;
+      }
+    }
+  }
+
   void _handleCanvasTouch(
     Offset localPosition,
     Size size, {
@@ -2859,16 +2886,29 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
       case _EditorTool.brush:
       case _EditorTool.eraser:
         setState(() {
-          _paintCell(x, y);
+          final ({int x, int y})? lastPaintCell = _lastPaintCell;
+          if (lastPaintCell == null) {
+            _paintCell(x, y);
+          } else {
+            _paintLine(lastPaintCell.x, lastPaintCell.y, x, y);
+          }
+          _lastPaintCell = (x: x, y: y);
         });
         break;
       case _EditorTool.bucket:
+        if (!beginStroke) {
+          return;
+        }
         setState(() {
           _bucketFill(x, y, _brushColor);
         });
         _strokeInProgress = false;
+        _lastPaintCell = null;
         break;
       case _EditorTool.picker:
+        if (!beginStroke) {
+          return;
+        }
         final Color? picked = _pixels[y][x];
         if (picked != null) {
           setState(() {
@@ -2878,8 +2918,20 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
           });
         }
         _strokeInProgress = false;
+        _lastPaintCell = null;
         break;
     }
+  }
+
+  void _finishCanvasPointer() {
+    if (!_strokeInProgress && _lastPaintCell == null) {
+      return;
+    }
+
+    setState(() {
+      _strokeInProgress = false;
+      _lastPaintCell = null;
+    });
   }
 
   void _clearCanvas() {
@@ -3057,30 +3109,23 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                             child: SizedBox(
                               width: size,
                               height: size,
-                              child: GestureDetector(
-                                onPanDown: (DragDownDetails details) =>
-                                    _handleCanvasTouch(
-                                      details.localPosition,
-                                      Size(size, size),
-                                      beginStroke: true,
-                                    ),
-                                onPanUpdate: (DragUpdateDetails details) =>
-                                    _handleCanvasTouch(
-                                      details.localPosition,
-                                      Size(size, size),
-                                      beginStroke: false,
-                                    ),
-                                onPanEnd: (_) {
-                                  _strokeInProgress = false;
-                                },
-                                onTapDown: (TapDownDetails details) {
+                              child: Listener(
+                                behavior: HitTestBehavior.opaque,
+                                onPointerDown: (PointerDownEvent details) {
                                   _handleCanvasTouch(
                                     details.localPosition,
                                     Size(size, size),
                                     beginStroke: true,
                                   );
-                                  _strokeInProgress = false;
                                 },
+                                onPointerMove: (PointerMoveEvent details) =>
+                                    _handleCanvasTouch(
+                                      details.localPosition,
+                                      Size(size, size),
+                                      beginStroke: false,
+                                    ),
+                                onPointerUp: (_) => _finishCanvasPointer(),
+                                onPointerCancel: (_) => _finishCanvasPointer(),
                                 child: CustomPaint(
                                   painter: _PixelCanvasPainter(
                                     pixels: _pixels,
