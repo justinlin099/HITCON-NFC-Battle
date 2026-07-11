@@ -11,6 +11,26 @@ cp .dev.vars.example .dev.vars
 
 Use `.dev.vars` only for local Worker runtime secrets such as `JWT_SECRET` and `STAFF_DANGER_TOKEN`.
 
+## Local Wrangler Auth
+
+Wrangler login state is machine-wide by default. For this repo, use the npm
+scripts or `npm run wrangler -- ...` instead of plain `wrangler` or
+`npx wrangler`. The wrapper loads repo-local Cloudflare credentials from
+`.cloudflare.env` and stores Wrangler auth/config state under `.wrangler-config`.
+
+```txt
+cp .cloudflare.env.example .cloudflare.env
+```
+
+Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in `.cloudflare.env`.
+Do not commit this file.
+
+Check the repo-local Wrangler identity:
+
+```txt
+npm run wrangler -- whoami
+```
+
 ## Checks
 
 ```txt
@@ -28,8 +48,8 @@ Use a workspace-local Wrangler config directory if your environment cannot write
 to `~/.config`:
 
 ```txt
-XDG_CONFIG_HOME="$PWD/.wrangler-config" npx wrangler d1 migrations apply nfc-battle-api-server --local
-XDG_CONFIG_HOME="$PWD/.wrangler-config" npm run dev -- --port 8797
+npm run wrangler -- d1 migrations apply nfc-battle-api-server --local
+npm run dev -- --port 8797
 ```
 
 Then verify the Worker and local D1 binding:
@@ -49,7 +69,7 @@ For local development and tests, the placeholder `database_id` in
 local D1 database:
 
 ```txt
-npx wrangler d1 migrations apply nfc-battle-api-server --local
+npm run wrangler -- d1 migrations apply nfc-battle-api-server --local
 ```
 
 Wrangler stores local D1 state under its local state directory, so it is not
@@ -60,7 +80,7 @@ committed with the repo.
 Create the staging D1 database:
 
 ```txt
-npx wrangler d1 create nfc-battle-api-server-staging
+npm run wrangler -- d1 create nfc-battle-api-server-staging
 ```
 
 Replace the staging placeholder `database_id` in
@@ -76,8 +96,8 @@ Set staging runtime secrets in Cloudflare. Store these values in a password
 manager because Cloudflare will not show them again after upload.
 
 ```txt
-npx wrangler secret put JWT_SECRET --env staging
-npx wrangler secret put STAFF_DANGER_TOKEN --env staging
+npm run wrangler -- secret put JWT_SECRET --env staging
+npm run wrangler -- secret put STAFF_DANGER_TOKEN --env staging
 ```
 
 Deploy staging:
@@ -103,8 +123,8 @@ then applies the current initial schema directly. Applying the schema with
 have been dropped.
 
 ```txt
-npx wrangler d1 execute nfc-battle-api-server-staging --remote --command "DROP TRIGGER IF EXISTS bump_collection_version_after_insert; DROP TABLE IF EXISTS prize_results; DROP TABLE IF EXISTS game_state; DROP TABLE IF EXISTS phishing_events; DROP TABLE IF EXISTS collections; DROP TABLE IF EXISTS nfc_tags; DROP TABLE IF EXISTS users;"
-npx wrangler d1 execute nfc-battle-api-server-staging --remote --file ./migrations/0001_initial_schema.sql
+npm run wrangler -- d1 execute nfc-battle-api-server-staging --remote --command "DROP TRIGGER IF EXISTS bump_collection_version_after_insert; DROP TABLE IF EXISTS prize_results; DROP TABLE IF EXISTS game_state; DROP TABLE IF EXISTS phishing_events; DROP TABLE IF EXISTS collections; DROP TABLE IF EXISTS nfc_tags; DROP TABLE IF EXISTS users;"
+npm run wrangler -- d1 execute nfc-battle-api-server-staging --remote --file ./migrations/0001_initial_schema.sql
 ```
 
 ## Manual Production Deploy
@@ -113,7 +133,7 @@ Production uses a separate Worker environment and D1 database. Create the
 production D1 database:
 
 ```txt
-npx wrangler d1 create nfc-battle-api-server
+npm run wrangler -- d1 create nfc-battle-api-server
 ```
 
 Replace the production placeholder `database_id` in
@@ -128,8 +148,8 @@ npm run db:migrate:production
 Set production runtime secrets in Cloudflare:
 
 ```txt
-npx wrangler secret put JWT_SECRET --env production
-npx wrangler secret put STAFF_DANGER_TOKEN --env production
+npm run wrangler -- secret put JWT_SECRET --env production
+npm run wrangler -- secret put STAFF_DANGER_TOKEN --env production
 ```
 
 Deploy production:
@@ -140,16 +160,18 @@ npm run deploy:production
 
 ## GitHub Deploy
 
-The manual **Backend Deploy** workflow can deploy either `staging` or
-`production`. It expects these repository-level GitHub Actions secrets:
+Backend pull requests and backend pushes run **Backend CI**. Pushes to `main` that touch the backend also run **Backend Staging Deploy**. The staging workflow runs tests, typecheck, remote staging D1 migrations, syncs staging Worker secrets from GitHub environment secrets, and deploys the staging Worker. Shared staging is not updated from unmerged PR code.
+
+The manual **Backend Deploy** workflow can deploy either `staging` or `production`. It expects these repository-level GitHub Actions secrets:
 
 ```txt
 CLOUDFLARE_ACCOUNT_ID
 CLOUDFLARE_API_TOKEN
 ```
 
-Create GitHub Environments named `staging` and `production`, then add these
-secrets to each environment:
+`CLOUDFLARE_ACCOUNT_ID` can be copied from the Cloudflare dashboard URL for the HITCON Events account. `CLOUDFLARE_API_TOKEN` can be generated from Cloudflare **User API Tokens** using the **Edit Cloudflare Workers** template, then adding account-level D1 edit permission so the workflow can apply remote D1 migrations.
+
+Create GitHub Environments named `staging` and `production`, then add these secrets to each environment. GitHub deploy workflows read these environment secrets and sync them to Cloudflare before deploying:
 
 ```txt
 JWT_SECRET

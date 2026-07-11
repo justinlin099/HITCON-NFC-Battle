@@ -7,7 +7,6 @@ import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { calculateScore } from "./scoring";
 import { errorResponse, success } from "./responses";
 import type { AppEnv } from "./types";
-import { lazyInitializeUser } from "./user-store";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -18,9 +17,6 @@ const scoreboard = new Hono<AppEnv>();
 scoreboard.use("*", requireAuth);
 
 scoreboard.get("/", async (c) => {
-  const authUser = c.get("authUser");
-  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
-
   const pagination = parsePagination(c.req.query("offset"), c.req.query("limit"));
   if (!pagination) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");

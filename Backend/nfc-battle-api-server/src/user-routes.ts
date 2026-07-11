@@ -7,8 +7,8 @@ import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { getPrizeResult } from "./freeze-snapshot-store";
 import type { AppEnv } from "./types";
 import {
-  getFullProfile,
   getHydratedCollection,
+  getSelfProfile,
   getUserRow,
   getUserRowsById,
   getVisibleProfile,
@@ -34,7 +34,7 @@ users.get("/me", async (c) => {
   const authUser = c.get("authUser");
   await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
-  const profile = await getFullProfile(c.env.DB, authUser.userId);
+  const profile = await getSelfProfile(c.env.DB, authUser.userId);
   if (!profile) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
@@ -44,7 +44,6 @@ users.get("/me", async (c) => {
 
 users.patch("/me", async (c) => {
   const authUser = c.get("authUser");
-  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
   const body = await readJson(c);
   const update = validateProfileUpdate(body);
@@ -54,7 +53,7 @@ users.patch("/me", async (c) => {
 
   await updateUserProfile(c.env.DB, authUser.userId, update);
 
-  const profile = await getFullProfile(c.env.DB, authUser.userId);
+  const profile = await getSelfProfile(c.env.DB, authUser.userId);
   if (!profile) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
@@ -95,9 +94,8 @@ users.get("/me/prize", async (c) => {
 
 users.get("/me/bootstrap", async (c) => {
   const authUser = c.get("authUser");
-  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
-  const me = await getFullProfile(c.env.DB, authUser.userId);
+  const me = await getSelfProfile(c.env.DB, authUser.userId);
   if (!me) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
@@ -119,7 +117,6 @@ users.get("/me/bootstrap", async (c) => {
 
 users.post("/batch", async (c) => {
   const authUser = c.get("authUser");
-  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
   const request = validateBatchGetUsersRequest(await readJson(c));
   if (!request) {

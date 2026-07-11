@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
-import { collectUser } from "./collection-store";
+import { collectUserIfNew } from "./collection-store";
 import { recordPhishingEvent } from "./freeze-snapshot-store";
 import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
 import { errorResponse, success, successMessage } from "./responses";
 import { getTagOwner } from "./tag-store";
 import type { AppEnv } from "./types";
-import { getUserRow, lazyInitializeUser, publicFullProfileFromRow } from "./user-store";
+import { getUserRow, publicFullProfileFromRow } from "./user-store";
 
 const SCAN_COLLECTION_KEYS = new Set(["user_id", "physical_id"]);
 const PHISHING_KEYS = new Set(["victim", "attacker"]);
@@ -17,15 +17,17 @@ collection.use("*", requireAuth);
 
 collection.post("/scan", async (c) => {
   const authUser = c.get("authUser");
-  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
   const request = validateScanCollectionRequest(await readJson(c));
   if (!request || request.user_id === authUser.userId) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
-  const targetUser = await getUserRow(c.env.DB, request.user_id);
-  if (!targetUser) {
+  const [scannerUser, targetUser] = await Promise.all([
+    getUserRow(c.env.DB, authUser.userId),
+    getUserRow(c.env.DB, request.user_id),
+  ]);
+  if (!scannerUser || !targetUser) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
 
@@ -34,7 +36,7 @@ collection.post("/scan", async (c) => {
     return errorResponse(c, 403, "PHYSICAL_ID_MISMATCH", "Physical tag ID does not match user ID.");
   }
 
-  const collectionResult = await collectUser(c.env.DB, authUser.userId, request.user_id);
+  const collectionResult = await collectUserIfNew(c.env.DB, authUser.userId, request.user_id);
 
   return success(c, {
     collected_user_id: request.user_id,
@@ -45,14 +47,20 @@ collection.post("/scan", async (c) => {
 
 collection.post("/phishing", async (c) => {
   const authUser = c.get("authUser");
-  await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
   const request = validatePhishingRequest(await readJson(c));
   if (!request || request.victim !== authUser.userId || request.victim === request.attacker) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
-  const attacker = await getUserRow(c.env.DB, request.attacker);
+  const [victim, attacker] = await Promise.all([
+    getUserRow(c.env.DB, request.victim),
+    getUserRow(c.env.DB, request.attacker),
+  ]);
+  if (!victim) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
   if (!attacker) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }

@@ -9,6 +9,12 @@ describe("user profile behavior", () => {
 
     const aliceInit = await server.request("/users/me", { headers: aliceAuth });
     expect(aliceInit.status).toBe(200);
+    const aliceInitBody = await readJson(aliceInit) as {
+      data: {
+        nfc_tag_key: string;
+      };
+    };
+    expect(aliceInitBody.data.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
 
     const missingBob = await server.request("/users/bob", { headers: aliceAuth });
     expect(missingBob.status).toBe(404);
@@ -85,7 +91,10 @@ describe("user profile behavior", () => {
       headers: aliceAuth,
     });
     expect(fullBob.status).toBe(200);
-    await expect(readJson(fullBob)).resolves.toMatchObject({
+    const fullBobBody = await readJson(fullBob) as {
+      data: Record<string, unknown>;
+    };
+    expect(fullBobBody).toMatchObject({
       status: "success",
       data: {
         user_id: "bob",
@@ -98,6 +107,7 @@ describe("user profile behavior", () => {
         collection_version: 0,
       },
     });
+    expect(fullBobBody.data).not.toHaveProperty("nfc_tag_key");
 
     const bobUpdate = await server.request(
       "/users/me",
@@ -167,6 +177,27 @@ describe("user profile behavior", () => {
       data: {
         user_id: "alice",
         role: "ATTENDEE",
+        nfc_tag_key: expect.stringMatching(/^[0-9a-f]{12}$/),
+      },
+    });
+
+    const noOpUpdate = await server.request(
+      "/users/me",
+      await jsonRequest(
+        "PATCH",
+        {
+          display_name: "Player_alice",
+          emoji_icon: "🙂",
+          bio: "",
+          pixel_avatar_base64: "",
+        },
+        aliceAuth,
+      ),
+    );
+    expect(noOpUpdate.status).toBe(200);
+    await expect(readJson(noOpUpdate)).resolves.toMatchObject({
+      data: {
+        profile_version: 1,
       },
     });
 
@@ -178,6 +209,86 @@ describe("user profile behavior", () => {
 
     const prizeResult = await server.request("/users/me/prize", { headers: aliceAuth });
     expect(prizeResult.status).toBe(409);
+  });
+
+  it("repairs missing NFC tag keys for imported user rows", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+
+    await server.db
+      .prepare(
+        `
+        INSERT INTO users (
+          user_id,
+          display_name,
+          role,
+          emoji_icon,
+          bio,
+          pixel_avatar_base64
+        )
+        VALUES ('alice', 'Imported Alice', 'ATTENDEE', '🙂', '', '')
+        `,
+      )
+      .run();
+
+    const response = await server.request("/users/me", { headers: aliceAuth });
+
+    expect(response.status).toBe(200);
+    const body = await readJson(response) as {
+      data: {
+        nfc_tag_key: string;
+      };
+    };
+    expect(body.data.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
+    await expect(
+      server.db
+        .prepare("SELECT nfc_tag_key FROM users WHERE user_id = 'alice'")
+        .first<{ nfc_tag_key: string }>(),
+    ).resolves.toEqual({ nfc_tag_key: body.data.nfc_tag_key });
+  });
+
+  it("repairs missing NFC tag keys before returning other self-profile responses", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+
+    await insertImportedUserWithoutNfcTagKey(server.db, "alice");
+
+    const bootstrap = await server.request("/users/me/bootstrap", { headers: aliceAuth });
+    expect(bootstrap.status).toBe(200);
+    await expect(readJson(bootstrap)).resolves.toMatchObject({
+      data: {
+        me: {
+          nfc_tag_key: expect.stringMatching(/^[0-9a-f]{12}$/),
+        },
+      },
+    });
+
+    await server.db
+      .prepare("UPDATE users SET nfc_tag_key = NULL WHERE user_id = 'alice'")
+      .run();
+
+    const update = await server.request(
+      "/users/me",
+      await jsonRequest("PATCH", { display_name: "Imported Alice" }, aliceAuth),
+    );
+    expect(update.status).toBe(200);
+    await expect(readJson(update)).resolves.toMatchObject({
+      data: {
+        nfc_tag_key: expect.stringMatching(/^[0-9a-f]{12}$/),
+      },
+    });
+  });
+
+  it("does not issue NFC tag key repair updates for healthy self-profile reads", async () => {
+    const server = await createTestServer();
+    const db = new CountingNfcTagKeyRepairDb(server.db);
+    server.env.DB = db as unknown as D1Database;
+    const aliceAuth = await authHeaders("alice");
+
+    expect((await server.request("/users/me", { headers: aliceAuth })).status).toBe(200);
+    expect((await server.request("/users/me", { headers: aliceAuth })).status).toBe(200);
+
+    expect(db.nfcTagKeyRepairUpdateCount).toBe(0);
   });
 
   it("supports cacheable batch, profile, and collection reads", async () => {
@@ -521,3 +632,40 @@ describe("user profile behavior", () => {
     }
   });
 });
+
+async function insertImportedUserWithoutNfcTagKey(db: D1Database, userId: string) {
+  await db
+    .prepare(
+      `
+      INSERT INTO users (
+        user_id,
+        display_name,
+        role,
+        emoji_icon,
+        bio,
+        pixel_avatar_base64
+      )
+      VALUES (?1, ?2, 'ATTENDEE', '🙂', '', '')
+      `,
+    )
+    .bind(userId, `Imported ${userId}`)
+    .run();
+}
+
+class CountingNfcTagKeyRepairDb {
+  nfcTagKeyRepairUpdateCount = 0;
+
+  constructor(private readonly db: D1Database) {}
+
+  prepare(query: string) {
+    if (query.includes("SET nfc_tag_key = ?2")) {
+      this.nfcTagKeyRepairUpdateCount += 1;
+    }
+
+    return this.db.prepare(query);
+  }
+
+  exec(query: string) {
+    return this.db.exec(query);
+  }
+}
