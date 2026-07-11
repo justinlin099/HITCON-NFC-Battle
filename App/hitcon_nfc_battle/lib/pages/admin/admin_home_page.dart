@@ -4,8 +4,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/ntag_security_service.dart';
+import '../../widgets/admin_mode_switch_button.dart';
 import '../user/pixel_theme.dart';
 
 class AdminHomePage extends StatefulWidget {
@@ -36,14 +38,19 @@ class _AdminHomePageState extends State<AdminHomePage> {
           appBar: AppBar(
             backgroundColor: PixelTheme.bgMid,
             foregroundColor: PixelTheme.accent,
-            title: const Text('管理者工具'),
+            leading: AdminModeSwitchButton(
+              target: AdminModeTarget.gameplay,
+              color: PixelTheme.accent,
+            ),
+            title: Text(context.l10n.tr('adminTools')),
             bottom: TabBar(
               indicatorColor: PixelTheme.accent,
               labelColor: PixelTheme.accent,
               unselectedLabelColor: PixelTheme.textGray,
-              tabs: const [
-                Tab(text: '寫入 Tag'),
-                Tab(text: '確認領獎'),
+              tabs: [
+                Tab(text: context.l10n.tr('writeTag')),
+                Tab(text: context.l10n.tr('confirmPrize')),
+                Tab(text: context.l10n.tr('unlockTag')),
               ],
             ),
           ),
@@ -70,33 +77,20 @@ class AdminTagWriterPage extends StatefulWidget {
 class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
   static const String _blankAppUri = 'https://game.hitcon2026.online/b';
 
-  final TextEditingController _tagIdController = TextEditingController(
-    text: 'CARD-001',
-  );
-  final TextEditingController _titleController = TextEditingController(
-    text: 'HITCON Card',
-  );
-  final TextEditingController _emojiController = TextEditingController(
-    text: '🌐',
-  );
-  final TextEditingController _labelController = TextEditingController(
-    text: 'WEB',
-  );
-  final TextEditingController _linkController = TextEditingController(
-    text: 'https://hitcon.org',
-  );
-
-  String _status = '請填寫資料後按下寫入';
+  String _status = '';
   String _lastUid = '-';
   bool _isWriting = false;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_status.isEmpty) {
+      _status = context.l10n.tr('prepareWritableTag');
+    }
+  }
+
+  @override
   void dispose() {
-    _tagIdController.dispose();
-    _titleController.dispose();
-    _emojiController.dispose();
-    _labelController.dispose();
-    _linkController.dispose();
     NfcManager.instance.stopSession();
     super.dispose();
   }
@@ -106,17 +100,18 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
       return;
     }
 
+    final AppLocalizations l10n = context.l10n;
     final bool isAvailable = await NfcManager.instance.isAvailable();
     if (!isAvailable) {
       setState(() {
-        _status = '此裝置不支援 NFC 或 NFC 未開啟';
+        _status = l10n.tr('nfcUnavailable');
       });
       return;
     }
 
     setState(() {
       _isWriting = true;
-      _status = '請將要寫入的 Tag 靠近手機';
+      _status = l10n.tr('holdTagToWrite');
       _lastUid = '-';
     });
 
@@ -133,7 +128,7 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
           setState(() {
             _isWriting = false;
             _lastUid = uid.isEmpty ? '-' : uid;
-            _status = '這張 Tag 不支援 NDEF 寫入';
+            _status = l10n.tr('tagNotWritable');
           });
           return;
         }
@@ -147,7 +142,7 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
           setState(() {
             _isWriting = false;
             _lastUid = uid.isEmpty ? '-' : uid;
-            _status = '寫入完成';
+            _status = l10n.tr('writeComplete');
           });
         } catch (error) {
           await NfcManager.instance.stopSession();
@@ -157,7 +152,7 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
           setState(() {
             _isWriting = false;
             _lastUid = uid.isEmpty ? '-' : uid;
-            _status = '寫入失敗: $error';
+            _status = l10n.tr('writeFailed', <String, Object?>{'error': error});
           });
         }
       },
@@ -168,38 +163,14 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
         }
         setState(() {
           _isWriting = false;
-          _status = 'NFC 錯誤: $error';
+          _status = l10n.tr('nfcError', <String, Object?>{'error': error});
         });
       },
     );
   }
 
   NdefMessage _buildTagMessage() {
-    final String tagId = _tagIdController.text.trim();
-    final String title = _titleController.text.trim();
-    final String emoji = _emojiController.text.trim();
-    final String label = _labelController.text.trim();
-    final String link = _normalizedLink;
-
-    return NdefMessage(<NdefRecord>[
-      _buildUriRecord(_blankAppUri),
-      _buildTextRecord('tag_id', tagId),
-      _buildTextRecord('card_title', title),
-      _buildTextRecord('attribute_emoji', emoji),
-      _buildTextRecord('attribute_label', label),
-      _buildTextRecord('link', link),
-    ]);
-  }
-
-  String get _normalizedLink {
-    final String raw = _linkController.text.trim();
-    if (raw.isEmpty) {
-      return 'https://hitcon.org';
-    }
-    if (raw.startsWith('http://') || raw.startsWith('https://')) {
-      return raw;
-    }
-    return 'https://$raw';
+    return NdefMessage(<NdefRecord>[_buildUriRecord(_blankAppUri)]);
   }
 
   @override
@@ -210,27 +181,33 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _PixelPanel(
-            title: 'Tag 資料',
+            title: context.l10n.tr('fixedAppUrl'),
             children: [
-              _PixelInput(label: 'Tag ID', controller: _tagIdController),
-              _PixelInput(label: '卡片名稱', controller: _titleController),
-              _PixelInput(label: 'Emoji', controller: _emojiController),
-              _PixelInput(label: '屬性名稱', controller: _labelController),
-              _PixelInput(label: '連結', controller: _linkController),
+              _StatusLine(
+                label: context.l10n.tr('purpose'),
+                value: context.l10n.tr('blankUrlPurpose'),
+              ),
+              _StatusLine(
+                label: context.l10n.tr('notice'),
+                value: context.l10n.tr('pairingUrlNotice'),
+              ),
+              _StatusLine(label: 'URL', value: _blankAppUri),
             ],
           ),
           const SizedBox(height: 12),
           _PixelPanel(
-            title: '寫入狀態',
+            title: context.l10n.tr('writeStatus'),
             children: [
-              _StatusLine(label: '狀態', value: _status),
+              _StatusLine(label: context.l10n.tr('status'), value: _status),
               _StatusLine(label: 'UID', value: _lastUid),
               _StatusLine(label: 'Landing URL', value: _previewLandingUrl),
             ],
           ),
           const SizedBox(height: 14),
           _PixelButton(
-            label: _isWriting ? '等待 Tag...' : '寫入 Tag',
+            label: context.l10n.tr(
+              _isWriting ? 'waitingForTagShort' : 'writeTag',
+            ),
             color: PixelTheme.accent,
             onTap: _writeTag,
           ),
@@ -253,11 +230,19 @@ class AdminPrizeClaimPage extends StatefulWidget {
 
 class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
   final AuthService _authService = AuthService();
-  String _status = '按下開始掃描，刷會眾 Tag 確認領獎';
+  String _status = '';
   String _lastUid = '-';
   String _lastUserId = '-';
   String _claimCode = '-';
   bool _isScanning = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_status.isEmpty) {
+      _status = context.l10n.tr('claimScanPrompt');
+    }
+  }
 
   @override
   void dispose() {
@@ -270,17 +255,18 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
       return;
     }
 
+    final AppLocalizations l10n = context.l10n;
     final bool isAvailable = await NfcManager.instance.isAvailable();
     if (!isAvailable) {
       setState(() {
-        _status = '此裝置不支援 NFC 或 NFC 未開啟';
+        _status = l10n.tr('nfcUnavailable');
       });
       return;
     }
 
     setState(() {
       _isScanning = true;
-      _status = '請刷會眾 Tag';
+      _status = l10n.tr('scanAttendeeTag');
       _lastUid = '-';
       _lastUserId = '-';
       _claimCode = '-';
@@ -303,14 +289,16 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
         setState(() {
           _isScanning = false;
           _lastUid = uid.isEmpty ? '-' : uid;
-          _lastUserId = userId.isEmpty ? '(Tag 未寫入 user_id)' : userId;
+          _lastUserId = userId.isEmpty ? l10n.tr('tagHasNoUserId') : userId;
           if (result == null) {
-            _status = '確認失敗，請稍後再試';
+            _status = l10n.tr('claimFailed');
             _claimCode = '-';
             return;
           }
           final bool alreadyClaimed = result['already_claimed'] == true;
-          _status = alreadyClaimed ? '此會眾已領過獎' : '領獎確認完成';
+          _status = l10n.tr(
+            alreadyClaimed ? 'alreadyClaimed' : 'claimComplete',
+          );
           _claimCode = result['claim_code'] as String? ?? '-';
         });
       },
@@ -321,7 +309,7 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
         }
         setState(() {
           _isScanning = false;
-          _status = 'NFC 錯誤: $error';
+          _status = l10n.tr('nfcError', <String, Object?>{'error': error});
         });
       },
     );
@@ -334,7 +322,7 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
     }
     setState(() {
       _isScanning = false;
-      _status = '已停止掃描';
+      _status = context.l10n.tr('scanStopped');
     });
   }
 
@@ -346,17 +334,20 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _PixelPanel(
-            title: '領獎確認',
+            title: context.l10n.tr('claimConfirmation'),
             children: [
-              _StatusLine(label: '狀態', value: _status),
+              _StatusLine(label: context.l10n.tr('status'), value: _status),
               _StatusLine(label: 'UID', value: _lastUid),
               _StatusLine(label: 'User ID', value: _lastUserId),
-              _StatusLine(label: '收件編號', value: _claimCode),
+              _StatusLine(
+                label: context.l10n.tr('claimCode'),
+                value: _claimCode,
+              ),
             ],
           ),
           const SizedBox(height: 14),
           _PixelButton(
-            label: _isScanning ? '停止掃描' : '開始掃描',
+            label: context.l10n.tr(_isScanning ? 'stopScan' : 'startScan'),
             color: _isScanning ? PixelTheme.warning : PixelTheme.accent,
             onTap: _isScanning ? _stopScan : _startScan,
           ),
@@ -376,9 +367,17 @@ class AdminTagUnlockPage extends StatefulWidget {
 class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
   static const NtagSecurityService _security = NtagSecurityService();
 
-  String _status = '請掃描需要解鎖重寫的 NTAG';
+  String _status = '';
   String _lastUid = '-';
   bool _isUnlocking = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_status.isEmpty) {
+      _status = context.l10n.tr('scanTagToUnlock');
+    }
+  }
 
   @override
   void dispose() {
@@ -391,17 +390,18 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
       return;
     }
 
+    final AppLocalizations l10n = context.l10n;
     final bool isAvailable = await NfcManager.instance.isAvailable();
     if (!isAvailable) {
       setState(() {
-        _status = '此裝置不支援 NFC 或 NFC 未開啟';
+        _status = l10n.tr('nfcUnavailable');
       });
       return;
     }
 
     setState(() {
       _isUnlocking = true;
-      _status = '請靠近要解鎖的 NTAG';
+      _status = l10n.tr('holdTagToUnlock');
       _lastUid = '-';
     });
 
@@ -412,9 +412,9 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
         final NtagLockSecret? secret = await AuthService()
             .requestNtagLockSecret(uid: uid, purpose: 'unlock');
         final NtagSecurityResult result = secret == null
-            ? const NtagSecurityResult(
+            ? NtagSecurityResult(
                 success: false,
-                message: '無法從 Server 取得 NTAG 解鎖密碼',
+                messageKey: 'adminUnlockSecretFailed',
               )
             : await _security.unlockForRewrite(tag, secret);
 
@@ -426,7 +426,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
         setState(() {
           _isUnlocking = false;
           _lastUid = uid.isEmpty ? '-' : uid;
-          _status = result.message;
+          _status = l10n.tr(result.messageKey, result.values);
         });
       },
       onError: (dynamic error) async {
@@ -436,7 +436,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
         }
         setState(() {
           _isUnlocking = false;
-          _status = 'NFC 錯誤: $error';
+          _status = l10n.tr('nfcError', <String, Object?>{'error': error});
         });
       },
     );
@@ -449,7 +449,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
     }
     setState(() {
       _isUnlocking = false;
-      _status = '已停止解鎖';
+      _status = context.l10n.tr('unlockStopped');
     });
   }
 
@@ -461,20 +461,21 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _PixelPanel(
-            title: 'UNLOCK TAG',
+            title: context.l10n.tr('unlockTag'),
             children: [
-              _StatusLine(label: '狀態', value: _status),
+              _StatusLine(label: context.l10n.tr('status'), value: _status),
               _StatusLine(label: 'UID', value: _lastUid),
               _StatusLine(
-                label: '說明',
-                value:
-                    '此功能會用 Tag UID 推導密碼，驗證後解除 AUTH0 保護並重設 PWD/PACK，讓此 NTAG 可以重新寫入。',
+                label: context.l10n.tr('description'),
+                value: context.l10n.tr('unlockTagDescription'),
               ),
             ],
           ),
           const SizedBox(height: 14),
           _PixelButton(
-            label: _isUnlocking ? '停止掃描' : '解鎖 Tag 以便重寫',
+            label: context.l10n.tr(
+              _isUnlocking ? 'stopScan' : 'unlockTagForRewrite',
+            ),
             color: _isUnlocking ? PixelTheme.warning : PixelTheme.accent,
             onTap: _isUnlocking ? _stopUnlock : _unlockTag,
           ),
@@ -515,38 +516,6 @@ class _PixelPanel extends StatelessWidget {
           const SizedBox(height: 12),
           ...children,
         ],
-      ),
-    );
-  }
-}
-
-class _PixelInput extends StatelessWidget {
-  const _PixelInput({required this.label, required this.controller});
-
-  final String label;
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: TextField(
-        controller: controller,
-        style: TextStyle(color: PixelTheme.textWhite, fontFamily: 'Unifont'),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: TextStyle(color: PixelTheme.textGray),
-          filled: true,
-          fillColor: PixelTheme.bgDark,
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.zero,
-            borderSide: BorderSide(color: PixelTheme.border, width: 2),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.zero,
-            borderSide: BorderSide(color: PixelTheme.accent, width: 2),
-          ),
-        ),
       ),
     );
   }
@@ -699,19 +668,5 @@ NdefRecord _buildUriRecord(String uri) {
     type: Uint8List.fromList(<int>[0x55]),
     identifier: Uint8List(0),
     payload: Uint8List.fromList(<int>[prefixIndex, ...utf8.encode(body)]),
-  );
-}
-
-NdefRecord _buildTextRecord(String identifier, String text) {
-  final List<int> languageCode = utf8.encode('en');
-  return NdefRecord(
-    typeNameFormat: NdefTypeNameFormat.nfcWellknown,
-    type: Uint8List.fromList(<int>[0x54]),
-    identifier: Uint8List.fromList(utf8.encode(identifier)),
-    payload: Uint8List.fromList(<int>[
-      languageCode.length,
-      ...languageCode,
-      ...utf8.encode(text),
-    ]),
   );
 }

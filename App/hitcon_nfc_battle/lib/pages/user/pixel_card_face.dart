@@ -64,185 +64,188 @@ class PixelCardFace extends StatelessWidget {
     final Color attributeTextColor = _readableAttributeColor(cardColor);
     final double borderSize = 3;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double pad = (constraints.maxWidth * 0.06).clamp(6.0, 16.0);
-        final double contentGap = extraContentSpacing ?? pad * 0.6;
-        final double watermarkSize =
-            (constraints.maxWidth * 0.07 * watermarkScale).clamp(10.0, 36.0);
-        final double watermarkDrop = watermarkSize * 0.12;
-        final Color gradientBase = PixelTheme.bgDark;
-        final Color gradientStart =
-            Color.lerp(gradientBase, cardColor, 0.18) ?? gradientBase;
-        final Color gradientEnd =
-            Color.lerp(gradientBase, cardColor, 0.48) ?? gradientBase;
+    return MediaQuery.withNoTextScaling(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final double pad = (constraints.maxWidth * 0.06).clamp(6.0, 16.0);
+          final double contentGap = extraContentSpacing ?? pad * 0.6;
+          final double watermarkSize =
+              (constraints.maxWidth * 0.07 * watermarkScale).clamp(10.0, 36.0);
+          final double watermarkDrop = watermarkSize * 0.12;
+          final Color gradientBase = PixelTheme.bgDark;
+          final Color gradientStart =
+              Color.lerp(gradientBase, cardColor, 0.18) ?? gradientBase;
+          final Color gradientEnd =
+              Color.lerp(gradientBase, cardColor, 0.48) ?? gradientBase;
 
-        return Container(
-          decoration: BoxDecoration(
-            color: gradientBase,
-            gradient: LinearGradient(
-              colors: [gradientStart, gradientEnd],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            border: showOuterFrame
-                ? Border.all(color: cardColor, width: borderSize)
-                : null,
-            boxShadow: showDropShadow
-                ? const [
-                    BoxShadow(
-                      color: Colors.black,
-                      blurRadius: 0,
-                      offset: Offset(4, 4),
-                    ),
-                  ]
-                : const [],
-          ),
-          child: Stack(
-            children: [
-              Padding(
-                padding: EdgeInsets.all(pad),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AspectRatio(
-                      aspectRatio: 1,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: PixelTheme.bgDark,
-                          border: Border.all(
-                            color: cardColor,
-                            width: imageBorderWidth,
-                          ),
-                        ),
-                        child: image,
+          return Container(
+            decoration: BoxDecoration(
+              color: gradientBase,
+              gradient: LinearGradient(
+                colors: [gradientStart, gradientEnd],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              border: showOuterFrame
+                  ? Border.all(color: cardColor, width: borderSize)
+                  : null,
+              boxShadow: showDropShadow
+                  ? const [
+                      BoxShadow(
+                        color: Colors.black,
+                        blurRadius: 0,
+                        offset: Offset(4, 4),
                       ),
-                    ),
-                    SizedBox(height: imageToTitleSpacing ?? pad),
-                    Expanded(
-                      child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 140),
-                        opacity: showText ? 1 : 0,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            GestureDetector(
-                              onTap: onTapTitle,
-                              behavior: HitTestBehavior.opaque,
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      title,
-                                      maxLines: titleMaxLines,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: textColor,
-                                        fontSize: titleFontSize,
-                                        fontWeight: titleFontWeight,
-                                        fontFamily: 'Unifont',
-                                      ),
-                                    ),
-                                  ),
-                                  if (titleSuffix != null) ...[
-                                    const SizedBox(width: 6),
-                                    titleSuffix!,
-                                  ],
-                                ],
-                              ),
+                    ]
+                  : const [],
+            ),
+            child: Stack(
+              children: [
+                Padding(
+                  padding: EdgeInsets.all(pad),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: 1,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: PixelTheme.bgDark,
+                            border: Border.all(
+                              color: cardColor,
+                              width: imageBorderWidth,
                             ),
-                            const SizedBox(height: 1),
-                            GestureDetector(
-                              onTap: onTapAttribute,
-                              behavior: HitTestBehavior.opaque,
-                              child: Row(
-                                children: [
-                                  if (_showSeparateAttributeEmoji) ...[
-                                    Text(
-                                      attributeEmoji,
-                                      style: TextStyle(
-                                        color: attributeTextColor,
-                                        fontSize: emojiFontSize,
-                                        fontFamily: 'Roboto',
-                                        fontFamilyFallback: const <String>[
-                                          'Segoe UI Emoji',
-                                          'Apple Color Emoji',
-                                          'Noto Color Emoji',
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                  ],
-                                  Expanded(
-                                    child: RichText(
-                                      maxLines: attributeMaxLines,
-                                      overflow: TextOverflow.ellipsis,
-                                      text: TextSpan(
-                                        children: _attributeLabelSpans(
-                                          attributeTextColor,
+                          ),
+                          child: image,
+                        ),
+                      ),
+                      SizedBox(height: imageToTitleSpacing ?? pad),
+                      Expanded(
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 140),
+                          opacity: showText ? 1 : 0,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              GestureDetector(
+                                onTap: onTapTitle,
+                                behavior: HitTestBehavior.opaque,
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        title,
+                                        maxLines: titleMaxLines,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: textColor,
+                                          fontSize: titleFontSize,
+                                          fontWeight: titleFontWeight,
+                                          fontFamily: 'Unifont',
                                         ),
                                       ),
                                     ),
-                                  ),
-                                  if (attributeSuffix != null) ...[
-                                    const SizedBox(width: 6),
-                                    attributeSuffix!,
+                                    if (titleSuffix != null) ...[
+                                      const SizedBox(width: 6),
+                                      titleSuffix!,
+                                    ],
                                   ],
-                                ],
-                              ),
-                            ),
-                            if (fixedContent != null ||
-                                extraContent != null) ...[
-                              SizedBox(height: contentGap),
-                              ?fixedContent,
-                              if (fixedContent != null && extraContent != null)
-                                SizedBox(height: contentGap),
-                              Container(
-                                height: 1,
-                                width: double.infinity,
-                                color: PixelTheme.textWhite,
-                              ),
-                              if (extraContent != null) ...[
-                                SizedBox(height: contentGap),
-                                Expanded(
-                                  child: SingleChildScrollView(
-                                    padding: const EdgeInsets.only(right: 4),
-                                    child: extraContent!,
-                                  ),
                                 ),
+                              ),
+                              const SizedBox(height: 1),
+                              GestureDetector(
+                                onTap: onTapAttribute,
+                                behavior: HitTestBehavior.opaque,
+                                child: Row(
+                                  children: [
+                                    if (_showSeparateAttributeEmoji) ...[
+                                      Text(
+                                        attributeEmoji,
+                                        style: TextStyle(
+                                          color: attributeTextColor,
+                                          fontSize: emojiFontSize,
+                                          fontFamily: 'Roboto',
+                                          fontFamilyFallback: const <String>[
+                                            'Segoe UI Emoji',
+                                            'Apple Color Emoji',
+                                            'Noto Color Emoji',
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                    ],
+                                    Expanded(
+                                      child: RichText(
+                                        maxLines: attributeMaxLines,
+                                        overflow: TextOverflow.ellipsis,
+                                        text: TextSpan(
+                                          children: _attributeLabelSpans(
+                                            attributeTextColor,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    if (attributeSuffix != null) ...[
+                                      const SizedBox(width: 6),
+                                      attributeSuffix!,
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              if (fixedContent != null ||
+                                  extraContent != null) ...[
+                                SizedBox(height: contentGap),
+                                ?fixedContent,
+                                if (fixedContent != null &&
+                                    extraContent != null)
+                                  SizedBox(height: contentGap),
+                                Container(
+                                  height: 1,
+                                  width: double.infinity,
+                                  color: PixelTheme.textWhite,
+                                ),
+                                if (extraContent != null) ...[
+                                  SizedBox(height: contentGap),
+                                  Expanded(
+                                    child: SingleChildScrollView(
+                                      padding: const EdgeInsets.only(right: 4),
+                                      child: extraContent!,
+                                    ),
+                                  ),
+                                ],
                               ],
                             ],
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: IgnorePointer(
-                  child: Transform.translate(
-                    offset: Offset(0, watermarkDrop),
-                    child: Text(
-                      'HITCON 2026',
-                      style: TextStyle(
-                        color: PixelTheme.textWhite.withValues(alpha: 0.18),
-                        fontFamily: 'Unifont',
-                        fontSize: watermarkSize,
-                        fontWeight: FontWeight.w900,
-                        height: 1,
-                        letterSpacing: 1.0,
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    child: Transform.translate(
+                      offset: Offset(0, watermarkDrop),
+                      child: Text(
+                        'HITCON 2026',
+                        style: TextStyle(
+                          color: PixelTheme.textWhite.withValues(alpha: 0.18),
+                          fontFamily: 'Unifont',
+                          fontSize: watermarkSize,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                          letterSpacing: 1.0,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        );
-      },
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 

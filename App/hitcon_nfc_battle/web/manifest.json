@@ -1,6 +1,6 @@
 {
-    "name": "hitcon_nfc_battle",
-    "short_name": "hitcon_nfc_battle",
+    "name": "HITCON NFC Battle",
+    "short_name": "HITCON NFC Battle",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

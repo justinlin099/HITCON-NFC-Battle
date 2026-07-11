@@ -9,11 +9,14 @@ typedef CollectionNtagHandler = Future<void> Function(String uid);
 class CollectionNtagScanner {
   CollectionNtagScanner({
     required CollectionNtagHandler onTagDiscovered,
+    required String alertMessage,
     bool autoRestart = true,
   }) : _onTagDiscovered = onTagDiscovered,
+       _alertMessage = alertMessage,
        _autoRestart = autoRestart;
 
   final CollectionNtagHandler _onTagDiscovered;
+  final String _alertMessage;
   final bool _autoRestart;
 
   bool _isScanning = false;
@@ -49,7 +52,7 @@ class CollectionNtagScanner {
     try {
       await NfcManager.instance.startSession(
         pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
-        alertMessage: '請將卡片靠近 iPhone 頂部',
+        alertMessage: _alertMessage,
         onDiscovered: (NfcTag tag) async {
           if (!lease.isActive || _isHandling || _isDisposed) {
             return;

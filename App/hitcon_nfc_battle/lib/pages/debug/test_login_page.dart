@@ -1,10 +1,19 @@
+import 'dart:async';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../config/app_config.dart';
+import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/mock_api_service.dart';
 import '../../services/setup_service.dart';
+import '../user/pixel_theme.dart';
 
-/// 測試登入頁面 - 用於快速切換不同角色進行測試
 class TestLoginPage extends StatefulWidget {
   const TestLoginPage({super.key});
 
@@ -13,190 +22,536 @@ class TestLoginPage extends StatefulWidget {
 }
 
 class _TestLoginPageState extends State<TestLoginPage> {
+  static const MethodChannel _appActionsChannel = MethodChannel(
+    'hitcon_nfc_battle/app_actions',
+  );
+
+  final TextEditingController _tokenController = TextEditingController();
   bool _isLoading = false;
+  String _status = '';
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_status.isEmpty) {
+      _status = context.l10n.tr('loginPrompt');
+    }
+  }
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('🧪 角色測試面板'),
-        centerTitle: true,
-        elevation: 0,
+    PixelTheme.active = PixelTheme.getPalette(PixelTheme.defaultScheme);
+    final ThemeData base = Theme.of(context);
+    final MediaQueryData mediaQuery = MediaQuery.of(context);
+    final double layoutTextScale = _layoutTextScale(mediaQuery.size);
+    final double systemTextScale = mediaQuery.textScaler.scale(1);
+    final MediaQueryData responsiveMediaQuery = mediaQuery.copyWith(
+      textScaler: TextScaler.linear(
+        (systemTextScale * layoutTextScale).clamp(0.8, 2.0),
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // 測試模式警告
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade50,
-                  border: Border.all(color: Colors.amber.shade700),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.info_outline,
-                      color: Colors.amber.shade700,
-                      size: 32,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      '🔴 測試模式已啟用',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.amber.shade900,
-                        fontWeight: FontWeight.bold,
+    );
+    final ThemeData pixelTheme = base.copyWith(
+      textTheme: base.textTheme.apply(fontFamily: 'Unifont'),
+      primaryTextTheme: base.primaryTextTheme.apply(fontFamily: 'Unifont'),
+      scaffoldBackgroundColor: PixelTheme.bgDark,
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: PixelTheme.bgDark,
+        hintStyle: TextStyle(color: PixelTheme.textGray),
+        contentPadding: const EdgeInsets.all(12),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: PixelTheme.border, width: 2),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: PixelTheme.accentBlue, width: 3),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: PixelTheme.textGray, width: 2),
+        ),
+      ),
+    );
+
+    return MediaQuery(
+      data: responsiveMediaQuery,
+      child: Theme(
+        data: pixelTheme,
+        child: Scaffold(
+          body: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
+              children: <Widget>[
+                _LoginHeader(status: _status),
+                const SizedBox(height: 18),
+                _LoginPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      _PixelSectionTitle(label: context.l10n.tr('loginToken')),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _tokenController,
+                        minLines: 3,
+                        maxLines: 6,
+                        cursorColor: PixelTheme.accent,
+                        style: TextStyle(
+                          color: PixelTheme.textWhite,
+                          fontFamily: 'Unifont',
+                          fontSize: 12,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: context.l10n.tr('loginTokenHint'),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '使用 Mock 服務進行開發測試\n無需後端 API',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.amber.shade800,
+                      const SizedBox(height: 12),
+                      _PixelLoginButton(
+                        onPressed: _isLoading
+                            ? null
+                            : () => _loginWithRawToken(_tokenController.text),
+                        icon: Icons.login_rounded,
+                        label: context.l10n.tr(
+                          _isLoading ? 'signingIn' : 'signIn',
+                        ),
+                        accent: PixelTheme.accent,
                       ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 40),
-
-              // 角色選擇標題
-              Text(
-                '選擇角色進行測試',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-
-              const SizedBox(height: 8),
-              Text(
-                '各角色有不同的功能和權限',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-              ),
-
-              const SizedBox(height: 40),
-
-              // 管理者按鈕
-              _buildRoleButton(
-                context,
-                userType: 'ADMIN',
-                label: '🔧 管理者',
-                description: 'NFC 卡片寫入工具',
-                color: Colors.blue,
-              ),
-
-              const SizedBox(height: 16),
-
-              // 玩家按鈕
-              _buildRoleButton(
-                context,
-                userType: 'USER',
-                label: '🎮 玩家',
-                description: '遊戲和集卡介面',
-                color: Colors.green,
-              ),
-
-              const SizedBox(height: 16),
-
-              // 活動管理員按鈕
-              _buildRoleButton(
-                context,
-                userType: 'EVENT_STAFF',
-                label: '🎯 活動管理員',
-                description: '獎品發放管理',
-                color: Colors.purple,
-              ),
-
-              const SizedBox(height: 48),
-
-              // 底部信息
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      '📌 Mock 服務信息',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
+                      const SizedBox(height: 12),
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: _PixelLoginButton(
+                              onPressed: _isLoading ? null : _scanQrWithCamera,
+                              icon: Icons.qr_code_scanner_rounded,
+                              label: context.l10n.tr('scanQr'),
+                              accent: PixelTheme.accentBlue,
+                              compact: true,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _PixelLoginButton(
+                              onPressed: _isLoading ? null : _importQrImage,
+                              icon: Icons.image_search_rounded,
+                              label: context.l10n.tr('importQr'),
+                              accent: PixelTheme.accentBlue,
+                              compact: true,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    _buildInfoRow('模式', 'Mock（本地測試）'),
-                    const SizedBox(height: 8),
-                    _buildInfoRow('網路延遲', '${AppConfig.mockNetworkDelay}ms'),
-                    const SizedBox(height: 8),
-                    _buildInfoRow(
-                      '調試日誌',
-                      AppConfig.enableDebugLogging ? '已啟用' : '已禁用',
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // 重置數據按鈕
-              ElevatedButton.icon(
-                onPressed: _resetMockData,
-                icon: const Icon(Icons.refresh),
-                label: const Text('重置 Mock 數據'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.grey.shade600,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
+                      const SizedBox(height: 10),
+                      _PixelLoginButton(
+                        onPressed: _openGmail,
+                        icon: Icons.mail_rounded,
+                        label: context.l10n.tr('openGmail'),
+                        accent: PixelTheme.textWhite,
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: PixelTheme.bgMid,
+                    border: Border.all(color: PixelTheme.border, width: 2),
+                  ),
+                  child: Text(
+                    context.l10n.tr('loginEmailHint'),
+                    style: TextStyle(
+                      color: PixelTheme.textGray,
+                      fontFamily: 'Unifont',
+                      fontSize: 11,
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+                if (AppConfig.useMockServices) ...<Widget>[
+                  const SizedBox(height: 18),
+                  _LoginPanel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        _PixelSectionTitle(label: context.l10n.tr('mockLogin')),
+                        const SizedBox(height: 12),
+                        _MockLoginButton(
+                          label: context.l10n.tr('administrator'),
+                          onPressed: _isLoading
+                              ? null
+                              : () => _handleLogin('ADMIN'),
+                        ),
+                        const SizedBox(height: 10),
+                        _MockLoginButton(
+                          label: context.l10n.tr('attendee'),
+                          onPressed: _isLoading
+                              ? null
+                              : () => _handleLogin('USER'),
+                        ),
+                        const SizedBox(height: 10),
+                        _MockLoginButton(
+                          label: context.l10n.tr('staff'),
+                          onPressed: _isLoading
+                              ? null
+                              : () => _handleLogin('EVENT_STAFF'),
+                        ),
+                        const SizedBox(height: 10),
+                        _PixelLoginButton(
+                          onPressed: _resetMockData,
+                          icon: Icons.refresh_rounded,
+                          label: context.l10n.tr('resetMockData'),
+                          accent: PixelTheme.warning,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  /// 建立角色選擇按鈕
-  Widget _buildRoleButton(
-    BuildContext context, {
-    required String userType,
-    required String label,
-    required String description,
-    required Color color,
-  }) {
-    return ElevatedButton(
-      onPressed: _isLoading ? null : () => _handleLogin(userType),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  double _layoutTextScale(Size size) {
+    if (size.shortestSide >= 600 && size.height >= 700) {
+      return 1.45;
+    }
+    if (size.width >= 360 && size.height >= 780) {
+      return 1.3;
+    }
+    if (size.width >= 360 && size.height >= 680) {
+      return 1.18;
+    }
+    return 1;
+  }
+
+  Future<void> _scanQrWithCamera() async {
+    final String? value = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(builder: (_) => const _QrScannerPage()),
+    );
+    if (value == null || value.trim().isEmpty) {
+      return;
+    }
+    _tokenController.text = _extractToken(value);
+    await _loginWithRawToken(value);
+  }
+
+  Future<void> _importQrImage() async {
+    final AppLocalizations l10n = context.l10n;
+    setState(() {
+      _status = l10n.tr('readingQrImage');
+    });
+
+    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    final String? path = result?.files.single.path;
+    if (path == null) {
+      setState(() {
+        _status = l10n.tr('importCanceled');
+      });
+      return;
+    }
+
+    final MobileScannerController controller = MobileScannerController(
+      formats: const <BarcodeFormat>[BarcodeFormat.qrCode],
+    );
+    try {
+      final BarcodeCapture? capture = await controller.analyzeImage(
+        path,
+        formats: const <BarcodeFormat>[BarcodeFormat.qrCode],
+      );
+      final String? value = capture?.barcodes
+          .map((Barcode barcode) => barcode.rawValue)
+          .whereType<String>()
+          .firstOrNull;
+      if (value == null || value.trim().isEmpty) {
+        _showError(l10n.tr('tokenQrNotFound'));
+        return;
+      }
+      _tokenController.text = _extractToken(value);
+      await _loginWithRawToken(value);
+    } catch (error) {
+      _showError(l10n.tr('qrReadFailed', <String, Object?>{'error': error}));
+    } finally {
+      unawaited(controller.dispose());
+    }
+  }
+
+  Future<void> _openGmail() async {
+    final Uri webUri = Uri.parse('https://mail.google.com/');
+    if (await _openDefaultEmailApp()) {
+      return;
+    }
+    await launchUrl(webUri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<bool> _openDefaultEmailApp() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        return await _appActionsChannel.invokeMethod<bool>('openEmailApp') ??
+            false;
+      } on PlatformException {
+        return false;
+      } on MissingPluginException {
+        return false;
+      }
+    }
+
+    final Uri mailUri = Uri(scheme: 'mailto');
+    if (!await canLaunchUrl(mailUri)) {
+      return false;
+    }
+    return launchUrl(mailUri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _loginWithRawToken(String raw) async {
+    final AppLocalizations l10n = context.l10n;
+    final String token = _extractToken(raw);
+    if (token.isEmpty) {
+      _showError(l10n.tr('tokenRequired'));
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _status = l10n.tr('signingIn');
+    });
+
+    try {
+      final bool success = await AuthService().loginWithToken(token);
+      if (!mounted) {
+        return;
+      }
+      if (!success) {
+        _showError(l10n.tr('loginFailedToken'));
+        return;
+      }
+      await _goNext();
+    } catch (error) {
+      if (mounted) {
+        _showError(l10n.tr('loginFailed', <String, Object?>{'error': error}));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleLogin(String userType) async {
+    setState(() {
+      _isLoading = true;
+      _status = context.l10n.tr('mockSigningIn');
+    });
+
+    try {
+      final bool success = await AuthService().login(userType);
+      if (!mounted) {
+        return;
+      }
+      if (!success) {
+        _showError(context.l10n.tr('mockLoginFailed'));
+        return;
+      }
+      await _goNext();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _goNext() async {
+    final AuthService authService = AuthService();
+    final String? userId = authService.currentUserId;
+    final bool setupComplete =
+        userId != null && await SetupService().isComplete(userId);
+    if (!mounted) {
+      return;
+    }
+    final String routeName = authService.isRegularUser
+        ? (setupComplete ? '/collection' : '/setup')
+        : '/admin';
+    Navigator.of(context).pushReplacementNamed(routeName);
+  }
+
+  String _extractToken(String raw) {
+    final String trimmed = raw.trim();
+    final Uri? uri = Uri.tryParse(trimmed);
+    if (uri != null && uri.hasQuery) {
+      for (final String key in <String>[
+        'token',
+        'jwt',
+        'access_token',
+        'login_token',
+      ]) {
+        final String? value = uri.queryParameters[key];
+        if (value != null && value.trim().isNotEmpty) {
+          return _extractToken(value);
+        }
+      }
+    }
+
+    final RegExp bearer = RegExp(
+      r'Bearer\s+([A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)',
+      caseSensitive: false,
+    );
+    final RegExp jwt = RegExp(
+      r'([A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)',
+    );
+    return bearer.firstMatch(trimmed)?.group(1) ??
+        jwt.firstMatch(trimmed)?.group(1) ??
+        trimmed;
+  }
+
+  void _showError(String message) {
+    setState(() {
+      _status = message;
+      _isLoading = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(
+            color: Colors.white,
+            fontFamily: 'Unifont',
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        backgroundColor: PixelTheme.warning,
       ),
-      child: SizedBox(
-        width: double.infinity,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+    );
+  }
+
+  void _resetMockData() {
+    MockApiService.resetMockData();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: PixelTheme.bgMid,
+        content: Text(
+          context.l10n.tr('mockDataReset'),
+          style: TextStyle(
+            color: PixelTheme.accent,
+            fontFamily: 'Unifont',
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QrScannerPage extends StatefulWidget {
+  const _QrScannerPage();
+
+  @override
+  State<_QrScannerPage> createState() => _QrScannerPageState();
+}
+
+class _QrScannerPageState extends State<_QrScannerPage> {
+  final MobileScannerController _controller = MobileScannerController(
+    formats: const <BarcodeFormat>[BarcodeFormat.qrCode],
+  );
+  bool _handled = false;
+
+  @override
+  void dispose() {
+    unawaited(_controller.dispose());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    PixelTheme.active = PixelTheme.getPalette(PixelTheme.defaultScheme);
+    final ThemeData base = Theme.of(context);
+    return Theme(
+      data: base.copyWith(
+        textTheme: base.textTheme.apply(fontFamily: 'Unifont'),
+        primaryTextTheme: base.primaryTextTheme.apply(fontFamily: 'Unifont'),
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: PixelTheme.bgMid,
+          foregroundColor: PixelTheme.accent,
+          titleTextStyle: TextStyle(
+            color: PixelTheme.accent,
+            fontFamily: 'Unifont',
+            fontSize: 17,
+            fontWeight: FontWeight.w900,
+          ),
+          title: Text(context.l10n.tr('scanLoginQr')),
+          actions: <Widget>[
+            _PixelToolButton(
+              onPressed: _controller.toggleTorch,
+              icon: Icons.flash_on_rounded,
+              tooltip: 'Flash',
             ),
-            const SizedBox(height: 8),
-            Text(
-              description,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
+            const SizedBox(width: 6),
+            _PixelToolButton(
+              onPressed: _controller.switchCamera,
+              icon: Icons.cameraswitch_rounded,
+              tooltip: 'Camera',
+            ),
+            const SizedBox(width: 10),
+          ],
+        ),
+        body: Stack(
+          children: <Widget>[
+            MobileScanner(controller: _controller, onDetect: _handleDetect),
+            Center(
+              child: Container(
+                width: 240,
+                height: 240,
+                decoration: BoxDecoration(
+                  border: Border.all(color: PixelTheme.accent, width: 4),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: PixelTheme.accent.withValues(alpha: 0.25),
+                      blurRadius: 0,
+                      spreadRadius: 6,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: PixelTheme.bgMid.withValues(alpha: 0.92),
+                  border: Border(
+                    top: BorderSide(color: PixelTheme.accent, width: 3),
+                  ),
+                ),
+                child: Text(
+                  context.l10n.tr('qrFrameHint'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: PixelTheme.textWhite,
+                    fontFamily: 'Unifont',
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -204,95 +559,276 @@ class _TestLoginPageState extends State<TestLoginPage> {
     );
   }
 
-  /// 建立信息行
-  Widget _buildInfoRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
-        Text(
-          value,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+  void _handleDetect(BarcodeCapture capture) {
+    if (_handled) {
+      return;
+    }
+    final String? value = capture.barcodes
+        .map((Barcode barcode) => barcode.rawValue)
+        .whereType<String>()
+        .firstOrNull;
+    if (value == null || value.trim().isEmpty) {
+      return;
+    }
+    _handled = true;
+    Navigator.of(context).pop(value);
+  }
+}
+
+class _PixelToolButton extends StatelessWidget {
+  const _PixelToolButton({
+    required this.onPressed,
+    required this.icon,
+    required this.tooltip,
+  });
+
+  final VoidCallback onPressed;
+  final IconData icon;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: PixelTheme.bgDark,
+            border: Border.all(color: PixelTheme.accent, width: 2),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, color: PixelTheme.accent, size: 19),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoginHeader extends StatelessWidget {
+  const _LoginHeader({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Container(
+              width: 52,
+              height: 52,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: PixelTheme.accent,
+                border: Border.all(color: PixelTheme.textWhite, width: 2),
+                boxShadow: const <BoxShadow>[
+                  BoxShadow(
+                    color: Colors.black,
+                    blurRadius: 0,
+                    offset: Offset(4, 4),
+                  ),
+                ],
+              ),
+              child: Image.asset(
+                'assets/app_icon/app_icon_master.png',
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.none,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                'HITCON\nNFC BATTLE',
+                style: TextStyle(
+                  color: PixelTheme.accent,
+                  fontFamily: 'Unifont',
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  height: 1.05,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: PixelTheme.bgMid,
+            border: Border(
+              left: BorderSide(color: PixelTheme.accentBlue, width: 4),
+            ),
+          ),
+          child: Text(
+            status,
+            style: TextStyle(
+              color: PixelTheme.textWhite,
+              fontFamily: 'Unifont',
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
         ),
       ],
     );
   }
+}
 
-  /// 登入處理
-  Future<void> _handleLogin(String userType) async {
-    setState(() => _isLoading = true);
+class _PixelSectionTitle extends StatelessWidget {
+  const _PixelSectionTitle({required this.label});
 
-    try {
-      final authService = AuthService();
-      final success = await authService.login(userType);
+  final String label;
 
-      if (mounted) {
-        if (success) {
-          final AuthService authService = AuthService();
-          final String? userId = authService.currentUserId;
-          final bool setupComplete =
-              userId != null && await SetupService().isComplete(userId);
-          if (!mounted) {
-            return;
-          }
-          final String routeName = authService.isRegularUser
-              ? (setupComplete ? '/collection' : '/setup')
-              : '/admin';
-          Navigator.of(context).pushReplacementNamed(routeName);
-        } else {
-          // 登入失敗
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('登入失敗，請重試'),
-              backgroundColor: Colors.red.shade600,
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        Container(width: 8, height: 8, color: PixelTheme.accent),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: PixelTheme.textWhite,
+              fontFamily: 'Unifont',
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
             ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('錯誤: $e'),
-            backgroundColor: Colors.red.shade600,
           ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
+        ),
+      ],
+    );
   }
+}
 
-  /// 重置 Mock 數據
-  void _resetMockData() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('重置 Mock 數據'),
-        content: const Text('確定要重置所有 Mock 數據到初始狀態嗎？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              MockApiService.resetMockData();
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('✅ Mock 數據已重置'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            },
-            child: const Text('確定'),
-          ),
+class _LoginPanel extends StatelessWidget {
+  const _LoginPanel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: PixelTheme.bgMid,
+        border: Border.all(color: PixelTheme.accent, width: 3),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(5, 5)),
         ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _MockLoginButton extends StatelessWidget {
+  const _MockLoginButton({required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return _PixelLoginButton(
+      onPressed: onPressed,
+      icon: Icons.person_rounded,
+      label: label,
+      accent: PixelTheme.accentBlue,
+    );
+  }
+}
+
+class _PixelLoginButton extends StatefulWidget {
+  const _PixelLoginButton({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    required this.accent,
+    this.compact = false,
+  });
+
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final String label;
+  final Color accent;
+  final bool compact;
+
+  @override
+  State<_PixelLoginButton> createState() => _PixelLoginButtonState();
+}
+
+class _PixelLoginButtonState extends State<_PixelLoginButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool enabled = widget.onPressed != null;
+    final Color color = enabled ? widget.accent : PixelTheme.textGray;
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: widget.label,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+        onTapUp: enabled
+            ? (_) {
+                setState(() => _pressed = false);
+                widget.onPressed?.call();
+              }
+            : null,
+        onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
+        child: Transform.translate(
+          offset: _pressed ? const Offset(3, 3) : Offset.zero,
+          child: Container(
+            height: widget.compact ? 46 : 48,
+            padding: EdgeInsets.symmetric(horizontal: widget.compact ? 8 : 12),
+            decoration: BoxDecoration(
+              color: enabled ? PixelTheme.bgDark : PixelTheme.bgLight,
+              border: Border.all(color: color, width: 2),
+              boxShadow: <BoxShadow>[
+                if (!_pressed)
+                  const BoxShadow(
+                    color: Colors.black,
+                    blurRadius: 0,
+                    offset: Offset(4, 4),
+                  ),
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Icon(widget.icon, color: color, size: 18),
+                const SizedBox(width: 7),
+                Flexible(
+                  child: Text(
+                    widget.label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: color,
+                      fontFamily: 'Unifont',
+                      fontSize: widget.compact ? 10 : 12,
+                      fontWeight: FontWeight.w900,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

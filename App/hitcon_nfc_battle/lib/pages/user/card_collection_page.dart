@@ -1,12 +1,16 @@
 import 'dart:async';
-import 'dart:math' as math;
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
+
 import 'my_card_editor_page.dart';
 import 'card_detail_page.dart';
+import 'emoji_catalog.dart';
 import 'pixel_card_face.dart';
+import 'pixel_card_hero.dart';
 import 'pixel_theme.dart';
 import 'score_board_page.dart';
 
@@ -14,6 +18,8 @@ import '../../services/auth_service.dart';
 import '../../services/local_collection_store.dart';
 import '../../services/local_profile_store.dart';
 import '../../services/mock_api_service.dart';
+import '../../services/nfc_deep_link_service.dart';
+import '../../widgets/admin_mode_switch_button.dart';
 
 class CardCollectionPage extends StatefulWidget {
   const CardCollectionPage({super.key});
@@ -23,36 +29,51 @@ class CardCollectionPage extends StatefulWidget {
 }
 
 class _CardCollectionPageState extends State<CardCollectionPage> {
-  static const int _prizeRequirement = 9;
-
   final AuthService _authService = AuthService();
   final LocalCollectionStore _localStore = LocalCollectionStore();
   final LocalProfileStore _localProfileStore = LocalProfileStore();
+  final NfcDeepLinkService _deepLinks = NfcDeepLinkService.instance;
+  final ScrollController _collectionScrollController = ScrollController();
+  final PageController _pageController = PageController();
+  final ValueNotifier<int> _selectedTab = ValueNotifier<int>(0);
 
   PixelScheme _selectedScheme = PixelTheme.defaultScheme;
-  int _selectedTabIndex = 0;
   bool _appliedInitialTab = false;
+  bool _showAdminModeSwitch = false;
 
   bool _isLoading = true;
+  bool _isHandlingNfcRequest = false;
   bool _ntagReminderChecked = false;
+  StreamSubscription<NfcScanRequest>? _nfcRequestSubscription;
   final ValueNotifier<RefreshIndicatorStatus?> _refreshStatus =
       ValueNotifier<RefreshIndicatorStatus?>(null);
   final ValueNotifier<double> _refreshPullDistance = ValueNotifier<double>(0);
   Map<String, dynamic>? _collectionData;
+  Map<String, dynamic>? _stampMission;
   List<Map<String, dynamic>> _localCards = <Map<String, dynamic>>[];
   List<Map<String, String>> _featuredBooths = <Map<String, String>>[];
 
   @override
   void initState() {
     super.initState();
+    _nfcRequestSubscription = _deepLinks.requests.listen((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_consumePendingNfcRequest());
+      });
+    });
     _loadData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_consumePendingNfcRequest());
       unawaited(_showNtagPairingReminderIfNeeded());
     });
   }
 
   @override
   void dispose() {
+    _nfcRequestSubscription?.cancel();
+    _collectionScrollController.dispose();
+    _pageController.dispose();
+    _selectedTab.dispose();
     _refreshStatus.dispose();
     _refreshPullDistance.dispose();
     super.dispose();
@@ -67,10 +88,17 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     _appliedInitialTab = true;
 
     final Object? args = ModalRoute.of(context)?.settings.arguments;
+    _showAdminModeSwitch =
+        _authService.isAdmin || (args is Map && args['fromAdminMode'] == true);
     if (args is Map && args['tab'] is int) {
       final int tab = args['tab'] as int;
       if (tab >= 0 && tab <= 2) {
-        _selectedTabIndex = tab;
+        _selectedTab.value = tab;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _pageController.hasClients) {
+            _pageController.jumpToPage(tab);
+          }
+        });
       }
     }
   }
@@ -89,10 +117,15 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         localCards = await _localStore.loadCards(userId);
       }
 
-      final List<Map<String, String>> boothResult =
-          await MockApiService.getFeaturedBooths();
-      final Map<String, dynamic>? collectionResult = await _authService
+      final Future<List<Map<String, String>>> boothFuture =
+          MockApiService.getFeaturedBooths();
+      final Future<Map<String, dynamic>?> collectionFuture = _authService
           .fetchCollectionRecords();
+      final Future<Map<String, dynamic>?> stampMissionFuture = _authService
+          .fetchStampMission();
+      final List<Map<String, String>> boothResult = await boothFuture;
+      final Map<String, dynamic>? collectionResult = await collectionFuture;
+      final Map<String, dynamic>? stampMission = await stampMissionFuture;
       if (userId != null && collectionResult != null) {
         await _localStore.saveCollectionIndex(
           userId: userId,
@@ -108,6 +141,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       setState(() {
         _featuredBooths = boothResult;
         _collectionData = collectionResult;
+        _stampMission = stampMission;
         _localCards = localCards;
       });
     } finally {
@@ -130,12 +164,18 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     return <Map<String, dynamic>>[];
   }
 
-  int get _totalCollected {
-    final int remoteTotal = _collectionData?['total_collected'] as int? ?? 0;
-    return math.max(remoteTotal, _cards.length);
-  }
+  int get _stampThreshold =>
+      (_stampMission?['stamp_threshold'] as num?)?.toInt() ?? 10;
 
-  bool get _isComplete => _totalCollected >= _prizeRequirement;
+  int get _sponsorStampCount =>
+      (_stampMission?['sponsor_count'] as num?)?.toInt() ?? 0;
+
+  int get _communityStampCount =>
+      (_stampMission?['community_count'] as num?)?.toInt() ?? 0;
+
+  int get _stampProgress => _sponsorStampCount + _communityStampCount;
+
+  bool get _isComplete => _stampMission?['eligible_for_stamp_prize'] == true;
 
   Future<void> _showNtagPairingReminderIfNeeded() async {
     if (_ntagReminderChecked || !mounted) {
@@ -143,7 +183,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     }
     _ntagReminderChecked = true;
 
-    if (!_authService.isRegularUser) {
+    if (!_authService.isRegularUser || _deepLinks.hasPending) {
       return;
     }
     final String? userId = _authService.currentUserId;
@@ -163,9 +203,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       builder: (BuildContext context) => const _NtagPairingReminderDialog(),
     );
     if (goPair == true && mounted) {
-      setState(() {
-        _selectedTabIndex = 1;
-      });
+      await _selectTab(1);
     }
   }
 
@@ -175,7 +213,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         card['sponsor_stand_name'] as String? ??
         card['community_stand_name'] as String? ??
         card['tag_name'] as String? ??
-        'Unknown';
+        context.l10n.tr('unknown');
   }
 
   String _attributeEmojiForCard(Map<String, dynamic> card) {
@@ -185,20 +223,92 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   }
 
   String _attributeLabelForCard(Map<String, dynamic> card) {
-    return card['attribute_label'] as String? ??
-        card['user_type'] as String? ??
-        card['scan_type'] as String? ??
-        'UNKNOWN';
+    final String emoji = _attributeEmojiForCard(card);
+    final String label = normalizeEmojiAttributeLabel(
+      emojiValue: emoji,
+      rawLabel: card['attribute_label'] as String? ?? '',
+    );
+    if (label.trim().isNotEmpty && !_isRoleLabel(label)) {
+      return label;
+    }
+    return emojiNameLabelForValue(emoji).toUpperCase();
+  }
+
+  bool _isRoleLabel(String value) {
+    switch (value.trim().toUpperCase()) {
+      case 'ATTENDEE':
+      case 'USER':
+      case 'STAFF':
+      case 'SPONSOR':
+      case 'COMMUNITY':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  Color _cardColorForCard(Map<String, dynamic> card, int index) {
+    final Object? raw = card['card_color'];
+    if (raw is int) {
+      return Color(raw);
+    }
+    if (raw is num) {
+      return Color(raw.toInt());
+    }
+    if (raw is String) {
+      final int? parsed = _parseColorString(raw);
+      if (parsed != null) {
+        return Color(parsed);
+      }
+    }
+    return _PixelCard.colorForIndex(index);
+  }
+
+  int? _parseColorString(String raw) {
+    final String value = raw.trim();
+    if (value.isEmpty) {
+      return null;
+    }
+    if (value.startsWith('#')) {
+      final String normalized = value.substring(1);
+      return int.tryParse(
+        normalized.length == 6 ? 'FF$normalized' : normalized,
+        radix: 16,
+      );
+    }
+    if (RegExp(r'^\d+$').hasMatch(value)) {
+      return int.tryParse(value);
+    }
+    return int.tryParse(value, radix: 16);
+  }
+
+  Future<void> _selectTab(int index, {bool animate = true}) async {
+    if (index < 0 || index > 2 || !mounted) {
+      return;
+    }
+    if (!_pageController.hasClients) {
+      _selectedTab.value = index;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _pageController.hasClients) {
+          _pageController.jumpToPage(index);
+        }
+      });
+      return;
+    }
+    if (animate) {
+      await _pageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _pageController.jumpToPage(index);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     PixelTheme.active = PixelTheme.getPalette(_selectedScheme);
-    final String pageTitle = switch (_selectedTabIndex) {
-      1 => '我的卡片',
-      2 => 'SCORE BOARD',
-      _ => 'HITCON NFC Battle',
-    };
 
     final ThemeData pixelTheme = Theme.of(context).copyWith(
       textTheme: Theme.of(context).textTheme.apply(fontFamily: 'Unifont'),
@@ -214,7 +324,23 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         child: Scaffold(
           backgroundColor: PixelTheme.bgDark,
           appBar: AppBar(
-            title: Text(pageTitle),
+            leading: _showAdminModeSwitch
+                ? AdminModeSwitchButton(
+                    target: AdminModeTarget.adminTools,
+                    color: PixelTheme.accent,
+                  )
+                : null,
+            title: ValueListenableBuilder<int>(
+              valueListenable: _selectedTab,
+              builder: (BuildContext context, int tab, Widget? child) {
+                final String title = switch (tab) {
+                  1 => context.l10n.tr('myCardTab'),
+                  2 => context.l10n.tr('scoreboardTab'),
+                  _ => context.l10n.tr('appTitle'),
+                };
+                return Text(title);
+              },
+            ),
             titleTextStyle: TextStyle(
               color: PixelTheme.accent,
               fontFamily: 'Unifont',
@@ -229,7 +355,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
             toolbarHeight: 68,
             actions: [
               PopupMenuButton<PixelScheme>(
-                tooltip: 'Palette',
+                tooltip: context.l10n.tr('paletteTooltip'),
                 icon: _PixelThemeIcon(color: PixelTheme.accent),
                 onSelected: (PixelScheme scheme) {
                   setState(() {
@@ -241,7 +367,11 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                       .map(
                         (PixelScheme scheme) => PopupMenuItem<PixelScheme>(
                           value: scheme,
-                          child: Text('${PixelTheme.labelOf(scheme)} Theme'),
+                          child: Text(
+                            context.l10n.tr('themeName', <String, Object?>{
+                              'name': PixelTheme.labelOf(scheme),
+                            }),
+                          ),
                         ),
                       )
                       .toList();
@@ -249,15 +379,20 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
               ),
             ],
           ),
-          body: IndexedStack(
-            index: _selectedTabIndex,
+          body: PageView(
+            controller: _pageController,
+            onPageChanged: (int index) {
+              _selectedTab.value = index;
+            },
             children: [
-              _buildCollectionBody(),
-              MyCardEditorPage(
-                scheme: _selectedScheme,
-                onBackupRestored: _loadData,
+              _KeepAlivePage(child: _buildCollectionBody()),
+              _KeepAlivePage(
+                child: MyCardEditorPage(
+                  scheme: _selectedScheme,
+                  onBackupRestored: _loadData,
+                ),
               ),
-              ScoreBoardPage(scheme: _selectedScheme),
+              _KeepAlivePage(child: ScoreBoardPage(scheme: _selectedScheme)),
             ],
           ),
           bottomNavigationBar: NavigationBarTheme(
@@ -293,45 +428,48 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                 return IconThemeData(color: PixelTheme.textGray);
               }),
             ),
-            child: NavigationBar(
-              selectedIndex: _selectedTabIndex,
-              onDestinationSelected: (int index) {
-                setState(() {
-                  _selectedTabIndex = index;
-                });
+            child: ValueListenableBuilder<int>(
+              valueListenable: _selectedTab,
+              builder: (BuildContext context, int tab, Widget? child) {
+                return NavigationBar(
+                  selectedIndex: tab,
+                  onDestinationSelected: (int index) {
+                    unawaited(_selectTab(index));
+                  },
+                  destinations: [
+                    NavigationDestination(
+                      icon: _PixelNavIcon(
+                        type: _PixelNavIconType.collection,
+                        color: PixelTheme.textGray,
+                      ),
+                      selectedIcon: _PixelNavSelectedIcon(
+                        type: _PixelNavIconType.collection,
+                      ),
+                      label: context.l10n.tr('collectionTab'),
+                    ),
+                    NavigationDestination(
+                      icon: _PixelNavIcon(
+                        type: _PixelNavIconType.edit,
+                        color: PixelTheme.textGray,
+                      ),
+                      selectedIcon: _PixelNavSelectedIcon(
+                        type: _PixelNavIconType.edit,
+                      ),
+                      label: context.l10n.tr('myCardTab'),
+                    ),
+                    NavigationDestination(
+                      icon: _PixelNavIcon(
+                        type: _PixelNavIconType.trophy,
+                        color: PixelTheme.textGray,
+                      ),
+                      selectedIcon: _PixelNavSelectedIcon(
+                        type: _PixelNavIconType.trophy,
+                      ),
+                      label: context.l10n.tr('scoreboardTab'),
+                    ),
+                  ],
+                );
               },
-              destinations: [
-                NavigationDestination(
-                  icon: _PixelNavIcon(
-                    type: _PixelNavIconType.collection,
-                    color: PixelTheme.textGray,
-                  ),
-                  selectedIcon: _PixelNavSelectedIcon(
-                    type: _PixelNavIconType.collection,
-                  ),
-                  label: '收集卡牌',
-                ),
-                NavigationDestination(
-                  icon: _PixelNavIcon(
-                    type: _PixelNavIconType.edit,
-                    color: PixelTheme.textGray,
-                  ),
-                  selectedIcon: _PixelNavSelectedIcon(
-                    type: _PixelNavIconType.edit,
-                  ),
-                  label: '我的卡片',
-                ),
-                NavigationDestination(
-                  icon: _PixelNavIcon(
-                    type: _PixelNavIconType.trophy,
-                    color: PixelTheme.textGray,
-                  ),
-                  selectedIcon: _PixelNavSelectedIcon(
-                    type: _PixelNavIconType.trophy,
-                  ),
-                  label: 'Score Board',
-                ),
-              ],
             ),
           ),
         ),
@@ -343,7 +481,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     if (_isLoading) {
       return Center(
         child: Text(
-          'LOADING...',
+          context.l10n.tr('loading'),
           style: TextStyle(
             color: PixelTheme.accent,
             fontFamily: 'Unifont',
@@ -363,13 +501,17 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
           child: NotificationListener<ScrollNotification>(
             onNotification: _handleRefreshScrollNotification,
             child: CustomScrollView(
+              controller: _collectionScrollController,
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
                 SliverToBoxAdapter(
                   child: _HeroHeader(
-                    totalCollected: _totalCollected,
-                    prizeRequirement: _prizeRequirement,
+                    totalCollected: _stampProgress,
+                    sponsorCollected: _sponsorStampCount,
+                    communityCollected: _communityStampCount,
+                    prizeRequirement: _stampThreshold,
                     isComplete: _isComplete,
+                    onRedeem: _isComplete ? _handleRedeem : null,
                   ),
                 ),
                 SliverPersistentHeader(
@@ -400,11 +542,13 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                       final String attributeLabel = _attributeLabelForCard(
                         card,
                       );
-                      final String rawLink = card['link'] as String? ?? '';
-                      final String link = rawLink.trim().isEmpty
-                          ? 'https://hitcon.org'
-                          : rawLink;
-                      final Color cardColor = _PixelCard.colorForIndex(index);
+                      final String link = (card['link'] as String? ?? '')
+                          .trim();
+                      final String description =
+                          card['bio'] as String? ??
+                          card['description'] as String? ??
+                          '';
+                      final Color cardColor = _cardColorForCard(card, index);
                       final String imageAsset = _PixelCard.imageAssetForIndex(
                         index,
                       );
@@ -414,6 +558,8 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                         uid: card['physical_uid'] as String? ?? '',
                         collectedAt: card['collected_at'] as String? ?? '',
                         index: index,
+                        cardColor: cardColor,
+                        imageBase64: card['pixel_avatar_base64'] as String?,
                         attributeEmoji: attributeEmoji,
                         attributeLabel: attributeLabel,
                         heroTag: heroTag,
@@ -423,24 +569,15 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                           attributeEmoji: attributeEmoji,
                           attributeLabel: attributeLabel,
                           link: link,
+                          description: description,
                           uid: card['physical_uid'] as String? ?? '',
                           collectedAt: card['collected_at'] as String? ?? '',
                           cardColor: cardColor,
                           imageAsset: imageAsset,
+                          imageBase64: card['pixel_avatar_base64'] as String?,
                         ),
                       );
                     }, childCount: _cards.length),
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 32),
-                    child: _PrizePanel(
-                      totalCollected: _totalCollected,
-                      requiredCount: _prizeRequirement,
-                      isComplete: _isComplete,
-                      onRedeem: null,
-                    ),
                   ),
                 ),
               ],
@@ -453,6 +590,10 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         ),
       ],
     );
+  }
+
+  void _handleRedeem() {
+    _showNfcMessage(context.l10n.tr('prizeReady'));
   }
 
   void _handleRefreshStatusChange(RefreshIndicatorStatus? status) {
@@ -496,16 +637,262 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     return false;
   }
 
+  Future<void> _consumePendingNfcRequest() async {
+    if (_isHandlingNfcRequest || !mounted) {
+      return;
+    }
+    final NfcScanRequest? request = _deepLinks.takePending();
+    if (request == null) {
+      return;
+    }
+    final AppLocalizations l10n = context.l10n;
+
+    final String? currentUserId = _authService.currentUserId;
+    if (currentUserId == null || !_authService.isRegularUser) {
+      return;
+    }
+
+    if (request.hasUserIdMismatch) {
+      await _showIosRescanPrompt(
+        expectedUserId: request.expectedUserId!,
+        mismatch: true,
+      );
+      return;
+    }
+
+    if (request.userId == currentUserId) {
+      _returnToCollectionRoute();
+      await _selectTab(1);
+      return;
+    }
+
+    if (request.physicalUid.isEmpty) {
+      switch (request.launchEvidence) {
+        case NfcLaunchEvidence.directLink:
+          await _recordPhishing(request.userId);
+        case NfcLaunchEvidence.unknown:
+          if (defaultTargetPlatform == TargetPlatform.iOS) {
+            await _showIosRescanPrompt(
+              expectedUserId: request.userId,
+              reportDirectLinkOnDecline: true,
+            );
+          } else {
+            _showNfcMessage(l10n.tr('nfcUidMissing'));
+          }
+        case NfcLaunchEvidence.physicalTag:
+          if (defaultTargetPlatform == TargetPlatform.iOS) {
+            await _showIosRescanPrompt(expectedUserId: request.userId);
+          } else {
+            _showNfcMessage(l10n.tr('nfcUidMissing'));
+          }
+      }
+      return;
+    }
+
+    _isHandlingNfcRequest = true;
+    _returnToCollectionRoute();
+    try {
+      final Map<String, dynamic>? scanResult = await _authService
+          .scanCollection(
+            targetUserId: request.userId,
+            scannedNfcUid: request.physicalUid,
+          );
+      if (scanResult == null) {
+        _showNfcMessage(l10n.tr('collectionFailed'));
+        return;
+      }
+      final Map<String, dynamic> scanData = Map<String, dynamic>.from(
+        scanResult['data'] as Map? ?? <String, dynamic>{},
+      );
+      final bool firstTimeCollected =
+          scanData['first_time_collected'] as bool? ?? false;
+
+      await _localStore.saveScanResult(
+        userId: currentUserId,
+        scannedUid: request.physicalUid,
+        scanResult: scanResult,
+      );
+      final Future<Map<String, dynamic>?> collectionFuture = _authService
+          .fetchCollectionRecords();
+      final Future<Map<String, dynamic>?> stampMissionFuture = _authService
+          .fetchStampMission();
+      final Map<String, dynamic>? collection = await collectionFuture;
+      final Map<String, dynamic>? stampMission = await stampMissionFuture;
+      if (collection != null) {
+        await _localStore.saveCollectionIndex(
+          userId: currentUserId,
+          collection: collection,
+        );
+      }
+      final List<Map<String, dynamic>> cards = await _localStore.loadCards(
+        currentUserId,
+      );
+      int cardIndex = cards.indexWhere((Map<String, dynamic> card) {
+        final String owner =
+            (card['owner'] as String? ?? card['user_id'] as String? ?? '')
+                .trim();
+        return owner == request.userId;
+      });
+      if (cardIndex < 0) {
+        cardIndex = cards.indexWhere(
+          (Map<String, dynamic> card) =>
+              (card['physical_uid'] as String? ?? '').toUpperCase() ==
+              request.physicalUid.toUpperCase(),
+        );
+      }
+      if (cardIndex < 0 || !mounted) {
+        _showNfcMessage(l10n.tr('collectionPreviewFailed'));
+        return;
+      }
+
+      setState(() {
+        _collectionData = collection ?? _collectionData;
+        _stampMission = stampMission ?? _stampMission;
+        _localCards = cards;
+      });
+      await _selectTab(0);
+      await WidgetsBinding.instance.endOfFrame;
+      await _scrollCardIntoView(cardIndex);
+      if (mounted) {
+        await _openScannedCard(
+          cards[cardIndex],
+          cardIndex,
+          playRevealEffect: firstTimeCollected,
+        );
+      }
+    } finally {
+      _isHandlingNfcRequest = false;
+      if (_deepLinks.hasPending) {
+        unawaited(_consumePendingNfcRequest());
+      }
+    }
+  }
+
+  Future<void> _showIosRescanPrompt({
+    required String expectedUserId,
+    bool mismatch = false,
+    bool reportDirectLinkOnDecline = false,
+  }) async {
+    if (!mounted) {
+      return;
+    }
+    final bool? shouldScan = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) => _NfcRescanDialog(
+        mismatch: mismatch,
+        showDirectLinkChoice: reportDirectLinkOnDecline,
+      ),
+    );
+    if (shouldScan == true) {
+      await _deepLinks.requestPhysicalRescan(expectedUserId);
+    } else {
+      _deepLinks.cancelPhysicalRescan();
+      if (reportDirectLinkOnDecline) {
+        await _recordPhishing(expectedUserId);
+      }
+    }
+  }
+
+  Future<void> _recordPhishing(String attackerUserId) async {
+    if (_isHandlingNfcRequest) {
+      return;
+    }
+    _isHandlingNfcRequest = true;
+    _returnToCollectionRoute();
+    try {
+      final bool recorded = await _authService.recordPhishing(
+        attackerUserId: attackerUserId,
+      );
+      if (!mounted) {
+        return;
+      }
+      _showNfcMessage(
+        context.l10n.tr(recorded ? 'phishingRecorded' : 'phishingRecordFailed'),
+      );
+    } finally {
+      _isHandlingNfcRequest = false;
+      if (_deepLinks.hasPending) {
+        unawaited(_consumePendingNfcRequest());
+      }
+    }
+  }
+
+  void _returnToCollectionRoute() {
+    Navigator.of(context).popUntil(
+      (Route<dynamic> route) =>
+          route.settings.name == '/collection' || route.isFirst,
+    );
+  }
+
+  void _showNfcMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _scrollCardIntoView(int index) async {
+    if (!_collectionScrollController.hasClients || !mounted) {
+      return;
+    }
+    final double availableWidth = MediaQuery.sizeOf(context).width - 32;
+    final double cardWidth = availableWidth / 3;
+    final double cardHeight = cardWidth / (53.98 / 85.60);
+    final int row = index ~/ 3;
+    final double targetOffset = (210 + row * (cardHeight + 10) - 90).clamp(
+      0.0,
+      _collectionScrollController.position.maxScrollExtent,
+    );
+    if ((_collectionScrollController.offset - targetOffset).abs() < 8) {
+      return;
+    }
+    await _collectionScrollController.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  Future<void> _openScannedCard(
+    Map<String, dynamic> card,
+    int index, {
+    required bool playRevealEffect,
+  }) {
+    final String uid = card['physical_uid'] as String? ?? '';
+    return _openCardDetail(
+      heroTag: 'card-$index',
+      title: _titleForCard(card),
+      attributeEmoji: _attributeEmojiForCard(card),
+      attributeLabel: _attributeLabelForCard(card),
+      link: (card['link'] as String? ?? '').trim(),
+      description:
+          card['bio'] as String? ?? card['description'] as String? ?? '',
+      uid: uid,
+      collectedAt: card['collected_at'] as String? ?? '',
+      cardColor: _cardColorForCard(card, index),
+      imageAsset: _PixelCard.imageAssetForIndex(index),
+      imageBase64: card['pixel_avatar_base64'] as String?,
+      playRevealEffect: playRevealEffect,
+    );
+  }
+
   Future<void> _openCardDetail({
     required String heroTag,
     required String title,
     required String attributeEmoji,
     required String attributeLabel,
     required String link,
+    required String description,
     required String uid,
     required String collectedAt,
     required Color cardColor,
     required String imageAsset,
+    String? imageBase64,
+    bool playRevealEffect = false,
   }) {
     return Navigator.of(context).push(
       PageRouteBuilder<void>(
@@ -520,10 +907,13 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
             attributeEmoji: attributeEmoji,
             attributeLabel: attributeLabel,
             link: link,
+            description: description,
             uid: uid,
             collectedAt: collectedAt,
             cardColor: cardColor,
             imageAsset: imageAsset,
+            imageBase64: imageBase64,
+            playRevealEffect: playRevealEffect,
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -539,30 +929,25 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   }
 }
 
-Widget _wrapShuttle({
-  required Widget rawShuttle,
-  required ThemeData shuttleTheme,
-  required Size shuttleSize,
-}) {
-  return Theme(
-    data: shuttleTheme.copyWith(
-      textTheme: shuttleTheme.textTheme.apply(fontFamily: 'Unifont'),
-      primaryTextTheme: shuttleTheme.primaryTextTheme.apply(
-        fontFamily: 'Unifont',
-      ),
-    ),
-    child: DefaultTextStyle.merge(
-      style: const TextStyle(fontFamily: 'Unifont'),
-      child: FittedBox(
-        fit: BoxFit.fill,
-        child: SizedBox(
-          width: shuttleSize.width,
-          height: shuttleSize.height,
-          child: rawShuttle,
-        ),
-      ),
-    ),
-  );
+class _KeepAlivePage extends StatefulWidget {
+  const _KeepAlivePage({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<_KeepAlivePage>
+    with AutomaticKeepAliveClientMixin<_KeepAlivePage> {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return RepaintBoundary(child: widget.child);
+  }
 }
 
 /// 英雄區塊 - 顯示進度和統計
@@ -587,7 +972,7 @@ class _NtagPairingReminderDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'NTAG PAIRING',
+              context.l10n.tr('ntagPairingTitle'),
               style: TextStyle(
                 color: PixelTheme.accent,
                 fontFamily: 'Unifont',
@@ -597,7 +982,7 @@ class _NtagPairingReminderDialog extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              '\u4f60\u9084\u6c92\u6709\u914d\u5c0d NTAG Badge\u3002\u914d\u5c0d\u5f8c\u624d\u80fd\u8b93\u5225\u4eba\u6383\u63cf\u4f60\u7684\u5361\u7247\u3002',
+              context.l10n.tr('ntagPairingReminder'),
               style: TextStyle(
                 color: PixelTheme.textWhite,
                 fontFamily: 'Unifont',
@@ -611,7 +996,7 @@ class _NtagPairingReminderDialog extends StatelessWidget {
                 Expanded(
                   child: _PixelButton(
                     onPressed: () => Navigator.of(context).pop(false),
-                    label: '\u7a0d\u5f8c',
+                    label: context.l10n.tr('later'),
                     fullWidth: true,
                   ),
                 ),
@@ -619,7 +1004,86 @@ class _NtagPairingReminderDialog extends StatelessWidget {
                 Expanded(
                   child: _PixelButton(
                     onPressed: () => Navigator.of(context).pop(true),
-                    label: '\u524d\u5f80\u914d\u5c0d',
+                    label: context.l10n.tr('goPair'),
+                    fullWidth: true,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NfcRescanDialog extends StatelessWidget {
+  const _NfcRescanDialog({
+    required this.mismatch,
+    required this.showDirectLinkChoice,
+  });
+
+  final bool mismatch;
+  final bool showDirectLinkChoice;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(
+            color: mismatch ? PixelTheme.warning : PixelTheme.accent,
+            width: 3,
+          ),
+          boxShadow: const [
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              context.l10n.tr(
+                mismatch ? 'cardMismatchTitle' : 'scanAgainTitle',
+              ),
+              style: TextStyle(
+                color: mismatch ? PixelTheme.warning : PixelTheme.accent,
+                fontFamily: 'Unifont',
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              context.l10n.tr(mismatch ? 'cardMismatchBody' : 'iosRescanBody'),
+              style: TextStyle(
+                color: PixelTheme.textWhite,
+                fontFamily: 'Unifont',
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _PixelButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    label: context.l10n.tr(
+                      showDirectLinkChoice ? 'openedLink' : 'cancel',
+                    ),
+                    fullWidth: true,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _PixelButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    label: context.l10n.tr('startScan'),
                     fullWidth: true,
                   ),
                 ),
@@ -703,11 +1167,11 @@ class _PixelRefreshBannerState extends State<_PixelRefreshBanner> {
 
   String get _message {
     return switch (_displayStatus) {
-      RefreshIndicatorStatus.drag => '\u4e0b\u62c9\u91cd\u65b0\u6574\u7406',
-      RefreshIndicatorStatus.armed => '\u653e\u958b\u958b\u59cb\u540c\u6b65',
+      RefreshIndicatorStatus.drag => context.l10n.tr('pullToRefresh'),
+      RefreshIndicatorStatus.armed => context.l10n.tr('releaseToSync'),
       RefreshIndicatorStatus.snap ||
-      RefreshIndicatorStatus.refresh => '\u540c\u6b65\u4e2d...',
-      RefreshIndicatorStatus.done => '\u66f4\u65b0\u5b8c\u6210',
+      RefreshIndicatorStatus.refresh => context.l10n.tr('syncing'),
+      RefreshIndicatorStatus.done => context.l10n.tr('updateComplete'),
       _ => '',
     };
   }
@@ -1048,28 +1512,28 @@ class _PixelNavIconPainter extends CustomPainter {
   }
 }
 
-Size _largerCardSize(Size a, Size b) {
-  return a.width * a.height >= b.width * b.height ? a : b;
-}
-
-Size _smallerCardSize(Size a, Size b) {
-  return a.width * a.height <= b.width * b.height ? a : b;
-}
-
 class _HeroHeader extends StatelessWidget {
   const _HeroHeader({
     required this.totalCollected,
+    required this.sponsorCollected,
+    required this.communityCollected,
     required this.prizeRequirement,
     required this.isComplete,
+    required this.onRedeem,
   });
 
   final int totalCollected;
+  final int sponsorCollected;
+  final int communityCollected;
   final int prizeRequirement;
   final bool isComplete;
+  final VoidCallback? onRedeem;
 
   @override
   Widget build(BuildContext context) {
-    final double progress = (totalCollected / prizeRequirement).clamp(0.0, 1.0);
+    final double progress = prizeRequirement <= 0
+        ? 0
+        : (totalCollected / prizeRequirement).clamp(0.0, 1.0);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(8, 12, 8, 8),
@@ -1086,33 +1550,12 @@ class _HeroHeader extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: PixelTheme.accent,
-                  border: Border.all(color: PixelTheme.bgDark, width: 2),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black,
-                      blurRadius: 0,
-                      offset: Offset(2, 2),
-                    ),
-                  ],
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  '*',
-                  style: TextStyle(fontSize: 28, color: PixelTheme.bgDark),
-                ),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'COLLECTION',
+                      context.l10n.tr('collectionHeader'),
                       style: TextStyle(
                         color: PixelTheme.accent,
                         fontFamily: 'Unifont',
@@ -1123,7 +1566,7 @@ class _HeroHeader extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      isComplete ? 'COMPLETE !' : 'IN PROGRESS',
+                      context.l10n.tr(isComplete ? 'complete' : 'inProgress'),
                       style: TextStyle(
                         color: isComplete
                             ? PixelTheme.success
@@ -1135,6 +1578,11 @@ class _HeroHeader extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+              const SizedBox(width: 8),
+              _PixelButton(
+                onPressed: onRedeem,
+                label: context.l10n.tr(isComplete ? 'redeem' : 'locked'),
               ),
             ],
           ),
@@ -1148,10 +1596,20 @@ class _HeroHeader extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _StatItem(label: 'CARDS', value: '$totalCollected'),
-                _StatItem(label: 'NEED', value: '$prizeRequirement'),
                 _StatItem(
-                  label: 'REMAIN',
+                  label: context.l10n.tr('sponsorStamps'),
+                  value: '$sponsorCollected',
+                ),
+                _StatItem(
+                  label: context.l10n.tr('communityStamps'),
+                  value: '$communityCollected',
+                ),
+                _StatItem(
+                  label: context.l10n.tr('need'),
+                  value: '$prizeRequirement',
+                ),
+                _StatItem(
+                  label: context.l10n.tr('remain'),
                   value: '${(prizeRequirement - totalCollected).clamp(0, 999)}',
                 ),
               ],
@@ -1171,13 +1629,15 @@ class _HeroHeader extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             isComplete
-                ? 'Prize ready. Please visit the staff booth.'
-                : 'Collect ${prizeRequirement - totalCollected} more cards.',
+                ? context.l10n.tr('prizeReady')
+                : context.l10n.tr('collectMoreStamps', <String, Object?>{
+                    'count': (prizeRequirement - totalCollected).clamp(0, 999),
+                  }),
             style: TextStyle(
               color: isComplete ? PixelTheme.success : PixelTheme.accentBlue,
               fontSize: 11,
               fontWeight: FontWeight.w700,
-              fontFamily: 'Courier New',
+              fontFamily: 'Unifont',
             ),
           ),
         ],
@@ -1194,29 +1654,34 @@ class _StatItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: PixelTheme.textGray,
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            fontFamily: 'Unifont',
-            letterSpacing: 0.5,
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: PixelTheme.textGray,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              fontFamily: 'Unifont',
+              letterSpacing: 0.5,
+            ),
           ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          value,
-          style: TextStyle(
-            color: PixelTheme.accent,
-            fontSize: 14,
-            fontWeight: FontWeight.w900,
-            fontFamily: 'Unifont',
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: TextStyle(
+              color: PixelTheme.accent,
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+              fontFamily: 'Unifont',
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -1387,6 +1852,8 @@ class _PixelCard extends StatefulWidget {
     required this.uid,
     required this.collectedAt,
     required this.index,
+    required this.cardColor,
+    required this.imageBase64,
     required this.attributeEmoji,
     required this.attributeLabel,
     required this.heroTag,
@@ -1397,6 +1864,8 @@ class _PixelCard extends StatefulWidget {
   final String uid;
   final String collectedAt;
   final int index;
+  final Color cardColor;
+  final String? imageBase64;
   final String attributeEmoji;
   final String attributeLabel;
   final String heroTag;
@@ -1434,6 +1903,21 @@ class _PixelCard extends StatefulWidget {
 
 class _PixelCardState extends State<_PixelCard> {
   bool _showText = true;
+  Uint8List? _imageBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageBytes = _decodeImageBytes(widget.imageBase64);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PixelCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageBase64 != widget.imageBase64) {
+      _imageBytes = _decodeImageBytes(widget.imageBase64);
+    }
+  }
 
   Future<void> _handleTap() async {
     setState(() {
@@ -1454,181 +1938,69 @@ class _PixelCardState extends State<_PixelCard> {
 
   @override
   Widget build(BuildContext context) {
-    final Color cardColor = _PixelCard.colorForIndex(widget.index);
-    final String imageAsset = _PixelCard.imageAssetForIndex(widget.index);
+    final Widget image = _cardImage();
     final Widget cardBody = PixelCardFace(
       title: widget.title,
       attributeEmoji: widget.attributeEmoji,
       attributeLabel: widget.attributeLabel,
-      cardColor: cardColor,
+      cardColor: widget.cardColor,
       showText: _showText,
       titleFontSize: 11,
       titleFontWeight: FontWeight.w900,
       attributeMaxLines: 3,
       stackAttributePairs: true,
       watermarkScale: 1.6,
-      image: Image.asset(
-        imageAsset,
-        fit: BoxFit.cover,
-        filterQuality: FilterQuality.none,
-      ),
+      image: image,
     );
 
     return GestureDetector(
       onTap: _handleTap,
       child: Hero(
         tag: widget.heroTag,
-        flightShuttleBuilder:
-            (context, animation, direction, fromContext, toContext) {
-              final RenderBox fromBox =
-                  fromContext.findRenderObject()! as RenderBox;
-              final RenderBox toBox =
-                  toContext.findRenderObject()! as RenderBox;
-              final bool isPush = direction == HeroFlightDirection.push;
-              final Size shuttleSize = isPush
-                  ? _largerCardSize(fromBox.size, toBox.size)
-                  : _smallerCardSize(fromBox.size, toBox.size);
-              final ThemeData shuttleTheme = Theme.of(fromContext);
-              final Animation<double> curved = CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOutCubic,
-                reverseCurve: Curves.easeInCubic,
-              );
-
-              return AnimatedBuilder(
-                animation: curved,
-                builder: (context, child) {
-                  final double rotation = (1 - curved.value) * math.pi * 2;
-                  final Widget rawShuttle = SizedBox(
-                    width: shuttleSize.width,
-                    height: shuttleSize.height,
-                    child: PixelCardFace(
-                      title: widget.title,
-                      attributeEmoji: widget.attributeEmoji,
-                      attributeLabel: widget.attributeLabel,
-                      cardColor: cardColor,
-                      showText: false,
-                      titleFontSize: 22,
-                      titleFontWeight: FontWeight.w900,
-                      attributeFontSize: 12,
-                      emojiFontSize: 16,
-                      titleMaxLines: 2,
-                      watermarkScale: 1.6,
-                      imageToTitleSpacing: 8,
-                      extraContentSpacing: 8,
-                      image: Image.asset(
-                        imageAsset,
-                        fit: BoxFit.cover,
-                        filterQuality: FilterQuality.none,
-                      ),
-                    ),
-                  );
-                  final Widget shuttle = _wrapShuttle(
-                    rawShuttle: rawShuttle,
-                    shuttleTheme: shuttleTheme,
-                    shuttleSize: shuttleSize,
-                  );
-                  final Widget clippedChild = ClipRect(
-                    child: MediaQuery.withNoTextScaling(
-                      child: RepaintBoundary(child: shuttle),
-                    ),
-                  );
-                  return Transform(
-                    alignment: Alignment.center,
-                    transform: Matrix4.identity()
-                      ..setEntry(3, 2, 0.001)
-                      ..rotateY(rotation),
-                    child: clippedChild,
-                  );
-                },
-              );
-            },
+        flightShuttleBuilder: pixelCardFlightShuttleBuilder(
+          title: widget.title,
+          attributeEmoji: widget.attributeEmoji,
+          attributeLabel: widget.attributeLabel,
+          cardColor: widget.cardColor,
+          imageBuilder: _cardImage,
+        ),
         child: Material(color: Colors.transparent, child: cardBody),
       ),
     );
   }
-}
 
-/// 獎品面板
-class _PrizePanel extends StatelessWidget {
-  const _PrizePanel({
-    required this.totalCollected,
-    required this.requiredCount,
-    required this.isComplete,
-    required this.onRedeem,
-  });
-
-  final int totalCollected;
-  final int requiredCount;
-  final bool isComplete;
-  final VoidCallback? onRedeem;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _cardImage() {
+    final Uint8List? bytes = _imageBytes;
+    if (bytes != null) {
+      return Image.memory(
+        bytes,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.none,
+        gaplessPlayback: true,
+      );
+    }
     return Container(
-      decoration: BoxDecoration(
-        color: PixelTheme.bgMid,
-        border: Border.all(
-          color: isComplete ? PixelTheme.success : PixelTheme.border,
-          width: 2,
-        ),
-        boxShadow: const [
-          BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
-        ],
-      ),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                isComplete ? '*' : '!',
-                style: TextStyle(
-                  color: isComplete ? PixelTheme.success : PixelTheme.border,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                isComplete ? 'PRIZE READY' : 'REQUIREMENTS',
-                style: TextStyle(
-                  color: PixelTheme.accent,
-                  fontFamily: 'Unifont',
-                  fontWeight: FontWeight.w900,
-                  fontSize: 11,
-                  letterSpacing: 1.0,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            isComplete
-                ? 'Prize ready. Please visit the staff booth.'
-                : 'Collected $totalCollected / $requiredCount. Need ${requiredCount - totalCollected} more.',
-            style: TextStyle(
-              color: PixelTheme.textWhite,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: _PixelButton(
-              onPressed: onRedeem,
-              label: isComplete ? 'REDEEM' : 'LOCKED',
-              fullWidth: true,
-            ),
-          ),
-        ],
-      ),
+      color: PixelTheme.bgDark,
+      alignment: Alignment.center,
+      child: Icon(Icons.person_rounded, color: PixelTheme.accent, size: 28),
     );
+  }
+
+  Uint8List? _decodeImageBytes(String? raw) {
+    final String value = raw?.trim() ?? '';
+    if (value.isEmpty) {
+      return null;
+    }
+    final String payload = value.contains(',') ? value.split(',').last : value;
+    try {
+      return base64Decode(payload);
+    } catch (_) {
+      return null;
+    }
   }
 }
 
+/// 獎品面板
 /// 像素風按鈕
 class _PixelButton extends StatefulWidget {
   const _PixelButton({

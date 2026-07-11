@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
+import 'card_bio_codec.dart';
 import 'mock_api_service.dart';
 import 'nfc_battle_api_client.dart';
 import 'ntag_security_service.dart';
@@ -23,6 +26,7 @@ class AuthService {
   static const String _stagingUserRoleKey = 'staging_user_role';
 
   final NfcBattleApiClient _api = const NfcBattleApiClient();
+  final CardBioCodec _cardBioCodec = const CardBioCodec();
 
   String? _currentUserId;
   UserRole _currentRole = UserRole.unknown;
@@ -59,6 +63,90 @@ class AuthService {
       return true;
     } catch (e) {
       _log('Login error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> loginWithToken(String token) async {
+    final String normalizedToken = token.trim();
+    if (normalizedToken.isEmpty) {
+      return false;
+    }
+
+    try {
+      final Map<String, dynamic> claims = _decodeJwtClaims(normalizedToken);
+      final String? userId = claims['sub'] as String?;
+      final String? role = claims['role'] as String?;
+      if (userId == null || userId.trim().isEmpty) {
+        return false;
+      }
+
+      _jwtToken = normalizedToken;
+      _currentUserId = userId;
+      _setRoleFromString(role ?? '');
+
+      final Map<String, dynamic>? profile = await fetchUserProfile();
+      if (profile == null) {
+        _jwtToken = null;
+        _currentUserId = null;
+        _currentRole = UserRole.unknown;
+        return false;
+      }
+
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_stagingJwtKey, normalizedToken);
+      await prefs.setString(_stagingUserIdKey, _currentUserId!);
+      if (role != null) {
+        await prefs.setString(_stagingUserRoleKey, role);
+      }
+      return true;
+    } catch (e) {
+      _log('Token login error: $e');
+      _jwtToken = null;
+      _currentUserId = null;
+      _currentRole = UserRole.unknown;
+      return false;
+    }
+  }
+
+  Future<bool> restoreSession() async {
+    if (_ensureSession()) {
+      return true;
+    }
+
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      if (AppConfig.useMockServices) {
+        _jwtToken = prefs.getString('test_jwt_token');
+        _currentUserId = prefs.getString('test_user_id');
+        if (_jwtToken == null || _currentUserId == null) {
+          return false;
+        }
+        final Map<String, dynamic>? profile = await fetchUserProfile();
+        return profile != null;
+      }
+
+      final String? token = prefs.getString(_stagingJwtKey);
+      final String? userId = prefs.getString(_stagingUserIdKey);
+      final String? role = prefs.getString(_stagingUserRoleKey);
+      if (token == null || userId == null) {
+        return false;
+      }
+
+      _jwtToken = token;
+      _currentUserId = userId;
+      _setRoleFromString(role ?? '');
+
+      final Map<String, dynamic>? profile = await fetchUserProfile();
+      if (profile != null) {
+        return true;
+      }
+
+      await logout();
+      return false;
+    } catch (e) {
+      _log('Restore session error: $e');
+      await logout();
       return false;
     }
   }
@@ -143,18 +231,18 @@ class AuthService {
     }
 
     try {
+      final Map<String, dynamic> body = _profileUpdateForApi(updates);
+      if (body.isEmpty) {
+        return true;
+      }
       if (AppConfig.useMockServices) {
         final Map<String, dynamic> result =
-            await MockApiService.updateUserProfile(_currentUserId!, updates);
+            await MockApiService.updateUserProfile(_currentUserId!, body);
         if (result['status'] == 'success') {
           await fetchUserProfile();
           return true;
         }
       } else {
-        final Map<String, dynamic> body = _profileUpdateForApi(updates);
-        if (body.isEmpty) {
-          return true;
-        }
         final Map<String, dynamic> result = await _api.patch(
           '/users/me',
           token: _jwtToken!,
@@ -193,6 +281,21 @@ class AuthService {
       await fetchUserProfile();
       return true;
     } catch (e) {
+      if (e is ApiException && e.statusCode == 409) {
+        final Map<String, dynamic>? profile =
+            _userProfile ?? await fetchUserProfile();
+        final String pairedUid =
+            (profile?['paired_ntag_uid'] as String? ??
+                    profile?['physical_id'] as String? ??
+                    '')
+                .trim();
+        if (_samePhysicalId(pairedUid, uid)) {
+          _log(
+            'NFC tag is already paired to current user; treating as success.',
+          );
+          return true;
+        }
+      }
       _log('Error pairing NFC tag: $e');
       return false;
     }
@@ -221,6 +324,20 @@ class AuthService {
       } else {
         final Map<String, dynamic>? profile =
             _userProfile ?? await fetchUserProfile();
+        if (purpose == 'unlock') {
+          final String pairedUid =
+              (profile?['paired_ntag_uid'] as String? ??
+                      profile?['physical_id'] as String? ??
+                      '')
+                  .trim()
+                  .toUpperCase();
+          if (pairedUid.isNotEmpty && pairedUid != uid.trim().toUpperCase()) {
+            _log(
+              'Server API only exposes the current user nfc_tag_key; cannot unlock another user tag uid=$uid paired=$pairedUid',
+            );
+            return null;
+          }
+        }
         return _secretFromNfcTagKey(profile?['nfc_tag_key']);
       }
     } catch (e) {
@@ -263,6 +380,30 @@ class AuthService {
     return null;
   }
 
+  Future<Map<String, dynamic>?> fetchStampMission() async {
+    if (!_ensureSession()) {
+      _log('No user logged in');
+      return null;
+    }
+
+    try {
+      if (AppConfig.useMockServices) {
+        final Map<String, dynamic> result =
+            await MockApiService.getStampMission(_currentUserId!);
+        return result['status'] == 'success' ? _jsonMap(result['data']) : null;
+      }
+
+      final Map<String, dynamic> result = await _api.get(
+        '/missions/stamp',
+        token: _jwtToken!,
+      );
+      return _jsonMap(result['data']);
+    } catch (e) {
+      _log('Error fetching stamp mission: $e');
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> scanCollection({
     required String targetUserId,
     required String scannedNfcUid,
@@ -272,11 +413,17 @@ class AuthService {
       return null;
     }
 
+    final String normalizedTargetUserId = targetUserId.trim();
+    if (normalizedTargetUserId.isEmpty) {
+      _log('Cannot scan collection without user_id from tag URL.');
+      return null;
+    }
+
     try {
       if (AppConfig.useMockServices) {
         final Map<String, dynamic> result = await MockApiService.scanCollection(
           currentUserId: _currentUserId!,
-          targetUserId: targetUserId,
+          targetUserId: normalizedTargetUserId,
           scannedNfcUid: scannedNfcUid,
         );
         return result['status'] == 'success' ? result : null;
@@ -286,7 +433,7 @@ class AuthService {
         '/collection/scan',
         token: _jwtToken!,
         body: <String, dynamic>{
-          'user_id': targetUserId,
+          'user_id': normalizedTargetUserId,
           'physical_id': scannedNfcUid,
         },
       );
@@ -310,6 +457,37 @@ class AuthService {
     }
 
     return null;
+  }
+
+  Future<bool> recordPhishing({required String attackerUserId}) async {
+    if (!_ensureSession()) {
+      return false;
+    }
+    final String victim = _currentUserId?.trim() ?? '';
+    final String attacker = attackerUserId.trim();
+    if (victim.isEmpty || attacker.isEmpty || victim == attacker) {
+      return false;
+    }
+
+    try {
+      if (AppConfig.useMockServices) {
+        final Map<String, dynamic> result = await MockApiService.recordPhishing(
+          victim: victim,
+          attacker: attacker,
+        );
+        return result['status'] == 'success';
+      }
+
+      await _api.post(
+        '/collection/phishing',
+        token: _jwtToken!,
+        body: <String, dynamic>{'victim': victim, 'attacker': attacker},
+      );
+      return true;
+    } catch (e) {
+      _log('Error recording phishing event: $e');
+      return false;
+    }
   }
 
   Future<Map<String, dynamic>?> fetchUserCollection(String targetUserId) async {
@@ -340,6 +518,35 @@ class AuthService {
       );
     } catch (e) {
       _log('Error fetching user collection: $e');
+    }
+
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> fetchPublicUserProfile(
+    String targetUserId,
+  ) async {
+    if (!_ensureSession() || targetUserId.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      if (AppConfig.useMockServices) {
+        final Map<String, dynamic> result = await MockApiService.getUserProfile(
+          targetUserId,
+        );
+        return result['status'] == 'success'
+            ? _normalizeVisibleProfile(_jsonMap(result['data']))
+            : null;
+      }
+
+      final Map<String, dynamic> result = await _api.get(
+        '/users/$targetUserId',
+        token: _jwtToken!,
+      );
+      return _normalizeVisibleProfile(_jsonMap(result['data']));
+    } catch (e) {
+      _log('Error fetching public user profile: $e');
     }
 
     return null;
@@ -424,11 +631,7 @@ class AuthService {
 
   Map<String, dynamic> _profileUpdateForApi(Map<String, dynamic> updates) {
     final Map<String, dynamic> body = <String, dynamic>{};
-    for (final String key in <String>[
-      'display_name',
-      'bio',
-      'pixel_avatar_base64',
-    ]) {
+    for (final String key in <String>['display_name', 'pixel_avatar_base64']) {
       if (updates.containsKey(key)) {
         body[key] = updates[key];
       }
@@ -438,12 +641,31 @@ class AuthService {
     } else if (updates.containsKey('attribute_emoji')) {
       body['emoji_icon'] = updates['attribute_emoji'];
     }
+    if (updates.containsKey('bio') ||
+        updates.containsKey('link') ||
+        updates.containsKey('card_color')) {
+      body['bio'] = _cardBioCodec.encode(
+        bio: _profileValue(updates, 'bio'),
+        link: _profileValue(updates, 'link'),
+        cardColor: updates.containsKey('card_color')
+            ? updates['card_color']
+            : _userProfile?['card_color'],
+      );
+    }
     body.removeWhere((String key, Object? value) => value == null);
     return body;
   }
 
+  String _profileValue(Map<String, dynamic> updates, String key) {
+    final Object? value = updates.containsKey(key)
+        ? updates[key]
+        : _userProfile?[key];
+    return value is String ? value : '';
+  }
+
   Map<String, dynamic> _normalizeProfile(Object? raw) {
     final Map<String, dynamic> profile = _jsonMap(raw);
+    final CardBioData cardBio = _cardBioCodec.decode(profile['bio']);
     final String emoji =
         profile['attribute_emoji'] as String? ??
         profile['emoji_icon'] as String? ??
@@ -454,13 +676,17 @@ class AuthService {
 
     final Map<String, dynamic> normalized = <String, dynamic>{
       ...profile,
+      'bio': cardBio.bio,
       'emoji_icon': emoji,
       'attribute_emoji': emoji,
       'attribute_label':
           profile['attribute_label'] as String? ??
           profile['role'] as String? ??
           'ATTENDEE',
-      'link': profile['link'] as String? ?? 'https://hitcon.org',
+      'link': cardBio.link.isNotEmpty
+          ? cardBio.link
+          : profile['link'] as String? ?? '',
+      if (cardBio.cardColor != null) 'card_color': cardBio.cardColor,
     };
     if (physicalId != null) {
       normalized['physical_id'] = physicalId;
@@ -475,7 +701,8 @@ class AuthService {
   }) {
     final List<Map<String, dynamic>> cards = users
         .whereType<Object>()
-        .map(_normalizeProfile)
+        .map(_jsonMap)
+        .map(_normalizeVisibleProfile)
         .map(_cardFromProfile)
         .toList(growable: false);
     return <String, dynamic>{
@@ -483,6 +710,17 @@ class AuthService {
       'total_collected': cards.length,
       'collection': cards,
       'collection_version': owner['collection_version'] ?? 0,
+    };
+  }
+
+  Map<String, dynamic> _normalizeVisibleProfile(Map<String, dynamic> profile) {
+    final bool isFull =
+        profile.containsKey('profile_version') ||
+        profile.containsKey('pixel_avatar_base64') ||
+        profile.containsKey('bio');
+    return <String, dynamic>{
+      ..._normalizeProfile(profile),
+      '_profile_full': isFull,
     };
   }
 
@@ -504,7 +742,7 @@ class AuthService {
       'collected_at': DateTime.now().toIso8601String(),
       'attribute_emoji': profile['attribute_emoji'] ?? profile['emoji_icon'],
       'attribute_label': profile['attribute_label'] ?? profile['role'],
-      'link': profile['link'] ?? 'https://hitcon.org',
+      'link': profile['link'] ?? '',
     };
   }
 
@@ -559,6 +797,30 @@ class AuthService {
       });
     }
     return <String, dynamic>{};
+  }
+
+  bool _samePhysicalId(String left, String right) {
+    String normalize(String value) {
+      return value.replaceAll(RegExp(r'[^0-9a-fA-F]'), '').toUpperCase();
+    }
+
+    final String normalizedLeft = normalize(left);
+    final String normalizedRight = normalize(right);
+    return normalizedLeft.isNotEmpty && normalizedLeft == normalizedRight;
+  }
+
+  Map<String, dynamic> _decodeJwtClaims(String token) {
+    final List<String> parts = token.split('.');
+    if (parts.length != 3) {
+      throw const FormatException('Token is not a JWT.');
+    }
+
+    final String payload = parts[1];
+    final String normalizedPayload = base64Url.normalize(payload);
+    final String decodedPayload = utf8.decode(
+      base64Url.decode(normalizedPayload),
+    );
+    return _jsonMap(jsonDecode(decodedPayload));
   }
 
   bool _ensureSession() {

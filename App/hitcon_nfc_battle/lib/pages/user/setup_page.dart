@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/local_profile_store.dart';
 import '../../services/setup_service.dart';
 import 'emoji_catalog.dart';
+import 'https_link_input.dart';
 import 'my_card_editor_page.dart';
 import 'ntag_pairing_page.dart';
 import 'pixel_card_face.dart';
@@ -49,7 +51,7 @@ class _SetupPageState extends State<SetupPage> {
   bool _isSaving = false;
   bool _isScanning = false;
   bool _tagPaired = false;
-  String _status = 'LOADING...';
+  String _status = '';
   String _tagUid = '';
   String _attributeEmoji = '\u2728\uD83D\uDCBB\uD83D\uDD25';
   String _attributeLabel = 'MAGIC / TECH / FIRE';
@@ -77,7 +79,10 @@ class _SetupPageState extends State<SetupPage> {
         ? ''
         : displayName;
     _bioController.text = profile?['bio'] as String? ?? '';
-    _linkController.text = profile?['link'] as String? ?? '';
+    final String loadedLink = profile?['link'] as String? ?? '';
+    _linkController.text = validateHttpsLink(loadedLink) == null
+        ? httpsLinkBody(loadedLink)
+        : '';
     _attributeEmoji = profile?['attribute_emoji'] as String? ?? _attributeEmoji;
     _attributeLabel = _attributeNamesForEmoji(_attributeEmoji);
     _avatarBase64 = profile?['pixel_avatar_base64'] as String?;
@@ -90,7 +95,7 @@ class _SetupPageState extends State<SetupPage> {
 
     setState(() {
       _isLoading = false;
-      _status = '開始設定你的卡片。';
+      _status = context.l10n.tr('setupStarted');
     });
   }
 
@@ -131,7 +136,7 @@ class _SetupPageState extends State<SetupPage> {
     setState(() {
       _avatarBytes = bytes;
       _avatarBase64 = base64Encode(bytes);
-      _status = '圖片已更新。';
+      _status = context.l10n.tr('imageUpdated');
     });
   }
 
@@ -146,24 +151,38 @@ class _SetupPageState extends State<SetupPage> {
     setState(() {
       _avatarBytes = bytes;
       _avatarBase64 = base64Encode(bytes);
-      _status = '圖片已匯入並轉成像素圖。';
+      _status = context.l10n.tr('imageImported');
     });
   }
 
-  Future<void> _saveProfile({bool quiet = false}) async {
+  Future<bool> _saveProfile({bool quiet = false}) async {
     if (_isSaving) {
-      return;
+      return false;
+    }
+
+    if (validateHttpsLink(_linkController.text) != null) {
+      final String message = context.l10n.tr('invalidHttpsLink');
+      setState(() {
+        _status = message;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message, style: const TextStyle(fontFamily: 'Unifont')),
+          backgroundColor: PixelTheme.warning,
+        ),
+      );
+      return false;
     }
 
     setState(() {
       _isSaving = true;
-      _status = quiet ? _status : '\u6b63\u5728\u5132\u5b58\u8cc7\u6599...';
+      _status = quiet ? _status : context.l10n.tr('savingProfile');
     });
 
     final Map<String, dynamic> updates = <String, dynamic>{
       'display_name': _displayNameController.text.trim(),
       'bio': _bioController.text.trim(),
-      'link': _linkController.text.trim(),
+      'link': buildHttpsLink(_linkController.text),
       'attribute_emoji': _attributeEmoji,
       'attribute_label': _attributeLabel,
       'card_color': _colorInt(_cardColor),
@@ -179,15 +198,14 @@ class _SetupPageState extends State<SetupPage> {
     final bool success = await _authService.updateUserProfile(updates);
 
     if (!mounted) {
-      return;
+      return true;
     }
 
     setState(() {
       _isSaving = false;
-      _status = success
-          ? '\u8cc7\u6599\u5df2\u81ea\u52d5\u5132\u5b58\u3002'
-          : '\u8cc7\u6599\u5132\u5b58\u5931\u6557\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002';
+      _status = context.l10n.tr(success ? 'profileSaved' : 'profileSaveFailed');
     });
+    return true;
   }
 
   Future<void> _startPairing() async {
@@ -197,7 +215,7 @@ class _SetupPageState extends State<SetupPage> {
 
     setState(() {
       _isScanning = true;
-      _status = '\u6b63\u5728\u958b\u555f NTAG \u914d\u5c0d\u756b\u9762...';
+      _status = context.l10n.tr('openingPairing');
     });
 
     final String? uid = await openNtagPairingScanPage(context);
@@ -208,14 +226,12 @@ class _SetupPageState extends State<SetupPage> {
     setState(() {
       _isScanning = false;
       if (uid == null || uid.isEmpty) {
-        _status =
-            '\u914d\u5c0d\u672a\u5b8c\u6210\uff0c\u8acb\u91cd\u8a66\u3002';
+        _status = context.l10n.tr('pairingIncomplete');
         return;
       }
       _tagUid = uid;
       _tagPaired = true;
-      _status =
-          '\u5df2\u5beb\u5165 user_id \u4e26\u5b8c\u6210 NTAG \u914d\u5c0d\u3002';
+      _status = context.l10n.tr('pairingComplete');
     });
   }
 
@@ -223,12 +239,14 @@ class _SetupPageState extends State<SetupPage> {
     if (!_hasName) {
       setState(() {
         _stepIndex = _SetupStep.name.index;
-        _status = '\u8acb\u5148\u8a2d\u5b9a\u4f60\u7684\u540d\u5b57\u3002';
+        _status = context.l10n.tr('nameRequired');
       });
       return;
     }
 
-    await _saveProfile(quiet: true);
+    if (!await _saveProfile(quiet: true)) {
+      return;
+    }
     final String? userId = _authService.currentUserId;
     if (userId != null) {
       await _setupService.markComplete(userId);
@@ -247,12 +265,14 @@ class _SetupPageState extends State<SetupPage> {
   Future<void> _nextStep() async {
     if (_SetupStep.values[_stepIndex] == _SetupStep.name && !_hasName) {
       setState(() {
-        _status = '\u8acb\u5148\u8a2d\u5b9a\u4f60\u7684\u540d\u5b57\u3002';
+        _status = context.l10n.tr('nameRequired');
       });
       return;
     }
 
-    await _saveProfile(quiet: true);
+    if (!await _saveProfile(quiet: true)) {
+      return;
+    }
     if (!mounted) {
       return;
     }
@@ -260,7 +280,7 @@ class _SetupPageState extends State<SetupPage> {
     if (_stepIndex < _SetupStep.values.length - 1) {
       setState(() {
         _stepIndex += 1;
-        _status = _SetupStep.values[_stepIndex].hint;
+        _status = context.l10n.tr(_SetupStep.values[_stepIndex].hintKey);
       });
     } else {
       unawaited(_finishSetup());
@@ -273,7 +293,7 @@ class _SetupPageState extends State<SetupPage> {
     }
     setState(() {
       _stepIndex -= 1;
-      _status = _SetupStep.values[_stepIndex].hint;
+      _status = context.l10n.tr(_SetupStep.values[_stepIndex].hintKey);
     });
   }
 
@@ -290,9 +310,7 @@ class _SetupPageState extends State<SetupPage> {
       if (selected.length >= _maxEmojiSelection) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text(
-              '\u6700\u591a\u53ea\u80fd\u9078\u4e09\u500b\u5c6c\u6027',
-            ),
+            content: Text(context.l10n.tr('maxThreeAttributes')),
             backgroundColor: PixelTheme.bgMid,
             duration: const Duration(milliseconds: 1400),
           ),
@@ -355,16 +373,16 @@ class _SetupPageState extends State<SetupPage> {
     final _SetupStep step = _SetupStep.values[_stepIndex];
     final bool isNameStep = step == _SetupStep.name;
     final bool canLeaveStep = !isNameStep || _hasName;
-    final String nextLabel = step == _SetupStep.pairTag && !_tagPaired
-        ? 'SKIP'
-        : 'NEXT';
+    final String nextLabel = context.l10n.tr(
+      step == _SetupStep.pairTag && !_tagPaired ? 'skip' : 'next',
+    );
 
     return Theme(
       data: theme,
       child: Scaffold(
         backgroundColor: PixelTheme.bgDark,
         appBar: AppBar(
-          title: const Text('PLAYER SETUP'),
+          title: Text(context.l10n.tr('setupTitle')),
           centerTitle: true,
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
@@ -373,7 +391,7 @@ class _SetupPageState extends State<SetupPage> {
         body: _isLoading
             ? Center(
                 child: Text(
-                  'LOADING...',
+                  context.l10n.tr('loading'),
                   style: TextStyle(
                     color: PixelTheme.accent,
                     fontFamily: 'Unifont',
@@ -387,7 +405,7 @@ class _SetupPageState extends State<SetupPage> {
                     _ProgressHeader(
                       step: _stepIndex + 1,
                       total: _SetupStep.values.length,
-                      title: step.title,
+                      title: context.l10n.tr(step.titleKey),
                     ),
                     Expanded(
                       child: AnimatedSwitcher(
@@ -421,11 +439,14 @@ class _SetupPageState extends State<SetupPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _StepIntro(label: 'NAME', title: '讓我們來設定你的名字吧'),
+              _StepIntro(
+                label: context.l10n.tr('name'),
+                title: context.l10n.tr('setupName'),
+              ),
               const SizedBox(height: 16),
               _PixelTextField(
                 controller: _displayNameController,
-                label: 'DISPLAY NAME',
+                label: context.l10n.tr('displayName'),
                 maxLength: 24,
               ),
             ],
@@ -436,9 +457,9 @@ class _SetupPageState extends State<SetupPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _StepIntro(
-                label: 'IMAGE',
-                title: '\u8a2d\u5b9a\u4f60\u7684\u5361\u7247\u5716\u7247',
+              _StepIntro(
+                label: context.l10n.tr('image'),
+                title: context.l10n.tr('setupImage'),
               ),
               if (_avatarBytes != null) ...[
                 const SizedBox(height: 16),
@@ -460,14 +481,14 @@ class _SetupPageState extends State<SetupPage> {
                 children: [
                   Expanded(
                     child: _PixelButton(
-                      label: '\u81ea\u5df1\u756b',
+                      label: context.l10n.tr('drawImage'),
                       onPressed: _drawImage,
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _PixelButton(
-                      label: '\u532f\u5165\u5716\u7247',
+                      label: context.l10n.tr('importImage'),
                       onPressed: _importImage,
                     ),
                   ),
@@ -481,14 +502,14 @@ class _SetupPageState extends State<SetupPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _StepIntro(
-                label: 'BIO',
-                title: '\u5beb\u4e00\u6bb5\u81ea\u6211\u4ecb\u7d39',
+              _StepIntro(
+                label: context.l10n.tr('bio'),
+                title: context.l10n.tr('setupBio'),
               ),
               const SizedBox(height: 16),
               _PixelTextField(
                 controller: _bioController,
-                label: 'BIO',
+                label: context.l10n.tr('bio'),
                 maxLines: 5,
                 maxLength: 100,
               ),
@@ -500,16 +521,21 @@ class _SetupPageState extends State<SetupPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _StepIntro(
-                label: 'LINK',
-                title: '\u653e\u4e0a\u4f60\u60f3\u5206\u4eab\u7684\u7db2\u5740',
+              _StepIntro(
+                label: context.l10n.tr('link'),
+                title: context.l10n.tr('setupLink'),
               ),
               const SizedBox(height: 16),
               _PixelTextField(
                 controller: _linkController,
-                label: 'URL',
+                label: context.l10n.tr('url'),
                 maxLines: 1,
                 maxLength: 120,
+                prefixText: httpsLinkPrefix,
+                keyboardType: TextInputType.url,
+                inputFormatters: const <TextInputFormatter>[
+                  HttpsLinkInputFormatter(),
+                ],
               ),
             ],
           ),
@@ -520,7 +546,10 @@ class _SetupPageState extends State<SetupPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _StepIntro(label: 'ATTRIBUTE', title: '選擇最多三個屬性'),
+              _StepIntro(
+                label: context.l10n.tr('attribute'),
+                title: context.l10n.tr('setupAttribute'),
+              ),
               const SizedBox(height: 12),
               _SelectedEmojiBar(selected: selected, onRemove: _toggleEmoji),
               const SizedBox(height: 12),
@@ -548,7 +577,10 @@ class _SetupPageState extends State<SetupPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _StepIntro(label: 'COLOR', title: '挑個喜歡的顏色'),
+              _StepIntro(
+                label: context.l10n.tr('color'),
+                title: context.l10n.tr('setupColor'),
+              ),
               const SizedBox(height: 16),
               Wrap(
                 spacing: 10,
@@ -575,14 +607,14 @@ class _SetupPageState extends State<SetupPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _StepIntro(
-                label: 'NFC TAG',
-                title: '\u6383\u63cf NFC Tag \u914d\u5c0d',
+              _StepIntro(
+                label: context.l10n.tr('nfcTag'),
+                title: context.l10n.tr('setupPairTag'),
               ),
               const SizedBox(height: 14),
               Text(
                 _tagUid.isEmpty
-                    ? '\u53ef\u4ee5\u6383\u63cf NFC Tag \u9032\u884c\u914d\u5c0d\uff0c\u4e5f\u53ef\u4ee5\u5148\u8df3\u904e\u3002'
+                    ? context.l10n.tr('pairTagOptional')
                     : 'UID: $_tagUid',
                 style: TextStyle(
                   color: PixelTheme.textWhite,
@@ -593,13 +625,13 @@ class _SetupPageState extends State<SetupPage> {
               ),
               const SizedBox(height: 14),
               _PixelButton(
-                label: _isScanning ? 'SCANNING...' : 'PAIR TAG',
+                label: context.l10n.tr(_isScanning ? 'scanning' : 'pairTag'),
                 onPressed: _isScanning ? null : _startPairing,
               ),
               if (_tagPaired) ...[
                 const SizedBox(height: 14),
                 Text(
-                  'Tag \u5df2\u914d\u5c0d\uff0c\u53ef\u4ee5\u958b\u59cb\u6536\u96c6\u5361\u7247\u4e86\u3002',
+                  context.l10n.tr('tagPairedReady'),
                   style: TextStyle(
                     color: PixelTheme.success,
                     fontFamily: 'Unifont',
@@ -615,10 +647,10 @@ class _SetupPageState extends State<SetupPage> {
 
   Widget _buildCardPreview({bool large = false, bool tiltable = false}) {
     final String title = _displayNameController.text.trim().isEmpty
-        ? 'HITCON PLAYER'
+        ? context.l10n.tr('defaultPlayerName')
         : _displayNameController.text.trim();
     final String bio = _bioController.text.trim().isEmpty
-        ? 'Set up your card profile.'
+        ? context.l10n.tr('defaultPlayerBio')
         : _bioController.text.trim();
 
     final double width = large ? 280 : 240;
@@ -780,28 +812,19 @@ class _TiltableSetupPreviewState extends State<_TiltableSetupPreview>
 }
 
 enum _SetupStep {
-  name(
-    'NAME',
-    '\u8b93\u6211\u5011\u4f86\u8a2d\u5b9a\u4f60\u7684\u540d\u5b57\u5427',
-  ),
-  image(
-    'IMAGE',
-    '\u81ea\u5df1\u756b\u6216\u532f\u5165\u5716\u7247\u5f8c\u9032\u5165\u5716\u7247\u7de8\u8f2f\u5668',
-  ),
-  bio('BIO', '\u5beb\u4e00\u6bb5\u81ea\u6211\u4ecb\u7d39'),
-  link('LINK', '\u653e\u4e0a\u4f60\u60f3\u5206\u4eab\u7684\u7db2\u5740'),
-  attribute('ATTRIBUTE', '\u9078\u64c7\u6700\u591a\u4e09\u500b\u5c6c\u6027'),
-  color('COLOR', '\u6311\u500b\u559c\u6b61\u7684\u984f\u8272'),
-  preview('PREVIEW', '\u6aa2\u8996\u6574\u5f35\u5361\u7247'),
-  pairTag(
-    'NFC TAG',
-    '\u6383\u63cf NFC Tag \u914d\u5c0d\uff0c\u4e5f\u53ef\u4ee5\u5148\u8df3\u904e',
-  );
+  name('name', 'setupName'),
+  image('image', 'setupImageHint'),
+  bio('bio', 'setupBio'),
+  link('link', 'setupLink'),
+  attribute('attribute', 'setupAttribute'),
+  color('color', 'setupColor'),
+  preview('preview', 'setupPreview'),
+  pairTag('nfcTag', 'setupPairTag');
 
-  const _SetupStep(this.title, this.hint);
+  const _SetupStep(this.titleKey, this.hintKey);
 
-  final String title;
-  final String hint;
+  final String titleKey;
+  final String hintKey;
 }
 
 class _ProgressHeader extends StatelessWidget {
@@ -901,7 +924,7 @@ class _FooterControls extends StatelessWidget {
             children: [
               Expanded(
                 child: _PixelButton(
-                  label: 'BACK',
+                  label: context.l10n.tr('back'),
                   muted: true,
                   onPressed: canGoBack ? onBack : null,
                 ),
@@ -974,7 +997,7 @@ class _SelectedEmojiBar extends StatelessWidget {
       padding: const EdgeInsets.all(8),
       child: selected.isEmpty
           ? Text(
-              '\u5c1a\u672a\u9078\u64c7\u5c6c\u6027',
+              context.l10n.tr('noAttributeSelected'),
               style: TextStyle(
                 color: PixelTheme.textGray,
                 fontFamily: 'Unifont',
@@ -1225,12 +1248,18 @@ class _PixelTextField extends StatelessWidget {
     required this.label,
     this.maxLines = 1,
     this.maxLength,
+    this.prefixText,
+    this.keyboardType,
+    this.inputFormatters,
   });
 
   final TextEditingController controller;
   final String label;
   final int maxLines;
   final int? maxLength;
+  final String? prefixText;
+  final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
 
   @override
   Widget build(BuildContext context) {
@@ -1238,6 +1267,10 @@ class _PixelTextField extends StatelessWidget {
       controller: controller,
       maxLines: maxLines,
       maxLength: maxLength,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      autocorrect: keyboardType != TextInputType.url,
+      enableSuggestions: keyboardType != TextInputType.url,
       style: TextStyle(
         color: PixelTheme.textWhite,
         fontFamily: 'Unifont',
@@ -1246,6 +1279,23 @@ class _PixelTextField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         labelStyle: TextStyle(color: PixelTheme.accentBlue),
+        floatingLabelBehavior: prefixText == null
+            ? FloatingLabelBehavior.auto
+            : FloatingLabelBehavior.always,
+        prefixIcon: prefixText == null
+            ? null
+            : Padding(
+                padding: const EdgeInsets.only(left: 12, right: 2),
+                child: Text(
+                  prefixText!,
+                  style: TextStyle(
+                    color: PixelTheme.accentBlue,
+                    fontFamily: 'Unifont',
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+        prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
         counterStyle: TextStyle(color: PixelTheme.textGray),
         filled: true,
         fillColor: PixelTheme.bgDark,

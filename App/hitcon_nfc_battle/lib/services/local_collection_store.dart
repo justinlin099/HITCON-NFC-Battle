@@ -163,9 +163,26 @@ class LocalCollectionStore {
   ) {
     cache['schema'] ??= 1;
     cache['user_id'] ??= userId;
-    cache['cards_by_uid'] = _cardsMap(cache);
+    cache['cards_by_uid'] = _dedupeCardsMap(userId, _cardsMap(cache));
     cache['updated_at'] ??= DateTime.now().toIso8601String();
     return cache;
+  }
+
+  Map<String, dynamic> _dedupeCardsMap(
+    String userId,
+    Map<String, dynamic> cards,
+  ) {
+    final Map<String, dynamic> normalizedCache = _emptyCache(userId);
+    normalizedCache['cards_by_uid'] = <String, dynamic>{};
+    for (final MapEntry<String, dynamic> entry in cards.entries) {
+      final Map<String, dynamic> card = _jsonMap(entry.value);
+      final String uid =
+          (card['physical_uid'] as String? ?? entry.key).trim().isEmpty
+          ? entry.key
+          : (card['physical_uid'] as String? ?? entry.key).trim();
+      _upsertCard(normalizedCache, uid, card);
+    }
+    return _cardsMap(normalizedCache);
   }
 
   void _upsertCard(
@@ -174,9 +191,66 @@ class LocalCollectionStore {
     Map<String, dynamic> next,
   ) {
     final Map<String, dynamic> cards = _cardsMap(cache);
-    final Map<String, dynamic> previous = _jsonMap(cards[uid]);
-    cards[uid] = <String, dynamic>{...previous, ..._jsonMap(next)};
+    final Map<String, dynamic> normalizedNext = _jsonMap(next);
+    final String mergeKey = _findMergeKey(cards, uid, normalizedNext);
+    final Map<String, dynamic> previous = _jsonMap(cards[mergeKey]);
+    final Map<String, dynamic> merged = <String, dynamic>{
+      ...previous,
+      ...normalizedNext,
+    };
+    merged.remove('_tag_metadata_keys');
+    if (!normalizedNext.containsKey('card_color')) {
+      merged.remove('card_color');
+    }
+    final String previousPhysicalUid =
+        (previous['physical_uid'] as String? ?? '').trim();
+    final String nextPhysicalUid =
+        (normalizedNext['physical_uid'] as String? ?? '').trim();
+    final String owner =
+        (merged['owner'] as String? ?? merged['user_id'] as String? ?? '')
+            .trim();
+    if (previousPhysicalUid.isNotEmpty &&
+        (nextPhysicalUid.isEmpty || nextPhysicalUid == owner)) {
+      merged['physical_uid'] = previousPhysicalUid;
+    } else if (nextPhysicalUid.isNotEmpty) {
+      merged['physical_uid'] = nextPhysicalUid;
+    } else {
+      merged['physical_uid'] = mergeKey;
+    }
+    if (mergeKey != uid) {
+      cards.remove(uid);
+    }
+    cards[mergeKey] = merged;
     cache['cards_by_uid'] = cards;
+  }
+
+  String _findMergeKey(
+    Map<String, dynamic> cards,
+    String uid,
+    Map<String, dynamic> next,
+  ) {
+    final String owner =
+        (next['owner'] as String? ?? next['user_id'] as String? ?? '').trim();
+    if (owner.isNotEmpty) {
+      for (final MapEntry<String, dynamic> entry in cards.entries) {
+        final Map<String, dynamic> card = _jsonMap(entry.value);
+        final String cardOwner =
+            (card['owner'] as String? ?? card['user_id'] as String? ?? '')
+                .trim();
+        final String cardPhysicalUid = (card['physical_uid'] as String? ?? '')
+            .trim();
+        if (cardOwner == owner &&
+            (entry.key != uid || cardPhysicalUid.isNotEmpty)) {
+          return entry.key;
+        }
+      }
+    }
+
+    if (cards.containsKey(uid)) {
+      return uid;
+    }
+
+    return uid;
   }
 
   Map<String, dynamic> _cardsMap(Map<String, dynamic> cache) {

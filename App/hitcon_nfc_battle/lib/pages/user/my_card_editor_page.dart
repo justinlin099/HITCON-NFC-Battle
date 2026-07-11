@@ -1,15 +1,20 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 
+import '../../l10n/app_localizations.dart';
+import '../../widgets/pixel_loading_overlay.dart';
 import 'pixel_theme.dart';
 import 'pixel_card_face.dart';
 import 'pixel_link_dialog.dart';
 import 'pixel_link_icon.dart';
 import 'emoji_catalog.dart';
+import 'https_link_input.dart';
 import 'ntag_pairing_page.dart';
 import '../../services/auth_service.dart';
 import '../../services/local_collection_store.dart';
@@ -18,10 +23,17 @@ import '../../services/local_profile_store.dart';
 typedef PixelGrid = List<List<Color?>>;
 
 class CardImageCropResult {
-  const CardImageCropResult({required this.bytes, required this.sourceName});
+  const CardImageCropResult({
+    required this.bytes,
+    required this.sourceName,
+    required this.sourceFormat,
+    required this.usedBackgroundColor,
+  });
 
   final Uint8List bytes;
   final String sourceName;
+  final String sourceFormat;
+  final bool usedBackgroundColor;
 }
 
 Future<CardImageCropResult?> openCardImageCropper(BuildContext context) async {
@@ -31,12 +43,16 @@ Future<CardImageCropResult?> openCardImageCropper(BuildContext context) async {
   if (picked == null) {
     return null;
   }
-
-  final Uint8List bytes = await picked.readAsBytes();
-  final img.Image? decoded = img.decodeImage(bytes);
-  if (decoded == null) {
+  if (!context.mounted) {
     return null;
   }
+  final String readingLabel = context.l10n.tr('readingImage');
+
+  final Uint8List bytes = await runWithPixelLoadingOverlay<Uint8List>(
+    context,
+    label: readingLabel,
+    action: picked.readAsBytes,
+  );
 
   final String detectedFormat = _detectImageFormat(bytes);
 
@@ -60,8 +76,10 @@ Future<CardImageCropResult?> openCardImageCropper(BuildContext context) async {
   }
 
   return CardImageCropResult(
-    bytes: Uint8List.fromList(img.encodePng(preprocessed.image)),
+    bytes: preprocessed.bytes,
     sourceName: preprocessed.sourceName,
+    sourceFormat: preprocessed.sourceFormat,
+    usedBackgroundColor: preprocessed.usedBackgroundColor,
   );
 }
 
@@ -88,14 +106,18 @@ Future<Uint8List?> openImportedCardPixelEditor(
     return null;
   }
 
-  final img.Image? decoded = img.decodeImage(cropped.bytes);
-  if (decoded == null) {
+  final PixelGrid? pixels = await runWithPixelLoadingOverlay<PixelGrid?>(
+    context,
+    label: context.l10n.tr('pixelatingImage'),
+    action: () => _pixelGridFromImageBytes(cropped.bytes, canvasSize),
+  );
+  if (pixels == null || !context.mounted) {
     return null;
   }
 
   return _openCardPixelEditorWithGrid(
     context,
-    initialPixels: _imageToPixelGridSimple(decoded, canvasSize),
+    initialPixels: pixels,
     cardColor: cardColor,
     canvasSize: canvasSize,
   );
@@ -177,13 +199,13 @@ Widget _withUnifont(BuildContext context, Widget child) {
 }
 
 enum _EditorTool {
-  brush('Brush'),
-  eraser('Erase'),
-  bucket('Fill'),
-  picker('Pick');
+  brush('brush'),
+  eraser('eraser'),
+  bucket('fill'),
+  picker('pickColor');
 
-  const _EditorTool(this.label);
-  final String label;
+  const _EditorTool(this.labelKey);
+  final String labelKey;
 }
 
 class MyCardEditorPage extends StatefulWidget {
@@ -202,13 +224,14 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   final AuthService _authService = AuthService();
   final LocalCollectionStore _localCollectionStore = LocalCollectionStore();
   final LocalProfileStore _localProfileStore = LocalProfileStore();
-  String _name = '\u6211\u7684\u5361\u7247';
+  String _name = '';
   String _link = 'https://';
   String _emoji = '\u2728';
-  String _description = '\u5beb\u4e0b\u4f60\u7684\u81ea\u6211\u4ecb\u7d39';
+  String _description = '';
   Color _cardColor = const Color(0xFFFFD700);
   PixelGrid _pixels = _createEmptyGrid(_canvasSize);
   String? _pairedUid;
+  bool _isLoadingProfile = true;
 
   @override
   void initState() {
@@ -216,19 +239,42 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
     _loadProfile();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_name.isEmpty) {
+      _name = context.l10n.tr('myCardDefaultName');
+    }
+    if (_description.isEmpty) {
+      _description = context.l10n.tr('myCardDefaultBio');
+    }
+  }
+
   Future<void> _loadProfile() async {
     final String? userId = _authService.currentUserId;
-    final Map<String, dynamic>? apiProfile = await _authService
-        .fetchUserProfile();
-    final Map<String, dynamic> localProfile = userId == null
-        ? <String, dynamic>{}
-        : await _localProfileStore.load(userId);
+    final List<Object?> results = await Future.wait<Object?>(<Future<Object?>>[
+      _authService.fetchUserProfile(),
+      userId == null
+          ? Future<Map<String, dynamic>>.value(<String, dynamic>{})
+          : _localProfileStore.load(userId),
+    ]);
+    final Map<String, dynamic>? apiProfile =
+        results[0] as Map<String, dynamic>?;
+    final Map<String, dynamic> localProfile =
+        results[1] as Map<String, dynamic>? ?? <String, dynamic>{};
     final Map<String, dynamic> profile = <String, dynamic>{
       if (apiProfile != null) ...apiProfile,
       ...localProfile,
     };
 
-    if (profile.isEmpty || !mounted) {
+    if (!mounted) {
+      return;
+    }
+
+    if (profile.isEmpty) {
+      setState(() {
+        _isLoadingProfile = false;
+      });
       return;
     }
 
@@ -239,7 +285,10 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
 
     setState(() {
       _name = _profileString(profile, 'display_name', _name);
-      _link = _profileString(profile, 'link', _link);
+      final String loadedLink = _profileString(profile, 'link', _link);
+      _link = validateHttpsLink(loadedLink) == null
+          ? buildHttpsLink(loadedLink)
+          : '';
       _emoji = _profileString(profile, 'attribute_emoji', _emoji);
       _description = _profileString(profile, 'bio', _description);
       _pairedUid = _profileString(profile, 'paired_ntag_uid', _pairedUid ?? '');
@@ -252,6 +301,7 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
       if (loadedPixels != null) {
         _pixels = loadedPixels;
       }
+      _isLoadingProfile = false;
     });
   }
 
@@ -283,11 +333,17 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   }
 
   Future<void> _saveProfile() async {
+    if (validateHttpsLink(_link) != null) {
+      if (mounted) {
+        _showEditorSnack(context.l10n.tr('invalidHttpsLink'));
+      }
+      return;
+    }
     final Map<String, dynamic> updates = <String, dynamic>{
       'display_name': _name,
       'bio': _description,
       'attribute_emoji': _emoji,
-      'attribute_label': emojiLabelForValue(_emoji),
+      'attribute_label': emojiNameLabelForValue(_emoji),
       'card_color': _colorInt(_cardColor),
       'pixel_avatar_base64': base64Encode(encodePixelGridPng(_pixels)),
       'link': _link,
@@ -324,64 +380,82 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
       ),
       child: DefaultTextStyle.merge(
         style: const TextStyle(fontFamily: 'Unifont'),
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-          children: [
-            _PokemonStyleCard(
-              name: _name,
-              link: _link,
-              emoji: _emoji,
-              description: _description,
-              cardColor: _cardColor,
-              pixels: _pixels,
-              onEditImage: _openPixelEditor,
-              onEditName: () => _openTextEditor('name'),
-              onEditEmoji: () => _openTextEditor('emoji'),
-              onEditLink: () => _openTextEditor('link'),
-              onTestLink: () => confirmAndOpenLink(context, _link),
-              onEditDescription: () => _openTextEditor('description'),
-            ),
-            const SizedBox(height: 12),
-            _EditorActionButton(
-              label: '\u9078\u64c7\u5361\u7247\u984f\u8272',
-              onTap: _openColorEditor,
-              color: PixelTheme.textWhite,
-              leading: Container(
-                width: 18,
-                height: 18,
-                decoration: BoxDecoration(
-                  color: _cardColor,
-                  border: Border.all(color: PixelTheme.textWhite, width: 1),
+        child: Stack(
+          children: <Widget>[
+            ListView(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+              children: [
+                _PokemonStyleCard(
+                  name: _name,
+                  link: _link,
+                  emoji: _emoji,
+                  description: _description,
+                  cardColor: _cardColor,
+                  pixels: _pixels,
+                  onEditImage: _openPixelEditor,
+                  onEditName: () => _openTextEditor('name'),
+                  onEditEmoji: () => _openTextEditor('emoji'),
+                  onEditLink: () => _openTextEditor('link'),
+                  onTestLink: () => confirmAndOpenLink(context, _link),
+                  onEditDescription: () => _openTextEditor('description'),
                 ),
-              ),
+                const SizedBox(height: 12),
+                _EditorActionButton(
+                  label: context.l10n.tr('chooseCardColor'),
+                  onTap: _openColorEditor,
+                  color: PixelTheme.textWhite,
+                  leading: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: _cardColor,
+                      border: Border.all(color: PixelTheme.textWhite, width: 1),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _EditorActionButton(
+                  label: _pairedUid == null
+                      ? context.l10n.tr('pairNtag')
+                      : context.l10n.tr('repairNtag'),
+                  subtitle: _pairedUid == null ? null : 'UID: $_pairedUid',
+                  onTap: _openNtagScanPage,
+                  color: PixelTheme.textWhite,
+                  icon: Icons.nfc_rounded,
+                  opacity: 1,
+                ),
+                const SizedBox(height: 12),
+                _EditorActionButton(
+                  label: context.l10n.tr('unlockNtag'),
+                  subtitle: context.l10n.tr(
+                    _pairedUid == null ? 'pairFirst' : 'removeWriteProtection',
+                  ),
+                  onTap: _openNtagUnlockPage,
+                  color: _pairedUid == null
+                      ? PixelTheme.textGray
+                      : PixelTheme.warning,
+                  icon: Icons.lock_open_rounded,
+                  opacity: _pairedUid == null ? 0.55 : 1,
+                ),
+                const SizedBox(height: 12),
+                _EditorActionButton(
+                  label: context.l10n.tr('printCard'),
+                  onTap: _openPrintPreview,
+                  color: PixelTheme.accent,
+                  icon: Icons.print_rounded,
+                ),
+                const SizedBox(height: 12),
+                _EditorActionButton(
+                  label: context.l10n.tr('backupRestore'),
+                  subtitle: context.l10n.tr('backupRestoreHint'),
+                  onTap: _openBackupMenu,
+                  color: PixelTheme.accentBlue,
+                  icon: Icons.inventory_2_outlined,
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            _EditorActionButton(
-              label: _pairedUid == null
-                  ? 'NTAG Badge \u914d\u5c0d'
-                  : '\u5df2\u914d\u5c0d',
-              subtitle: _pairedUid == null ? null : 'UID: $_pairedUid',
-              onTap: _pairedUid == null ? _openNtagScanPage : () {},
-              color: PixelTheme.textWhite,
-              icon: Icons.nfc_rounded,
-              opacity: _pairedUid == null ? 1 : 0.7,
-            ),
-            const SizedBox(height: 12),
-            _EditorActionButton(
-              label: '列印卡片',
-              onTap: _openPrintPreview,
-              color: PixelTheme.accent,
-              icon: Icons.print_rounded,
-            ),
-            const SizedBox(height: 12),
-            _EditorActionButton(
-              label: '\u5099\u4efd / \u9084\u539f',
-              subtitle:
-                  '\u532f\u51fa\u6216\u9084\u539f\u672c\u6a5f\u5361\u7247\u6536\u96c6\u8cc7\u6599',
-              onTap: _openBackupMenu,
-              color: PixelTheme.accentBlue,
-              icon: Icons.inventory_2_outlined,
-            ),
+            if (_isLoadingProfile)
+              PixelLoadingOverlay(label: context.l10n.tr('loadingCardProfile')),
           ],
         ),
       ),
@@ -417,9 +491,7 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   Future<String?> _localBackupJson() async {
     final String? userId = _authService.currentUserId;
     if (userId == null) {
-      _showEditorSnack(
-        '\u76ee\u524d\u6c92\u6709\u53ef\u532f\u51fa\u7684\u4f7f\u7528\u8005\u8cc7\u6599',
-      );
+      _showEditorSnack(context.l10n.tr('noUserDataToExport'));
       return null;
     }
     return _localCollectionStore.exportJson(userId);
@@ -441,9 +513,8 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
       context: context,
       builder: (BuildContext context) {
         return _PixelBackupDialog(
-          title: 'LOCAL BACKUP',
-          body:
-              '\u5099\u4efd JSON \u5df2\u7d93\u8907\u88fd\u5230\u526a\u8cbc\u7c3f\u3002',
+          title: context.l10n.tr('localBackup'),
+          body: context.l10n.tr('backupCopied'),
           content: exportText,
         );
       },
@@ -451,6 +522,7 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   }
 
   Future<void> _exportBackupToFile() async {
+    final AppLocalizations l10n = context.l10n;
     final String? exportText = await _localBackupJson();
     if (exportText == null) {
       return;
@@ -459,7 +531,7 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
     final String fileName =
         'hitcon_nfc_battle_backup_${DateTime.now().millisecondsSinceEpoch}.json';
     final String? path = await FilePicker.platform.saveFile(
-      dialogTitle: 'Export HITCON NFC Battle Backup',
+      dialogTitle: l10n.tr('exportBackupDialogTitle'),
       fileName: fileName,
       type: FileType.custom,
       allowedExtensions: <String>['json'],
@@ -468,15 +540,13 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
     if (!mounted || path == null) {
       return;
     }
-    _showEditorSnack('\u5099\u4efd JSON \u5df2\u532f\u51fa');
+    _showEditorSnack(context.l10n.tr('backupExported'));
   }
 
   Future<void> _restoreBackupText(String backupText) async {
     final String? userId = _authService.currentUserId;
     if (userId == null) {
-      _showEditorSnack(
-        '\u76ee\u524d\u6c92\u6709\u53ef\u9084\u539f\u7684\u4f7f\u7528\u8005\u8cc7\u6599',
-      );
+      _showEditorSnack(context.l10n.tr('noUserDataToRestore'));
       return;
     }
     if (backupText.trim().isEmpty) {
@@ -489,13 +559,11 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
       if (!mounted) {
         return;
       }
-      _showEditorSnack('\u5099\u4efd\u5df2\u9084\u539f');
+      _showEditorSnack(context.l10n.tr('backupRestored'));
     } on FormatException {
-      _showEditorSnack('\u5099\u4efd\u683c\u5f0f\u4e0d\u6b63\u78ba');
+      _showEditorSnack(context.l10n.tr('invalidBackup'));
     } catch (_) {
-      _showEditorSnack(
-        '\u9084\u539f\u5931\u6557\uff0c\u8acb\u6aa2\u67e5\u5099\u4efd\u5167\u5bb9',
-      );
+      _showEditorSnack(context.l10n.tr('restoreFailed'));
     }
   }
 
@@ -511,8 +579,9 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   }
 
   Future<void> _importBackupFromFile() async {
+    final AppLocalizations l10n = context.l10n;
     final FilePickerResult? result = await FilePicker.platform.pickFiles(
-      dialogTitle: 'Import HITCON NFC Battle Backup',
+      dialogTitle: l10n.tr('importBackupDialogTitle'),
       type: FileType.custom,
       allowedExtensions: <String>['json'],
       withData: true,
@@ -523,7 +592,7 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
 
     final Uint8List? bytes = result.files.single.bytes;
     if (bytes == null) {
-      _showEditorSnack('\u7121\u6cd5\u8b80\u53d6\u5099\u4efd\u6a94\u6848');
+      _showEditorSnack(l10n.tr('backupFileUnreadable'));
       return;
     }
     await _restoreBackupText(utf8.decode(bytes));
@@ -628,6 +697,18 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
       await _saveProfile();
     }
   }
+
+  Future<void> _openNtagUnlockPage() async {
+    if (_pairedUid == null || _pairedUid!.trim().isEmpty) {
+      _showEditorSnack(context.l10n.tr('pairFirst'));
+      return;
+    }
+
+    final bool? unlocked = await openNtagUnlockPage(context);
+    if (unlocked == true && mounted) {
+      _showEditorSnack(context.l10n.tr('ntagUnlocked'));
+    }
+  }
 }
 
 class _PokemonStyleCard extends StatelessWidget {
@@ -730,7 +811,7 @@ class _PokemonStyleCard extends StatelessWidget {
                       ),
                       SizedBox(height: s(6)),
                       Text(
-                        '點擊編輯圖片',
+                        context.l10n.tr('tapEditImage'),
                         style: TextStyle(
                           color: PixelTheme.textWhite,
                           fontSize: s(12),
@@ -1005,7 +1086,7 @@ class _BackupActionDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'BACKUP',
+              context.l10n.tr('backup'),
               style: TextStyle(
                 color: PixelTheme.accent,
                 fontFamily: 'Unifont',
@@ -1015,43 +1096,39 @@ class _BackupActionDialog extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _EditorActionButton(
-              label: '\u532f\u51fa JSON \u6a94',
-              subtitle:
-                  '\u4f7f\u7528\u7cfb\u7d71\u6a94\u6848\u7ba1\u7406\u5668\u5132\u5b58',
+              label: context.l10n.tr('exportJsonFile'),
+              subtitle: context.l10n.tr('exportJsonFileHint'),
               onTap: onExportFile,
               color: PixelTheme.accentBlue,
               icon: Icons.file_upload_outlined,
             ),
             const SizedBox(height: 10),
             _EditorActionButton(
-              label: '\u8907\u88fd\u5230\u526a\u8cbc\u7c3f',
-              subtitle:
-                  '\u8907\u88fd\u672c\u6a5f\u5361\u7247\u6536\u96c6\u8cc7\u6599',
+              label: context.l10n.tr('copyToClipboard'),
+              subtitle: context.l10n.tr('copyToClipboardHint'),
               onTap: onExportClipboard,
               color: PixelTheme.accentBlue,
               icon: Icons.content_copy_rounded,
             ),
             const SizedBox(height: 10),
             _EditorActionButton(
-              label: '\u5f9e JSON \u6a94\u9084\u539f',
-              subtitle:
-                  '\u4f7f\u7528\u7cfb\u7d71\u6a94\u6848\u7ba1\u7406\u5668\u9078\u53d6',
+              label: context.l10n.tr('restoreJsonFile'),
+              subtitle: context.l10n.tr('restoreJsonFileHint'),
               onTap: onImportFile,
               color: PixelTheme.textWhite,
               icon: Icons.file_download_outlined,
             ),
             const SizedBox(height: 10),
             _EditorActionButton(
-              label: '\u5f9e\u526a\u8cbc\u7c3f\u9084\u539f',
-              subtitle:
-                  '\u8cbc\u4e0a\u5099\u4efd JSON \u9084\u539f\u672c\u6a5f\u8cc7\u6599',
+              label: context.l10n.tr('restoreClipboard'),
+              subtitle: context.l10n.tr('restoreClipboardHint'),
               onTap: onImportClipboard,
               color: PixelTheme.textWhite,
               icon: Icons.content_paste_rounded,
             ),
             const SizedBox(height: 10),
             _EditorActionButton(
-              label: 'CANCEL',
+              label: context.l10n.tr('cancel'),
               onTap: () => Navigator.of(context).pop(),
               color: PixelTheme.textWhite.withValues(alpha: 0.75),
             ),
@@ -1133,7 +1210,7 @@ class _PixelBackupDialog extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _EditorActionButton(
-              label: 'OK',
+              label: context.l10n.tr('ok'),
               onTap: () => Navigator.of(context).pop(),
               color: PixelTheme.accent,
             ),
@@ -1187,7 +1264,7 @@ class _BackupImportDialogState extends State<_BackupImportDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'RESTORE BACKUP',
+              context.l10n.tr('restoreBackup'),
               style: TextStyle(
                 color: PixelTheme.accent,
                 fontFamily: 'Unifont',
@@ -1197,7 +1274,7 @@ class _BackupImportDialogState extends State<_BackupImportDialog> {
             ),
             const SizedBox(height: 8),
             Text(
-              '\u8cbc\u4e0a\u5099\u4efd JSON\uff0c\u9001\u51fa\u5f8c\u6703\u8986\u84cb\u672c\u6a5f\u5361\u7247\u6536\u96c6\u8cc7\u6599\u3002',
+              context.l10n.tr('restoreBackupWarning'),
               style: TextStyle(
                 color: PixelTheme.textWhite,
                 fontFamily: 'Unifont',
@@ -1237,21 +1314,21 @@ class _BackupImportDialogState extends State<_BackupImportDialog> {
             ),
             const SizedBox(height: 12),
             _EditorActionButton(
-              label: '\u5f9e\u526a\u8cbc\u7c3f\u8cbc\u4e0a',
+              label: context.l10n.tr('pasteFromClipboard'),
               onTap: _pasteFromClipboard,
               color: PixelTheme.textWhite,
               icon: Icons.content_paste_rounded,
             ),
             const SizedBox(height: 10),
             _EditorActionButton(
-              label: '\u9084\u539f',
+              label: context.l10n.tr('restore'),
               onTap: () => Navigator.of(context).pop(_controller.text),
               color: PixelTheme.accent,
               icon: Icons.restore_rounded,
             ),
             const SizedBox(height: 10),
             _EditorActionButton(
-              label: 'CANCEL',
+              label: context.l10n.tr('cancel'),
               onTap: () => Navigator.of(context).pop(),
               color: PixelTheme.textWhite.withValues(alpha: 0.75),
             ),
@@ -1312,7 +1389,7 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: const Text('\u5217\u5370\u5361\u7247'),
+          title: Text(context.l10n.tr('printCard')),
         ),
         body: SafeArea(
           child: LayoutBuilder(
@@ -1349,9 +1426,9 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
                     SizedBox(height: s(14)),
                     if (_order == null)
                       _EditorActionButton(
-                        label: _isSubmitting
-                            ? '\u9001\u51fa\u4e2d...'
-                            : '\u9001\u51fa\u5217\u5370\u9700\u6c42',
+                        label: context.l10n.tr(
+                          _isSubmitting ? 'submitting' : 'submitPrintOrder',
+                        ),
                         color: PixelTheme.accent,
                         onTap: _isSubmitting ? () {} : _submitPrintOrder,
                       )
@@ -1359,13 +1436,13 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
                       _BarcodeCard(order: _order!),
                       SizedBox(height: s(12)),
                       _EditorActionButton(
-                        label: '\u5132\u5b58\u689d\u78bc',
+                        label: context.l10n.tr('saveBarcode'),
                         color: PixelTheme.accent,
                         onTap: () => _openBarcodeSaveScreen(_order!),
                       ),
                       const SizedBox(height: 10),
                       _EditorActionButton(
-                        label: '\u8907\u88fd\u6536\u4ef6\u7de8\u865f',
+                        label: context.l10n.tr('copyOrderNumber'),
                         color: PixelTheme.accentBlue,
                         onTap: () => _copyOrderId(_order!.id),
                       ),
@@ -1385,25 +1462,31 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
       _isSubmitting = true;
     });
 
-    final Uint8List artworkPng = _buildCr80PrintPng(
-      name: widget.name,
-      link: widget.link,
-      emoji: widget.emoji,
-      description: widget.description,
-      cardColor: widget.cardColor,
-      pixels: widget.pixels,
-    );
-    final Map<String, dynamic>? response = await _authService
-        .submitCardPrintOrder(
-          artworkPng: artworkPng,
-          metadata: const <String, dynamic>{
-            'format': 'EVOLIS_PRIMACY_CR80_300DPI_PNG',
-            'width_px': 638,
-            'height_px': 1011,
-            'dpi': 300,
-            'card_size': 'CR80 / ISO 7810 ID-1 / 53.98 x 85.60 mm',
-            'printer': 'Evolis Primacy OEM',
-            'orientation': 'portrait',
+    final Map<String, dynamic>? response =
+        await runWithPixelLoadingOverlay<Map<String, dynamic>?>(
+          context,
+          label: context.l10n.tr('preparingPrintFile'),
+          action: () async {
+            final Uint8List artworkPng = _buildCr80PrintPng(
+              name: widget.name,
+              link: widget.link,
+              emoji: widget.emoji,
+              description: widget.description,
+              cardColor: widget.cardColor,
+              pixels: widget.pixels,
+            );
+            return _authService.submitCardPrintOrder(
+              artworkPng: artworkPng,
+              metadata: const <String, dynamic>{
+                'format': 'EVOLIS_PRIMACY_CR80_300DPI_PNG',
+                'width_px': 638,
+                'height_px': 1011,
+                'dpi': 300,
+                'card_size': 'CR80 / ISO 7810 ID-1 / 53.98 x 85.60 mm',
+                'printer': 'Evolis Primacy OEM',
+                'orientation': 'portrait',
+              },
+            );
           },
         );
 
@@ -1416,9 +1499,7 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
         _isSubmitting = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('\u9001\u51fa\u5217\u5370\u9700\u6c42\u5931\u6557'),
-        ),
+        SnackBar(content: Text(context.l10n.tr('printRequestFailed'))),
       );
       return;
     }
@@ -1449,7 +1530,7 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
     }
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Order ID copied')));
+    ).showSnackBar(SnackBar(content: Text(context.l10n.tr('orderIdCopied'))));
   }
 }
 
@@ -1802,9 +1883,9 @@ class _PrintInfoPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            order == null
-                ? '\u5217\u5370\u8aaa\u660e'
-                : '\u9700\u6c42\u5df2\u9001\u51fa',
+            context.l10n.tr(
+              order == null ? 'printInstructions' : 'printSubmitted',
+            ),
             style: TextStyle(
               color: PixelTheme.accent,
               fontSize: 15,
@@ -1813,9 +1894,9 @@ class _PrintInfoPanel extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            order == null
-                ? 'Submit the order, then pay at the souvenir booth to print the card.'
-                : 'Save or screenshot the barcode, then show it at the souvenir booth after payment.',
+            context.l10n.tr(
+              order == null ? 'printBeforeSubmit' : 'printAfterSubmit',
+            ),
             style: TextStyle(
               color: PixelTheme.textWhite,
               fontSize: 12,
@@ -1871,8 +1952,8 @@ class _BarcodeCard extends StatelessWidget {
               painter: _MockBarcodePainter(order.barcodeValue),
             ),
           ),
-          const Text(
-            '\u8acb\u622a\u5716\u6216\u5132\u5b58\u689d\u78bc\uff0c\u5230\u5927\u6703\u7d00\u5ff5\u54c1\u6524\u4f4d\u4ed8\u8cbb\u5217\u5370\u3002',
+          Text(
+            context.l10n.tr('barcodeInstruction'),
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.black,
@@ -1901,7 +1982,7 @@ class _BarcodeSaveScreen extends StatelessWidget {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: const Text('\u689d\u78bc\u5132\u5b58'),
+          title: Text(context.l10n.tr('saveBarcode')),
         ),
         body: SafeArea(
           child: Padding(
@@ -1923,12 +2004,12 @@ class _BarcodeSaveScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 _EditorActionButton(
-                  label: '複製收件編號',
+                  label: context.l10n.tr('copyOrderNumber'),
                   color: PixelTheme.accent,
                   onTap: () {
                     Clipboard.setData(ClipboardData(text: order.id));
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Order ID copied')),
+                      SnackBar(content: Text(context.l10n.tr('orderIdCopied'))),
                     );
                   },
                 ),
@@ -2246,7 +2327,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.name);
-    _linkController = TextEditingController(text: widget.link);
+    _linkController = TextEditingController(text: httpsLinkBody(widget.link));
     _emojiController = TextEditingController(text: widget.emoji);
     _descriptionController = TextEditingController(text: widget.description);
   }
@@ -2302,7 +2383,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
                         backgroundColor: PixelTheme.accent,
                         foregroundColor: PixelTheme.bgDark,
                       ),
-                      child: const Text('Save'),
+                      child: Text(context.l10n.tr('save')),
                     ),
                   ),
                 ),
@@ -2317,15 +2398,15 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
   String _getTitleForType() {
     switch (widget.editType) {
       case 'name':
-        return 'Edit Card Name';
+        return context.l10n.tr('editCardName');
       case 'emoji':
-        return 'Choose Emoji';
+        return context.l10n.tr('chooseEmoji');
       case 'link':
-        return 'Edit Link';
+        return context.l10n.tr('editLink');
       case 'description':
-        return 'Edit Description';
+        return context.l10n.tr('editDescription');
       default:
-        return 'Edit Card Info';
+        return context.l10n.tr('editCardInfo');
     }
   }
 
@@ -2336,7 +2417,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
           TextField(
             controller: _nameController,
             style: TextStyle(color: PixelTheme.textWhite),
-            decoration: _inputDecoration('Card Name'),
+            decoration: _inputDecoration(context.l10n.tr('name')),
             autofocus: true,
           ),
         ];
@@ -2393,7 +2474,13 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
           TextField(
             controller: _linkController,
             style: TextStyle(color: PixelTheme.textWhite),
-            decoration: _inputDecoration('Link'),
+            decoration: _linkInputDecoration(),
+            keyboardType: TextInputType.url,
+            inputFormatters: const <TextInputFormatter>[
+              HttpsLinkInputFormatter(),
+            ],
+            autocorrect: false,
+            enableSuggestions: false,
             autofocus: true,
           ),
         ];
@@ -2402,7 +2489,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
           TextField(
             controller: _descriptionController,
             style: TextStyle(color: PixelTheme.textWhite),
-            decoration: _inputDecoration('?∠?隤芣?'),
+            decoration: _inputDecoration(context.l10n.tr('description')),
             maxLines: 5,
             minLines: 3,
             autofocus: true,
@@ -2413,13 +2500,19 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
           TextField(
             controller: _nameController,
             style: TextStyle(color: PixelTheme.textWhite),
-            decoration: _inputDecoration('Card Name'),
+            decoration: _inputDecoration(context.l10n.tr('name')),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _linkController,
             style: TextStyle(color: PixelTheme.textWhite),
-            decoration: _inputDecoration('Link'),
+            decoration: _linkInputDecoration(),
+            keyboardType: TextInputType.url,
+            inputFormatters: const <TextInputFormatter>[
+              HttpsLinkInputFormatter(),
+            ],
+            autocorrect: false,
+            enableSuggestions: false,
           ),
           const SizedBox(height: 12),
           TextField(
@@ -2432,7 +2525,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
           TextField(
             controller: _descriptionController,
             style: TextStyle(color: PixelTheme.textWhite),
-            decoration: _inputDecoration('?∠?隤芣?'),
+            decoration: _inputDecoration(context.l10n.tr('description')),
             maxLines: 3,
             minLines: 2,
           ),
@@ -2555,10 +2648,23 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
   }
 
   void _saveAndClose() {
+    final String link = buildHttpsLink(_linkController.text);
+    if (validateHttpsLink(link) != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10n.tr('invalidHttpsLink'),
+            style: const TextStyle(fontFamily: 'Unifont'),
+          ),
+          backgroundColor: PixelTheme.warning,
+        ),
+      );
+      return;
+    }
     Navigator.of(context).pop(
       _TextEditResult(
         name: _nameController.text.trim(),
-        link: _linkController.text.trim(),
+        link: link,
         emoji: _emojiController.text.trim().isEmpty
             ? '\u2728'
             : _emojiController.text.trim(),
@@ -2582,6 +2688,20 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
       focusedBorder: OutlineInputBorder(
         borderSide: BorderSide(color: PixelTheme.accent, width: 2),
       ),
+    );
+  }
+
+  InputDecoration _linkInputDecoration() {
+    return _inputDecoration(context.l10n.tr('link')).copyWith(
+      floatingLabelBehavior: FloatingLabelBehavior.always,
+      prefixIcon: Padding(
+        padding: const EdgeInsets.only(left: 12, right: 2),
+        child: Text(
+          httpsLinkPrefix,
+          style: TextStyle(color: PixelTheme.accentBlue, fontFamily: 'Unifont'),
+        ),
+      ),
+      prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
     );
   }
 }
@@ -2646,7 +2766,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: const Text('\u9078\u64c7\u5361\u7247\u984f\u8272'),
+          title: Text(context.l10n.tr('chooseCardColor')),
         ),
         body: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
@@ -2694,7 +2814,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                           final Color? custom = await _showCustomColorDialog(
                             context,
                             initialColor: _selectedColor,
-                            title: '\u81ea\u8a02\u5361\u7247\u984f\u8272',
+                            title: context.l10n.tr('customCardColor'),
                           );
                           if (custom == null) {
                             return;
@@ -2708,7 +2828,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                           side: BorderSide(color: PixelTheme.accent, width: 2),
                         ),
                         icon: const Icon(Icons.tune_rounded),
-                        label: const Text('\u81ea\u8a02\u984f\u8272 (RGB)'),
+                        label: Text(context.l10n.tr('customColorRgb')),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -2724,7 +2844,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                       ),
                       alignment: Alignment.center,
                       child: Text(
-                        '\u76ee\u524d\u984f\u8272\n#${_hex6(_selectedColor)}',
+                        '${context.l10n.tr('currentColor')}\n#${_hex6(_selectedColor)}',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: _selectedColor.computeLuminance() > 0.5
@@ -2747,7 +2867,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                             backgroundColor: PixelTheme.accent,
                             foregroundColor: PixelTheme.bgDark,
                           ),
-                          child: const Text('\u5957\u7528\u984f\u8272'),
+                          child: Text(context.l10n.tr('applyColor')),
                         ),
                       ),
                     ),
@@ -2790,7 +2910,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
   ({int x, int y})? _lastPaintCell;
   final List<PixelGrid> _undoStack = <PixelGrid>[];
   final List<PixelGrid> _redoStack = <PixelGrid>[];
-  String _status = '準備畫圖...';
+  String _status = '';
 
   final List<Color> _swatches = const <Color>[
     Color(0xFFFFFFFF),
@@ -2819,6 +2939,14 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     super.initState();
     _pixels = _cloneGrid(widget.initialPixels);
     _brushColor = widget.cardColor;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_status.isEmpty) {
+      _status = context.l10n.tr('drawingReady');
+    }
   }
 
   void _paintCell(int x, int y) {
@@ -2914,7 +3042,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
           setState(() {
             _brushColor = picked;
             _tool = _EditorTool.brush;
-            _status = '已取得筆刷顏色';
+            _status = context.l10n.tr('brushColorPicked');
           });
         }
         _strokeInProgress = false;
@@ -2938,57 +3066,37 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     _pushHistory();
     setState(() {
       _pixels = _createEmptyGrid(widget.canvasSize);
-      _status = 'Unsupported image format';
+      _status = context.l10n.tr('unsupportedImage');
     });
   }
 
   Future<void> _importImage() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? picked = await picker.pickImage(source: ImageSource.gallery);
-
-    if (picked == null) {
+    final CardImageCropResult? cropped = await openCardImageCropper(context);
+    if (cropped == null || !mounted) {
       return;
     }
 
-    final Uint8List bytes = await picked.readAsBytes();
-
-    final img.Image? decoded = img.decodeImage(bytes);
-    if (decoded == null) {
-      return;
-    }
-
-    final String detectedFormat = _detectImageFormat(bytes);
-
-    if (!mounted) {
-      return;
-    }
-
-    final _ImagePreprocessResult? preprocessed = await Navigator.of(context)
-        .push<_ImagePreprocessResult>(
-          MaterialPageRoute<_ImagePreprocessResult>(
-            builder: (_) => _ImagePreprocessScreen(
-              sourceBytes: bytes,
-              sourceName: picked.name,
-              sourceFormat: detectedFormat,
-            ),
-          ),
-        );
-
-    if (preprocessed == null) {
-      return;
-    }
-
-    final PixelGrid nextPixels = _imageToPixelGridSimple(
-      preprocessed.image,
-      widget.canvasSize,
+    final PixelGrid? nextPixels = await runWithPixelLoadingOverlay<PixelGrid?>(
+      context,
+      label: context.l10n.tr('pixelatingImage'),
+      action: () => _pixelGridFromImageBytes(cropped.bytes, widget.canvasSize),
     );
+    if (nextPixels == null || !mounted) {
+      return;
+    }
 
     _pushHistory();
     setState(() {
       _pixels = nextPixels;
-      _status = preprocessed.usedBackgroundColor
-          ? 'Imported ${preprocessed.sourceName} (${preprocessed.sourceFormat}); transparent background filled white.'
-          : 'Imported ${preprocessed.sourceName} (${preprocessed.sourceFormat}).';
+      _status = context.l10n.tr(
+        cropped.usedBackgroundColor
+            ? 'imageImportedFlattened'
+            : 'imageImportedDetail',
+        <String, Object?>{
+          'name': cropped.sourceName,
+          'format': cropped.sourceFormat,
+        },
+      );
     });
   }
 
@@ -3007,7 +3115,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     setState(() {
       _redoStack.add(_cloneGrid(_pixels));
       _pixels = _undoStack.removeLast();
-      _status = 'Undo';
+      _status = context.l10n.tr('undo');
     });
   }
 
@@ -3018,7 +3126,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     setState(() {
       _undoStack.add(_cloneGrid(_pixels));
       _pixels = _redoStack.removeLast();
-      _status = 'Redo';
+      _status = context.l10n.tr('redo');
     });
   }
 
@@ -3068,7 +3176,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
       }
     }
 
-    _status = '畫布已清空';
+    _status = context.l10n.tr('canvasCleared');
   }
 
   @override
@@ -3086,7 +3194,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: const Text('圖片編輯器'),
+          title: Text(context.l10n.tr('imageEditor')),
         ),
         body: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
@@ -3109,36 +3217,61 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                             child: SizedBox(
                               width: size,
                               height: size,
-                              child: Listener(
+                              child: RawGestureDetector(
                                 behavior: HitTestBehavior.opaque,
-                                onPointerDown: (PointerDownEvent details) {
-                                  _handleCanvasTouch(
-                                    details.localPosition,
-                                    Size(size, size),
-                                    beginStroke: true,
-                                  );
-                                },
-                                onPointerMove: (PointerMoveEvent details) =>
+                                gestures:
+                                    <
+                                      Type,
+                                      GestureRecognizerFactory<
+                                        GestureRecognizer
+                                      >
+                                    >{
+                                      EagerGestureRecognizer:
+                                          GestureRecognizerFactoryWithHandlers<
+                                            EagerGestureRecognizer
+                                          >(
+                                            EagerGestureRecognizer.new,
+                                            (
+                                              EagerGestureRecognizer instance,
+                                            ) {},
+                                          ),
+                                    },
+                                child: Listener(
+                                  behavior: HitTestBehavior.opaque,
+                                  onPointerDown: (PointerDownEvent details) {
                                     _handleCanvasTouch(
                                       details.localPosition,
                                       Size(size, size),
-                                      beginStroke: false,
+                                      beginStroke: true,
+                                    );
+                                  },
+                                  onPointerMove: (PointerMoveEvent details) =>
+                                      _handleCanvasTouch(
+                                        details.localPosition,
+                                        Size(size, size),
+                                        beginStroke: false,
+                                      ),
+                                  onPointerUp: (_) => _finishCanvasPointer(),
+                                  onPointerCancel: (_) =>
+                                      _finishCanvasPointer(),
+                                  child: CustomPaint(
+                                    painter: _PixelCanvasPainter(
+                                      pixels: _pixels,
+                                      showGrid: _showGrid,
                                     ),
-                                onPointerUp: (_) => _finishCanvasPointer(),
-                                onPointerCancel: (_) => _finishCanvasPointer(),
-                                child: CustomPaint(
-                                  painter: _PixelCanvasPainter(
-                                    pixels: _pixels,
-                                    showGrid: _showGrid,
+                                    child: const SizedBox.expand(),
                                   ),
-                                  child: const SizedBox.expand(),
                                 ),
                               ),
                             ),
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            '$_status | \u5de5\u5177: ${_tool.label} | \u7b46\u5237: $_brushSize',
+                            context.l10n.tr('editorStatus', <String, Object?>{
+                              'status': _status,
+                              'tool': context.l10n.tr(_tool.labelKey),
+                              'size': _brushSize,
+                            }),
                             style: TextStyle(color: PixelTheme.accentBlue),
                           ),
                           const SizedBox(height: 12),
@@ -3149,21 +3282,21 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                               children: [
                                 _PixelToolButton(
                                   iconPattern: _iconImport,
-                                  label: '\u532f\u5165',
+                                  label: context.l10n.tr('import'),
                                   onPressed: _importImage,
                                 ),
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconClear,
-                                  label: '\u6e05\u7a7a',
+                                  label: context.l10n.tr('clear'),
                                   onPressed: _clearCanvas,
                                 ),
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconBrush,
                                   label: _tool == _EditorTool.brush
-                                      ? '\u7b46\u5237 ON'
-                                      : '\u7b46\u5237',
+                                      ? '${context.l10n.tr('brush')} ON'
+                                      : context.l10n.tr('brush'),
                                   selected: _tool == _EditorTool.brush,
                                   onPressed: () {
                                     setState(() {
@@ -3175,8 +3308,8 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 _PixelToolButton(
                                   iconPattern: _iconEraser,
                                   label: _tool == _EditorTool.eraser
-                                      ? '\u6a61\u76ae\u64e6 ON'
-                                      : '\u6a61\u76ae\u64e6',
+                                      ? '${context.l10n.tr('eraser')} ON'
+                                      : context.l10n.tr('eraser'),
                                   selected: _tool == _EditorTool.eraser,
                                   onPressed: () {
                                     setState(() {
@@ -3188,8 +3321,8 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 _PixelToolButton(
                                   iconPattern: _iconBucket,
                                   label: _tool == _EditorTool.bucket
-                                      ? '\u586b\u8272 ON'
-                                      : '\u586b\u8272',
+                                      ? '${context.l10n.tr('fill')} ON'
+                                      : context.l10n.tr('fill'),
                                   selected: _tool == _EditorTool.bucket,
                                   onPressed: () {
                                     setState(() {
@@ -3201,8 +3334,8 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 _PixelToolButton(
                                   iconPattern: _iconPicker,
                                   label: _tool == _EditorTool.picker
-                                      ? '\u53d6\u8272 ON'
-                                      : '\u53d6\u8272',
+                                      ? '${context.l10n.tr('pickColor')} ON'
+                                      : context.l10n.tr('pickColor'),
                                   selected: _tool == _EditorTool.picker,
                                   onPressed: () {
                                     setState(() {
@@ -3213,21 +3346,21 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconUndo,
-                                  label: '\u5fa9\u539f',
+                                  label: context.l10n.tr('undo'),
                                   onPressed: _undo,
                                 ),
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconRedo,
-                                  label: '\u91cd\u505a',
+                                  label: context.l10n.tr('redo'),
                                   onPressed: _redo,
                                 ),
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconGrid,
                                   label: _showGrid
-                                      ? '\u7db2\u683c ON'
-                                      : '\u7db2\u683c OFF',
+                                      ? context.l10n.tr('gridOn')
+                                      : context.l10n.tr('gridOff'),
                                   selected: _showGrid,
                                   onPressed: () {
                                     setState(() {
@@ -3238,7 +3371,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconMinus,
-                                  label: '\u7b46\u5237-',
+                                  label: context.l10n.tr('brushSmaller'),
                                   onPressed: () {
                                     setState(() {
                                       if (_brushSize > 1) {
@@ -3250,7 +3383,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconPlus,
-                                  label: '\u7b46\u5237+',
+                                  label: context.l10n.tr('brushLarger'),
                                   onPressed: () {
                                     setState(() {
                                       if (_brushSize < 3) {
@@ -3275,13 +3408,14 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 if (index == _swatches.length) {
                                   return GestureDetector(
                                     onTap: () async {
-                                      final Color?
-                                      custom = await _showCustomColorDialog(
-                                        context,
-                                        initialColor: _brushColor,
-                                        title:
-                                            '\u81ea\u8a02\u7b46\u5237\u984f\u8272',
-                                      );
+                                      final Color? custom =
+                                          await _showCustomColorDialog(
+                                            context,
+                                            initialColor: _brushColor,
+                                            title: context.l10n.tr(
+                                              'customBrushColor',
+                                            ),
+                                          );
                                       if (custom == null) {
                                         return;
                                       }
@@ -3291,7 +3425,9 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                             _tool == _EditorTool.picker) {
                                           _tool = _EditorTool.brush;
                                         }
-                                        _status = '已選擇顏色';
+                                        _status = context.l10n.tr(
+                                          'colorSelected',
+                                        );
                                       });
                                     },
                                     child: Container(
@@ -3370,7 +3506,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                         backgroundColor: PixelTheme.accent,
                         foregroundColor: PixelTheme.bgDark,
                       ),
-                      child: const Text('套用像素圖'),
+                      child: Text(context.l10n.tr('applyPixelArt')),
                     ),
                   ),
                 ),
@@ -3400,12 +3536,14 @@ class _ImagePreprocessScreen extends StatefulWidget {
 
 class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
   static const double _previewSize = 300;
-  static const int _previewMaxSide = 1024;
 
   late img.Image _workingImage;
   late img.Image _previewBaseImage;
   late Uint8List _workingPreviewBytes;
   late bool _hasTransparency;
+  bool _isPreparing = true;
+  bool _isProcessing = false;
+  bool _decodeFailed = false;
   int _rotationQuarterTurns = 0;
   double _viewScale = 1.0;
   double _baseScale = 1.0;
@@ -3416,56 +3554,40 @@ class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
   @override
   void initState() {
     super.initState();
-    final img.Image? decoded = img.decodeImage(widget.sourceBytes);
-    _workingImage = decoded ?? img.Image(width: 1, height: 1);
-    _previewBaseImage = _buildPreviewBaseImage(_workingImage);
+    _workingImage = img.Image(width: 1, height: 1);
+    _previewBaseImage = img.Image(width: 1, height: 1);
     _workingPreviewBytes = Uint8List(0);
-    _hasTransparency = _detectTransparency(_workingImage);
-    _refreshWorkingPreview();
+    _hasTransparency = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _prepareImage();
+    });
   }
 
-  void _refreshWorkingPreview() {
-    img.Image preview = _previewBaseImage;
-    if (_rotationQuarterTurns != 0) {
-      preview = _rotateByQuarterTurns(preview, _rotationQuarterTurns);
-    }
-    preview = _flattenOnWhite(preview);
-    _workingPreviewBytes = Uint8List.fromList(img.encodePng(preview, level: 1));
-  }
-
-  img.Image _buildPreviewBaseImage(img.Image source) {
-    final int maxSide = source.width > source.height
-        ? source.width
-        : source.height;
-    if (maxSide <= _previewMaxSide) {
-      return source;
-    }
-    if (source.width >= source.height) {
-      return img.copyResize(
-        source,
-        width: _previewMaxSide,
-        interpolation: img.Interpolation.linear,
-      );
-    }
-    return img.copyResize(
-      source,
-      height: _previewMaxSide,
-      interpolation: img.Interpolation.linear,
+  Future<void> _prepareImage() async {
+    final Map<String, Object?> prepared = await compute(
+      _prepareCropImage,
+      widget.sourceBytes,
     );
-  }
-
-  img.Image _rotateByQuarterTurns(img.Image source, int turns) {
-    final int normalized = ((turns % 4) + 4) % 4;
-    switch (normalized) {
-      case 1:
-        return img.copyRotate(source, angle: 90);
-      case 2:
-        return img.copyRotate(source, angle: 180);
-      case 3:
-        return img.copyRotate(source, angle: -90);
-      default:
-        return source;
+    if (!mounted) {
+      return;
     }
+    final img.Image? image = prepared['image'] as img.Image?;
+    final img.Image? preview = prepared['preview'] as img.Image?;
+    final Uint8List? previewBytes = prepared['previewBytes'] as Uint8List?;
+    if (image == null || preview == null || previewBytes == null) {
+      setState(() {
+        _isPreparing = false;
+        _decodeFailed = true;
+      });
+      return;
+    }
+    setState(() {
+      _workingImage = image;
+      _previewBaseImage = preview;
+      _workingPreviewBytes = previewBytes;
+      _hasTransparency = prepared['hasTransparency'] as bool? ?? false;
+      _isPreparing = false;
+    });
   }
 
   int get _layoutPreviewWidth => _rotationQuarterTurns.isEven
@@ -3514,287 +3636,248 @@ class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
           title: Text(
-            '\u5716\u7247\u88c1\u5207 - ${widget.sourceName} (${widget.sourceFormat})',
+            context.l10n.tr('imageCropTitle', <String, Object?>{
+              'name': widget.sourceName,
+              'format': widget.sourceFormat,
+            }),
           ),
         ),
-        body: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.all(12),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: constraints.maxHeight - 24,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: PixelTheme.bgMid,
-                        border: Border.all(color: PixelTheme.border, width: 2),
+        body: Stack(
+          children: <Widget>[
+            if (!_isPreparing && !_decodeFailed)
+              LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.all(12),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight - 24,
                       ),
-                      child: const Text(
-                        'Drag or pinch the image to choose the crop area.',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Center(
-                      child: Container(
-                        width: _previewSize,
-                        height: _previewSize,
-                        decoration: BoxDecoration(
-                          color: _hasTransparency
-                              ? Colors.white
-                              : PixelTheme.bgMid,
-                          border: Border.all(
-                            color: PixelTheme.border,
-                            width: 2,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: PixelTheme.bgMid,
+                              border: Border.all(
+                                color: PixelTheme.border,
+                                width: 2,
+                              ),
+                            ),
+                            child: const Text(
+                              'Drag or pinch the image to choose the crop area.',
+                            ),
                           ),
-                        ),
-                        child: GestureDetector(
-                          onScaleStart: (ScaleStartDetails details) {
-                            _baseScale = _viewScale;
-                            _baseOffset = _viewOffset;
-                            _scaleStartFocalPoint = details.localFocalPoint;
-                          },
-                          onScaleUpdate: (ScaleUpdateDetails details) {
-                            setState(() {
-                              _viewScale = (_baseScale * details.scale).clamp(
-                                0.2,
-                                4.0,
-                              );
-                              _viewOffset =
-                                  _baseOffset +
-                                  (details.localFocalPoint -
-                                      _scaleStartFocalPoint);
-                            });
-                          },
-                          child: ClipRect(
-                            child: Center(
-                              child: SizedBox(
-                                width: _previewSize,
-                                height: _previewSize,
-                                child: Builder(
-                                  builder: (BuildContext context) {
-                                    final _PlacedRectPx rect =
-                                        _computePlacedRectPx(
-                                          boxSize: _previewSize,
-                                          sourceWidth: _layoutPreviewWidth,
-                                          sourceHeight: _layoutPreviewHeight,
-                                          offsetScale: 1.0,
-                                        );
-                                    return Stack(
-                                      children: [
-                                        Positioned(
-                                          left: rect.dx.toDouble(),
-                                          top: rect.dy.toDouble(),
-                                          width: rect.drawW.toDouble(),
-                                          height: rect.drawH.toDouble(),
-                                          child: Image.memory(
-                                            _workingPreviewBytes,
-                                            fit: BoxFit.fill,
-                                            gaplessPlayback: true,
-                                            filterQuality: FilterQuality.none,
-                                          ),
-                                        ),
-                                      ],
-                                    );
-                                  },
+                          const SizedBox(height: 12),
+                          Center(
+                            child: Container(
+                              width: _previewSize,
+                              height: _previewSize,
+                              decoration: BoxDecoration(
+                                color: _hasTransparency
+                                    ? Colors.white
+                                    : PixelTheme.bgMid,
+                                border: Border.all(
+                                  color: PixelTheme.border,
+                                  width: 2,
+                                ),
+                              ),
+                              child: GestureDetector(
+                                onScaleStart: (ScaleStartDetails details) {
+                                  _baseScale = _viewScale;
+                                  _baseOffset = _viewOffset;
+                                  _scaleStartFocalPoint =
+                                      details.localFocalPoint;
+                                },
+                                onScaleUpdate: (ScaleUpdateDetails details) {
+                                  setState(() {
+                                    _viewScale = (_baseScale * details.scale)
+                                        .clamp(0.2, 4.0);
+                                    _viewOffset =
+                                        _baseOffset +
+                                        (details.localFocalPoint -
+                                            _scaleStartFocalPoint);
+                                  });
+                                },
+                                child: ClipRect(
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: _previewSize,
+                                      height: _previewSize,
+                                      child: Builder(
+                                        builder: (BuildContext context) {
+                                          final _PlacedRectPx
+                                          rect = _computePlacedRectPx(
+                                            boxSize: _previewSize,
+                                            sourceWidth: _layoutPreviewWidth,
+                                            sourceHeight: _layoutPreviewHeight,
+                                            offsetScale: 1.0,
+                                          );
+                                          return Stack(
+                                            children: [
+                                              Positioned(
+                                                left: rect.dx.toDouble(),
+                                                top: rect.dy.toDouble(),
+                                                width: rect.drawW.toDouble(),
+                                                height: rect.drawH.toDouble(),
+                                                child: RotatedBox(
+                                                  quarterTurns:
+                                                      _rotationQuarterTurns,
+                                                  child: Image.memory(
+                                                    _workingPreviewBytes,
+                                                    fit: BoxFit.fill,
+                                                    gaplessPlayback: true,
+                                                    filterQuality:
+                                                        FilterQuality.none,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _ToolButton(
-                          label: 'Rotate Right',
-                          onPressed: () {
-                            setState(() {
-                              _rotationQuarterTurns =
-                                  (_rotationQuarterTurns + 3) % 4;
-                              _refreshWorkingPreview();
-                            });
-                          },
-                        ),
-                        _ToolButton(
-                          label: 'Rotate Left',
-                          onPressed: () {
-                            setState(() {
-                              _rotationQuarterTurns =
-                                  (_rotationQuarterTurns + 1) % 4;
-                              _refreshWorkingPreview();
-                            });
-                          },
-                        ),
-                        _ToolButton(
-                          label: '重置位置',
-                          onPressed: () {
-                            setState(() {
-                              _viewScale = 1.0;
-                              _viewOffset = Offset.zero;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Drag with one finger, pinch with two fingers.',
-                      style: TextStyle(color: PixelTheme.accent),
-                    ),
-                    if (_hasTransparency) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Transparent background detected; output will use a white base.',
-                        style: TextStyle(color: PixelTheme.accentBlue),
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    SafeArea(
-                      top: false,
-                      minimum: const EdgeInsets.only(bottom: 12),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          onPressed: () {
-                            Navigator.of(context).pop(
-                              _ImagePreprocessResult(
-                                image: _buildProcessedSquare(outputSize: 512),
-                                usedBackgroundColor: _hasTransparency,
-                                sourceName: widget.sourceName,
-                                sourceFormat: widget.sourceFormat,
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _ToolButton(
+                                label: context.l10n.tr('rotateRight'),
+                                onPressed: () {
+                                  setState(() {
+                                    _rotationQuarterTurns =
+                                        (_rotationQuarterTurns + 3) % 4;
+                                  });
+                                },
                               ),
-                            );
-                          },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: PixelTheme.accent,
-                            foregroundColor: PixelTheme.bgDark,
+                              _ToolButton(
+                                label: context.l10n.tr('rotateLeft'),
+                                onPressed: () {
+                                  setState(() {
+                                    _rotationQuarterTurns =
+                                        (_rotationQuarterTurns + 1) % 4;
+                                  });
+                                },
+                              ),
+                              _ToolButton(
+                                label: context.l10n.tr('resetPosition'),
+                                onPressed: () {
+                                  setState(() {
+                                    _viewScale = 1.0;
+                                    _viewOffset = Offset.zero;
+                                  });
+                                },
+                              ),
+                            ],
                           ),
-                          child: const Text('套用裁切'),
-                        ),
+                          const SizedBox(height: 10),
+                          Text(
+                            context.l10n.tr('cropGestureHint'),
+                            style: TextStyle(color: PixelTheme.accent),
+                          ),
+                          if (_hasTransparency) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              context.l10n.tr('transparentImageHint'),
+                              style: TextStyle(color: PixelTheme.accentBlue),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                          SafeArea(
+                            top: false,
+                            minimum: const EdgeInsets.only(bottom: 12),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: FilledButton(
+                                onPressed: _applyCrop,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: PixelTheme.accent,
+                                  foregroundColor: PixelTheme.bgDark,
+                                ),
+                                child: Text(context.l10n.tr('applyCrop')),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
+                  );
+                },
+              ),
+            if (_isPreparing)
+              PixelLoadingOverlay(label: context.l10n.tr('preparingImage')),
+            if (_isProcessing)
+              PixelLoadingOverlay(label: context.l10n.tr('processingCrop')),
+            if (_decodeFailed)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: PixelTheme.bgDark,
+                  child: Center(
+                    child: Text(
+                      context.l10n.tr('unsupportedImage'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: PixelTheme.warning,
+                        fontFamily: 'Unifont',
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            );
-          },
+          ],
         ),
       ),
     );
   }
 
-  img.Image _flattenOnWhite(img.Image source) {
-    final img.Image flattened = img.Image(
-      width: source.width,
-      height: source.height,
-    );
-    img.fill(flattened, color: img.ColorRgba8(255, 255, 255, 255));
-    img.compositeImage(flattened, source);
-    return flattened;
-  }
-
-  img.Image _buildProcessedSquare({required int outputSize}) {
-    img.Image source = _flattenOnWhite(_workingImage);
-    if (_rotationQuarterTurns != 0) {
-      source = _rotateByQuarterTurns(source, _rotationQuarterTurns);
-    }
-    final img.Image flattened = img.Image(
-      width: outputSize,
-      height: outputSize,
-    );
-    img.fill(flattened, color: img.ColorRgba8(255, 255, 255, 255));
-
-    final _PlacedRectPx previewRect = _computePlacedRectPx(
-      boxSize: _previewSize,
-      sourceWidth: _layoutPreviewWidth,
-      sourceHeight: _layoutPreviewHeight,
-      offsetScale: 1.0,
-    );
-
-    final double ratio = outputSize / _previewSize;
-
-    int drawW = (previewRect.drawW * ratio).round();
-    int drawH = (previewRect.drawH * ratio).round();
-    if (drawW < 1) {
-      drawW = 1;
-    }
-    if (drawH < 1) {
-      drawH = 1;
-    }
-
-    final img.Image resized = img.copyResize(
-      source,
-      width: drawW,
-      height: drawH,
-      interpolation: img.Interpolation.linear,
-    );
-
-    final int dstX = (previewRect.dx * ratio).round();
-    final int dstY = (previewRect.dy * ratio).round();
-
-    _compositeImageClipped(
-      destination: flattened,
-      source: resized,
-      dstX: dstX,
-      dstY: dstY,
-    );
-    return flattened;
-  }
-
-  // Keep export behavior consistent with preview clipping when image is moved outside bounds.
-  void _compositeImageClipped({
-    required img.Image destination,
-    required img.Image source,
-    required int dstX,
-    required int dstY,
-  }) {
-    int outX = dstX;
-    int outY = dstY;
-    int srcX = 0;
-    int srcY = 0;
-    int copyW = source.width;
-    int copyH = source.height;
-
-    if (outX < 0) {
-      srcX = -outX;
-      copyW -= srcX;
-      outX = 0;
-    }
-    if (outY < 0) {
-      srcY = -outY;
-      copyH -= srcY;
-      outY = 0;
-    }
-
-    if (outX + copyW > destination.width) {
-      copyW = destination.width - outX;
-    }
-    if (outY + copyH > destination.height) {
-      copyH = destination.height - outY;
-    }
-
-    if (copyW <= 0 || copyH <= 0) {
+  Future<void> _applyCrop() async {
+    if (_isPreparing || _isProcessing || _decodeFailed) {
       return;
     }
+    setState(() {
+      _isProcessing = true;
+    });
+    await WidgetsBinding.instance.endOfFrame;
 
-    img.compositeImage(
-      destination,
-      source,
-      dstX: outX,
-      dstY: outY,
-      srcX: srcX,
-      srcY: srcY,
-      srcW: copyW,
-      srcH: copyH,
+    final Uint8List? bytes = await compute(_processCropImage, <String, Object>{
+      'image': _workingImage,
+      'rotation': _rotationQuarterTurns,
+      'outputSize': 512,
+      'previewSize': _previewSize,
+      'previewWidth': _previewBaseImage.width,
+      'previewHeight': _previewBaseImage.height,
+      'scale': _viewScale,
+      'offsetX': _viewOffset.dx,
+      'offsetY': _viewOffset.dy,
+    });
+    if (!mounted) {
+      return;
+    }
+    if (bytes == null) {
+      setState(() {
+        _isProcessing = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.tr('unsupportedImage'))),
+      );
+      return;
+    }
+    Navigator.of(context).pop(
+      _ImagePreprocessResult(
+        bytes: bytes,
+        usedBackgroundColor: _hasTransparency,
+        sourceName: widget.sourceName,
+        sourceFormat: widget.sourceFormat,
+      ),
     );
   }
 }
@@ -4000,13 +4083,13 @@ class _PixelEditResult {
 
 class _ImagePreprocessResult {
   const _ImagePreprocessResult({
-    required this.image,
+    required this.bytes,
     required this.usedBackgroundColor,
     required this.sourceName,
     required this.sourceFormat,
   });
 
-  final img.Image image;
+  final Uint8List bytes;
   final bool usedBackgroundColor;
   final String sourceName;
   final String sourceFormat;
@@ -4097,7 +4180,7 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'HEX \u984f\u8272 (#RRGGBB)',
+                      context.l10n.tr('hexColor'),
                       style: TextStyle(
                         color: _previewTextColor,
                         fontWeight: FontWeight.w900,
@@ -4199,7 +4282,7 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('\u53d6\u6d88'),
+            child: Text(context.l10n.tr('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(_preview),
@@ -4207,7 +4290,7 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
               backgroundColor: PixelTheme.accent,
               foregroundColor: PixelTheme.bgDark,
             ),
-            child: const Text('確定'),
+            child: Text(context.l10n.tr('confirm')),
           ),
         ],
       ),
@@ -4360,6 +4443,221 @@ bool _hasAnyPixel(PixelGrid source) {
     }
   }
   return false;
+}
+
+Map<String, Object?> _prepareCropImage(Uint8List bytes) {
+  final img.Image? decoded = img.decodeImage(bytes);
+  if (decoded == null) {
+    return <String, Object?>{};
+  }
+  final bool hasTransparency = _detectTransparency(decoded);
+  final int maxSide = decoded.width > decoded.height
+      ? decoded.width
+      : decoded.height;
+  final img.Image preview;
+  if (maxSide <= 1024) {
+    preview = decoded.clone();
+  } else if (decoded.width >= decoded.height) {
+    preview = img.copyResize(
+      decoded,
+      width: 1024,
+      interpolation: img.Interpolation.linear,
+    );
+  } else {
+    preview = img.copyResize(
+      decoded,
+      height: 1024,
+      interpolation: img.Interpolation.linear,
+    );
+  }
+  final img.Image flattenedPreview = _flattenImageOnWhite(preview);
+  return <String, Object?>{
+    'image': decoded,
+    'preview': preview,
+    'previewBytes': Uint8List.fromList(
+      img.encodePng(flattenedPreview, level: 1),
+    ),
+    'hasTransparency': hasTransparency,
+  };
+}
+
+Uint8List? _processCropImage(Map<String, Object> request) {
+  final img.Image? original = request['image'] as img.Image?;
+  if (original == null) {
+    return null;
+  }
+  img.Image source = _flattenImageOnWhite(original);
+  final int rotation = request['rotation'] as int;
+  source = _rotateImageByQuarterTurns(source, rotation);
+
+  final int outputSize = request['outputSize'] as int;
+  final double previewSize = request['previewSize'] as double;
+  final int basePreviewWidth = request['previewWidth'] as int;
+  final int basePreviewHeight = request['previewHeight'] as int;
+  final bool swapsDimensions = rotation.isOdd;
+  final int sourceWidth = swapsDimensions
+      ? basePreviewHeight
+      : basePreviewWidth;
+  final int sourceHeight = swapsDimensions
+      ? basePreviewWidth
+      : basePreviewHeight;
+  final _PlacedRectPx previewRect = _placedRectForImage(
+    boxSize: previewSize,
+    sourceWidth: sourceWidth,
+    sourceHeight: sourceHeight,
+    viewScale: request['scale'] as double,
+    offsetX: request['offsetX'] as double,
+    offsetY: request['offsetY'] as double,
+  );
+
+  final double ratio = outputSize / previewSize;
+  final int drawW = (previewRect.drawW * ratio).round().clamp(1, 1000000);
+  final int drawH = (previewRect.drawH * ratio).round().clamp(1, 1000000);
+  final img.Image resized = img.copyResize(
+    source,
+    width: drawW,
+    height: drawH,
+    interpolation: img.Interpolation.linear,
+  );
+  final img.Image output = img.Image(width: outputSize, height: outputSize);
+  img.fill(output, color: img.ColorRgba8(255, 255, 255, 255));
+  _compositeImageClipped(
+    destination: output,
+    source: resized,
+    dstX: (previewRect.dx * ratio).round(),
+    dstY: (previewRect.dy * ratio).round(),
+  );
+  return Uint8List.fromList(img.encodePng(output, level: 3));
+}
+
+Future<PixelGrid?> _pixelGridFromImageBytes(Uint8List bytes, int size) async {
+  final List<int>? values = await compute(_pixelateImageBytes, <String, Object>{
+    'bytes': bytes,
+    'size': size,
+  });
+  if (values == null || values.length != size * size) {
+    return null;
+  }
+  return List<List<Color?>>.generate(
+    size,
+    (int y) => List<Color?>.generate(
+      size,
+      (int x) => Color(values[y * size + x]),
+      growable: false,
+    ),
+    growable: false,
+  );
+}
+
+List<int>? _pixelateImageBytes(Map<String, Object> request) {
+  final Uint8List bytes = request['bytes'] as Uint8List;
+  final int size = request['size'] as int;
+  final img.Image? decoded = img.decodeImage(bytes);
+  if (decoded == null) {
+    return null;
+  }
+  final img.Image flattened = _flattenImageOnWhite(decoded);
+  final img.Image resized = img.copyResize(
+    flattened,
+    width: size,
+    height: size,
+    interpolation: img.Interpolation.average,
+  );
+  return List<int>.generate(size * size, (int index) {
+    final img.Pixel pixel = resized.getPixel(index % size, index ~/ size);
+    return 0xFF000000 |
+        (_toByteChannel(pixel.r) << 16) |
+        (_toByteChannel(pixel.g) << 8) |
+        _toByteChannel(pixel.b);
+  }, growable: false);
+}
+
+img.Image _flattenImageOnWhite(img.Image source) {
+  final img.Image flattened = img.Image(
+    width: source.width,
+    height: source.height,
+  );
+  img.fill(flattened, color: img.ColorRgba8(255, 255, 255, 255));
+  img.compositeImage(flattened, source);
+  return flattened;
+}
+
+img.Image _rotateImageByQuarterTurns(img.Image source, int turns) {
+  switch (((turns % 4) + 4) % 4) {
+    case 1:
+      return img.copyRotate(source, angle: 90);
+    case 2:
+      return img.copyRotate(source, angle: 180);
+    case 3:
+      return img.copyRotate(source, angle: -90);
+    default:
+      return source;
+  }
+}
+
+_PlacedRectPx _placedRectForImage({
+  required double boxSize,
+  required int sourceWidth,
+  required int sourceHeight,
+  required double viewScale,
+  required double offsetX,
+  required double offsetY,
+}) {
+  final double fitScale = sourceWidth > sourceHeight
+      ? boxSize / sourceWidth
+      : boxSize / sourceHeight;
+  final double effectiveScale = fitScale * viewScale;
+  final double drawW = (sourceWidth * effectiveScale).clamp(1, 1000000);
+  final double drawH = (sourceHeight * effectiveScale).clamp(1, 1000000);
+  return _PlacedRectPx(
+    drawW: drawW.round(),
+    drawH: drawH.round(),
+    dx: (((boxSize - drawW) / 2) + offsetX).round(),
+    dy: (((boxSize - drawH) / 2) + offsetY).round(),
+  );
+}
+
+void _compositeImageClipped({
+  required img.Image destination,
+  required img.Image source,
+  required int dstX,
+  required int dstY,
+}) {
+  int outX = dstX;
+  int outY = dstY;
+  int srcX = 0;
+  int srcY = 0;
+  int copyW = source.width;
+  int copyH = source.height;
+  if (outX < 0) {
+    srcX = -outX;
+    copyW -= srcX;
+    outX = 0;
+  }
+  if (outY < 0) {
+    srcY = -outY;
+    copyH -= srcY;
+    outY = 0;
+  }
+  if (outX + copyW > destination.width) {
+    copyW = destination.width - outX;
+  }
+  if (outY + copyH > destination.height) {
+    copyH = destination.height - outY;
+  }
+  if (copyW <= 0 || copyH <= 0) {
+    return;
+  }
+  img.compositeImage(
+    destination,
+    source,
+    dstX: outX,
+    dstY: outY,
+    srcX: srcX,
+    srcY: srcY,
+    srcW: copyW,
+    srcH: copyH,
+  );
 }
 
 bool _detectTransparency(img.Image source) {

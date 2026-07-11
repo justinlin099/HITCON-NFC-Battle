@@ -5,6 +5,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private var nativeNfcWriter: NativeNfcWriter?
+  private var nfcLaunchChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
@@ -18,7 +19,77 @@ import UIKit
       )
       nativeNfcWriter = NativeNfcWriter(channel: channel)
     }
+    if let registrar = registrar(forPlugin: "IosNfcLaunchEvidence") {
+      let channel = FlutterMethodChannel(
+        name: "hitcon_nfc_battle/nfc_intent",
+        binaryMessenger: registrar.messenger()
+      )
+      channel.setMethodCallHandler { call, result in
+        guard call.method == "takeNfcLaunch" else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        result(IosNfcLaunchEvidenceStore.shared.take())
+      }
+      nfcLaunchChannel = channel
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  override func application(
+    _ application: UIApplication,
+    continue userActivity: NSUserActivity,
+    restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
+  ) -> Bool {
+    IosNfcLaunchEvidenceStore.shared.capture(userActivity)
+    return super.application(
+      application,
+      continue: userActivity,
+      restorationHandler: restorationHandler
+    )
+  }
+}
+
+final class IosNfcLaunchEvidenceStore {
+  static let shared = IosNfcLaunchEvidenceStore()
+
+  private let lock = NSLock()
+  private var pending: [String: Any]?
+
+  private init() {}
+
+  func capture(_ userActivity: NSUserActivity) {
+    guard userActivity.activityType == NSUserActivityTypeBrowsingWeb else {
+      return
+    }
+    let records = userActivity.ndefMessagePayload.records
+    let isNfcIntent: Bool
+    if let firstRecord = records.first {
+      isNfcIntent = firstRecord.typeNameFormat != .empty
+    } else {
+      isNfcIntent = false
+    }
+    lock.lock()
+    pending = [
+      "uid": "",
+      "isNfcIntent": isNfcIntent,
+      "hasEvidence": true,
+    ]
+    lock.unlock()
+  }
+
+  func take() -> [String: Any] {
+    lock.lock()
+    defer { lock.unlock() }
+    guard let pending else {
+      return [
+        "uid": "",
+        "isNfcIntent": false,
+        "hasEvidence": false,
+      ]
+    }
+    self.pending = nil
+    return pending
   }
 }
 

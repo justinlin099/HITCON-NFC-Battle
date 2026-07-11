@@ -14,10 +14,15 @@ class NtagLockSecret {
 }
 
 class NtagSecurityResult {
-  const NtagSecurityResult({required this.success, required this.message});
+  const NtagSecurityResult({
+    required this.success,
+    required this.messageKey,
+    this.values = const <String, Object?>{},
+  });
 
   final bool success;
-  final String message;
+  final String messageKey;
+  final Map<String, Object?> values;
 }
 
 class NtagSecurityService {
@@ -48,7 +53,7 @@ class NtagSecurityService {
     if (!secret.isValid) {
       return const NtagSecurityResult(
         success: false,
-        message: 'Server 回傳的 NTAG 鎖定密碼格式不正確',
+        messageKey: 'ntagLockSecretInvalid',
       );
     }
 
@@ -57,7 +62,7 @@ class NtagSecurityService {
       if (access == null) {
         return const NtagSecurityResult(
           success: false,
-          message: '無法辨識 NTAG，請確認是 NTAG213/215/216',
+          messageKey: 'ntagUnsupported',
         );
       }
 
@@ -73,9 +78,13 @@ class NtagSecurityService {
       ]);
       await _writePage(tag, access.pages.access, access.accessPage);
       await _writePage(tag, access.pages.config, access.configPage);
-      return const NtagSecurityResult(success: true, message: '已完成 NTAG 鎖定');
+      return const NtagSecurityResult(success: true, messageKey: 'ntagLocked');
     } catch (error) {
-      return NtagSecurityResult(success: false, message: 'NTAG 鎖定失敗：$error');
+      return NtagSecurityResult(
+        success: false,
+        messageKey: 'ntagLockFailed',
+        values: <String, Object?>{'error': error},
+      );
     }
   }
 
@@ -86,7 +95,7 @@ class NtagSecurityService {
     if (!secret.isValid) {
       return const NtagSecurityResult(
         success: false,
-        message: 'Server 回傳的 NTAG 解鎖密碼格式不正確',
+        messageKey: 'ntagUnlockSecretInvalid',
       );
     }
 
@@ -95,7 +104,7 @@ class NtagSecurityService {
       if (access == null) {
         return const NtagSecurityResult(
           success: false,
-          message: '無法辨識 NTAG，請確認是 NTAG213/215/216',
+          messageKey: 'ntagUnsupported',
         );
       }
 
@@ -109,7 +118,7 @@ class NtagSecurityService {
           authResponse[1] != secret.pack[1]) {
         return const NtagSecurityResult(
           success: false,
-          message: '解鎖驗證失敗，Server 回傳的密碼可能不屬於這張 Tag',
+          messageKey: 'ntagAuthenticationFailed',
         );
       }
 
@@ -125,9 +134,16 @@ class NtagSecurityService {
         0xFF,
       ]);
       await _writePage(tag, access.pages.pack, <int>[0x00, 0x00, 0x00, 0x00]);
-      return const NtagSecurityResult(success: true, message: '已解鎖，可以重新寫入 Tag');
+      return const NtagSecurityResult(
+        success: true,
+        messageKey: 'ntagUnlockedForRewrite',
+      );
     } catch (error) {
-      return NtagSecurityResult(success: false, message: 'NTAG 解鎖失敗：$error');
+      return NtagSecurityResult(
+        success: false,
+        messageKey: 'ntagUnlockFailed',
+        values: <String, Object?>{'error': error},
+      );
     }
   }
 

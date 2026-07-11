@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../config/app_config.dart';
+import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import 'pixel_theme.dart';
+import 'user_collection_page.dart';
 
 class ScoreBoardPage extends StatefulWidget {
   const ScoreBoardPage({super.key, this.scheme});
@@ -64,9 +67,11 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
               });
               final int rank = item['rank'] as int? ?? 0;
               return <String, Object>{
+                'userId': item['user_id'] as String? ?? '',
                 'name':
                     item['display_name'] as String? ?? item['user_id'] ?? '',
                 'score': item['score'] as int? ?? 0,
+                'rank': rank,
                 'badge': rank <= 0 ? '-' : '#$rank',
                 'emoji': item['emoji_icon'] as String? ?? '',
                 'color': _rankColor(rank),
@@ -82,36 +87,54 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
     if (_remoteRanks.isNotEmpty) {
       return _remoteRanks;
     }
+    if (!AppConfig.useMockServices) {
+      return <Map<String, Object>>[];
+    }
     final int boost = _refreshCount % 3;
     return <Map<String, Object>>[
       <String, Object>{
+        'userId': 'mock-team-boss',
         'name': 'TEAM BOSS',
         'score': 1280 + boost * 5,
+        'rank': 1,
         'badge': 'S',
+        'emoji': '🏆',
         'color': PixelTheme.accent,
       },
       <String, Object>{
+        'userId': 'mock-pixel-hunter',
         'name': 'PIXEL HUNTER',
         'score': 1160 + boost * 3,
+        'rank': 2,
         'badge': 'A',
+        'emoji': '🎯',
         'color': PixelTheme.accentBlue,
       },
       <String, Object>{
+        'userId': 'mock-nfc-ranger',
         'name': 'NFC RANGER',
         'score': 1040 + boost * 2,
+        'rank': 3,
         'badge': 'B',
+        'emoji': '📡',
         'color': PixelTheme.success,
       },
       <String, Object>{
+        'userId': 'mock-tag-wizard',
         'name': 'TAG WIZARD',
         'score': 920 + boost,
+        'rank': 4,
         'badge': 'C',
+        'emoji': '✨',
         'color': PixelTheme.warning,
       },
       <String, Object>{
+        'userId': 'mock-reader',
         'name': 'REEDER',
         'score': 780,
+        'rank': 5,
         'badge': 'D',
+        'emoji': '📖',
         'color': PixelTheme.textGray,
       },
     ];
@@ -159,14 +182,14 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
                     _BoardHeader(isLoading: _isLoading, frozen: _frozen),
                     const SizedBox(height: 12),
                     _StatRow(
-                      players: _ranks.length,
+                      shownRanks: _ranks.length,
                       topScore: _ranks.isEmpty
                           ? 0
                           : _ranks.first['score'] as int? ?? 0,
                       rankThreshold: _rankThreshold,
                     ),
                     const SizedBox(height: 12),
-                    _RankPanel(ranks: _ranks),
+                    _RankPanel(ranks: _ranks, onOpenUser: _openUser),
                   ],
                 ),
               ),
@@ -176,6 +199,25 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
               pullDistanceListenable: _refreshPullDistance,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _openUser(Map<String, Object> row) {
+    final String userId = row['userId'] as String? ?? '';
+    if (userId.isEmpty) {
+      return;
+    }
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => UserCollectionPage(
+          userId: userId,
+          displayName: row['name'] as String? ?? userId,
+          emojiIcon: row['emoji'] as String? ?? '',
+          rank: row['rank'] as int? ?? 0,
+          score: row['score'] as int? ?? 0,
+          scheme: widget.scheme,
         ),
       ),
     );
@@ -247,7 +289,7 @@ class _BoardHeader extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  'SCORE BOARD',
+                  context.l10n.tr('scoreboardTitle'),
                   style: TextStyle(
                     color: PixelTheme.accent,
                     fontSize: 16,
@@ -258,7 +300,7 @@ class _BoardHeader extends StatelessWidget {
               ),
               if (isLoading)
                 Text(
-                  'SYNC',
+                  context.l10n.tr('sync'),
                   style: TextStyle(
                     color: PixelTheme.accentBlue,
                     fontSize: 10,
@@ -267,7 +309,7 @@ class _BoardHeader extends StatelessWidget {
                 )
               else if (frozen)
                 Text(
-                  'FROZEN',
+                  context.l10n.tr('frozen'),
                   style: TextStyle(
                     color: PixelTheme.warning,
                     fontSize: 10,
@@ -278,7 +320,7 @@ class _BoardHeader extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Pull down to refresh the latest battle ranking.',
+            context.l10n.tr('scoreboardHint'),
             style: TextStyle(color: PixelTheme.textWhite),
           ),
         ],
@@ -289,12 +331,12 @@ class _BoardHeader extends StatelessWidget {
 
 class _StatRow extends StatelessWidget {
   const _StatRow({
-    required this.players,
+    required this.shownRanks,
     required this.topScore,
     required this.rankThreshold,
   });
 
-  final int players;
+  final int shownRanks;
   final int topScore;
   final int rankThreshold;
 
@@ -303,18 +345,21 @@ class _StatRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: _StatCard(label: 'PLAYERS', value: '$players'),
+          child: _StatCard(
+            label: context.l10n.tr('shownRanks'),
+            value: '$shownRanks',
+          ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: _StatCard(
-            label: 'PRIZE',
+            label: context.l10n.tr('prize'),
             value: rankThreshold <= 0 ? '-' : '$rankThreshold',
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: _StatCard(label: 'TOP', value: '$topScore'),
+          child: _StatCard(label: context.l10n.tr('top'), value: '$topScore'),
         ),
       ],
     );
@@ -361,9 +406,10 @@ class _StatCard extends StatelessWidget {
 }
 
 class _RankPanel extends StatelessWidget {
-  const _RankPanel({required this.ranks});
+  const _RankPanel({required this.ranks, required this.onOpenUser});
 
   final List<Map<String, Object>> ranks;
+  final ValueChanged<Map<String, Object>> onOpenUser;
 
   @override
   Widget build(BuildContext context) {
@@ -380,7 +426,7 @@ class _RankPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'RANKING',
+            context.l10n.tr('ranking'),
             style: TextStyle(
               color: PixelTheme.accent,
               fontSize: 14,
@@ -388,76 +434,97 @@ class _RankPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: ranks.length,
-            separatorBuilder: (BuildContext context, int index) =>
-                const SizedBox(height: 8),
-            itemBuilder: (BuildContext context, int index) {
-              final Map<String, Object> row = ranks[index];
-              final Color color = row['color'] as Color;
-              return Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: PixelTheme.bgDark,
-                  border: Border.all(color: color, width: 2),
+          if (ranks.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  context.l10n.tr('noRankings'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: PixelTheme.textGray),
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: color,
-                        border: Border.all(color: PixelTheme.bgDark, width: 2),
-                      ),
-                      child: Text(
-                        '${row['badge']}',
-                        style: TextStyle(
-                          color: PixelTheme.bgDark,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: ranks.length,
+              separatorBuilder: (BuildContext context, int index) =>
+                  const SizedBox(height: 8),
+              itemBuilder: (BuildContext context, int index) {
+                final Map<String, Object> row = ranks[index];
+                final Color color = row['color'] as Color;
+                return GestureDetector(
+                  onTap: () => onOpenUser(row),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: PixelTheme.bgDark,
+                      border: Border.all(color: color, width: 2),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${row['name']}',
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: color,
+                            border: Border.all(
+                              color: PixelTheme.bgDark,
+                              width: 2,
+                            ),
+                          ),
+                          child: Text(
+                            '${row['badge']}',
                             style: TextStyle(
-                              color: PixelTheme.textWhite,
+                              color: PixelTheme.bgDark,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'COMBO SCORE',
-                            style: TextStyle(
-                              color: color,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                            ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${row['name']}',
+                                style: TextStyle(
+                                  color: PixelTheme.textWhite,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: <Widget>[
+                            Text(
+                              '${row['score']}',
+                              style: TextStyle(
+                                color: color,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              color: PixelTheme.textGray,
+                              size: 18,
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    Text(
-                      '${row['score']}',
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );
@@ -535,11 +602,11 @@ class _PixelRefreshBannerState extends State<_PixelRefreshBanner> {
 
   String get _message {
     return switch (_displayStatus) {
-      RefreshIndicatorStatus.drag => '\u4e0b\u62c9\u91cd\u65b0\u6574\u7406',
-      RefreshIndicatorStatus.armed => '\u653e\u958b\u958b\u59cb\u540c\u6b65',
+      RefreshIndicatorStatus.drag => context.l10n.tr('pullToRefresh'),
+      RefreshIndicatorStatus.armed => context.l10n.tr('releaseToSync'),
       RefreshIndicatorStatus.snap ||
-      RefreshIndicatorStatus.refresh => '\u540c\u6b65\u4e2d...',
-      RefreshIndicatorStatus.done => '\u66f4\u65b0\u5b8c\u6210',
+      RefreshIndicatorStatus.refresh => context.l10n.tr('syncing'),
+      RefreshIndicatorStatus.done => context.l10n.tr('updateComplete'),
       _ => '',
     };
   }

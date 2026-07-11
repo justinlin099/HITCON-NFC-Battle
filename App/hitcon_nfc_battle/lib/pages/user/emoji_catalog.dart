@@ -8,7 +8,7 @@ class EmojiOption {
 const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\u2728', 'Magic'),
   EmojiOption('\u2B50', 'Star'),
-  EmojiOption('\uD83C\uDF1F', 'Glowing Star'),
+  EmojiOption('\uD83C\uDF1F', 'Star'),
   EmojiOption('\uD83D\uDCAB', 'Dizzy'),
   EmojiOption('\uD83D\uDD25', 'Fire'),
   EmojiOption('\uD83D\uDCA7', 'Water'),
@@ -29,12 +29,12 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83C\uDF0D', 'Earth'),
   EmojiOption('\uD83C\uDF10', 'Globe'),
   EmojiOption('\uD83D\uDC8E', 'Gem'),
-  EmojiOption('\uD83D\uDC96', 'Sparkle Heart'),
-  EmojiOption('\uD83D\uDC99', 'Blue Heart'),
-  EmojiOption('\uD83D\uDC9A', 'Green Heart'),
-  EmojiOption('\uD83D\uDC9B', 'Yellow Heart'),
-  EmojiOption('\uD83D\uDC9C', 'Purple Heart'),
-  EmojiOption('\uD83D\uDDA4', 'Black Heart'),
+  EmojiOption('\uD83D\uDC96', 'Heart'),
+  EmojiOption('\uD83D\uDC99', 'Heart'),
+  EmojiOption('\uD83D\uDC9A', 'Heart'),
+  EmojiOption('\uD83D\uDC9B', 'Heart'),
+  EmojiOption('\uD83D\uDC9C', 'Heart'),
+  EmojiOption('\uD83D\uDDA4', 'Heart'),
   EmojiOption('\uD83D\uDD11', 'Key'),
   EmojiOption('\uD83D\uDD12', 'Lock'),
   EmojiOption('\uD83D\uDD13', 'Unlock'),
@@ -107,7 +107,7 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83C\uDF54', 'Burger'),
   EmojiOption('\uD83C\uDF5C', 'Ramen'),
   EmojiOption('\uD83C\uDF63', 'Sushi'),
-  EmojiOption('\uD83C\uDF66', 'Ice Cream'),
+  EmojiOption('\uD83C\uDF66', 'Icecream'),
   EmojiOption('\uD83D\uDC31', 'Cat'),
   EmojiOption('\uD83D\uDC36', 'Dog'),
   EmojiOption('\uD83D\uDC3A', 'Wolf'),
@@ -126,29 +126,29 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83D\uDE04', 'Grin'),
   EmojiOption('\uD83D\uDE0E', 'Cool'),
   EmojiOption('\uD83E\uDD13', 'Nerd'),
-  EmojiOption('\uD83E\uDD2F', 'Mind Blown'),
+  EmojiOption('\uD83E\uDD2F', 'Shock'),
   EmojiOption('\uD83E\uDEE1', 'Salute'),
   EmojiOption('\uD83D\uDE08', 'Imp'),
   EmojiOption('\uD83D\uDC7F', 'Oni'),
   EmojiOption('\uD83E\uDD77', 'Ninja'),
-  EmojiOption('\uD83D\uDC4D', 'Thumbs Up'),
+  EmojiOption('\uD83D\uDC4D', 'Thumb'),
   EmojiOption('\u270C\uFE0F', 'Victory'),
   EmojiOption('\uD83E\uDD18', 'Rock'),
-  EmojiOption('\uD83E\uDD1F', 'Love You'),
+  EmojiOption('\uD83E\uDD1F', 'Love'),
   EmojiOption('\uD83D\uDC4F', 'Clap'),
   EmojiOption('\uD83D\uDCAA', 'Power'),
-  EmojiOption('\uD83D\uDE4C', 'Raise Hands'),
+  EmojiOption('\uD83D\uDE4C', 'Hands'),
   EmojiOption('\uD83E\uDD1D', 'Handshake'),
   EmojiOption('\uD83D\uDC41\uFE0F', 'Eye'),
   EmojiOption('\uD83D\uDC40', 'Eyes'),
   EmojiOption('\uD83E\uDDE0', 'Brain'),
-  EmojiOption('\uD83E\uDEC0', 'Anatomical Heart'),
-  EmojiOption('\uD83E\uDDBE', 'Mechanical Arm'),
+  EmojiOption('\uD83E\uDEC0', 'Heart'),
+  EmojiOption('\uD83E\uDDBE', 'Arm'),
   EmojiOption('\uD83D\uDC51', 'Crown'),
   EmojiOption('\uD83C\uDFA9', 'Hat'),
   EmojiOption('\uD83D\uDC8D', 'Ring'),
-  EmojiOption('\uD83D\uDCB0', 'Money Bag'),
-  EmojiOption('\uD83D\uDCB3', 'Card Payment'),
+  EmojiOption('\uD83D\uDCB0', 'Money'),
+  EmojiOption('\uD83D\uDCB3', 'Payment'),
   EmojiOption('\uD83E\uDDF2', 'Magnet'),
   EmojiOption('\uD83E\uDDF0', 'Toolbox'),
   EmojiOption('\uD83D\uDEE0\uFE0F', 'Tools'),
@@ -158,7 +158,7 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83E\uDDF1', 'Brick'),
   EmojiOption('\uD83D\uDCA3', 'Bomb'),
   EmojiOption('\uD83E\uDDA0', 'Microbe'),
-  EmojiOption('\uD83E\uDEAB', 'X Ray'),
+  EmojiOption('\uD83E\uDEAB', 'Xray'),
   EmojiOption('\uD83E\uDE9B', 'Screwdriver'),
   EmojiOption('\uD83D\uDCE0', 'Fax'),
   EmojiOption('\uD83D\uDCDE', 'Phone'),
@@ -168,12 +168,12 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83D\uDCE2', 'Megaphone'),
   EmojiOption('\uD83D\uDCC0', 'DVD'),
   EmojiOption('\uD83D\uDCC1', 'Folder'),
-  EmojiOption('\uD83D\uDCC2', 'Open Folder'),
-  EmojiOption('\uD83D\uDDC3\uFE0F', 'Card Box'),
-  EmojiOption('\uD83D\uDDC4\uFE0F', 'File Cabinet'),
+  EmojiOption('\uD83D\uDCC2', 'Folder'),
+  EmojiOption('\uD83D\uDDC3\uFE0F', 'Box'),
+  EmojiOption('\uD83D\uDDC4\uFE0F', 'Cabinet'),
   EmojiOption('\uD83D\uDCCA', 'Chart'),
   EmojiOption('\uD83D\uDCC8', 'Growth'),
-  EmojiOption('\uD83D\uDCC9', 'Down Chart'),
+  EmojiOption('\uD83D\uDCC9', 'Decline'),
   EmojiOption('\uD83D\uDD22', 'Numbers'),
   EmojiOption('\uD83D\uDD23', 'Symbols'),
   EmojiOption('\u2705', 'Check'),
@@ -188,28 +188,28 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\u23F8\uFE0F', 'Pause'),
   EmojiOption('\u23F9\uFE0F', 'Stop'),
   EmojiOption('\u23FA\uFE0F', 'Record'),
-  EmojiOption('\uD83D\uDD34', 'Red Circle'),
-  EmojiOption('\uD83D\uDFE0', 'Orange Circle'),
-  EmojiOption('\uD83D\uDFE1', 'Yellow Circle'),
-  EmojiOption('\uD83D\uDFE2', 'Green Circle'),
-  EmojiOption('\uD83D\uDD35', 'Blue Circle'),
-  EmojiOption('\uD83D\uDFE3', 'Purple Circle'),
-  EmojiOption('\u2B1B', 'Black Square'),
-  EmojiOption('\u2B1C', 'White Square'),
-  EmojiOption('\uD83D\uDFE5', 'Red Square'),
-  EmojiOption('\uD83D\uDFE6', 'Blue Square'),
-  EmojiOption('\uD83D\uDFE7', 'Orange Square'),
-  EmojiOption('\uD83D\uDFE8', 'Yellow Square'),
-  EmojiOption('\uD83D\uDFE9', 'Green Square'),
-  EmojiOption('\uD83D\uDFEA', 'Purple Square'),
+  EmojiOption('\uD83D\uDD34', 'Circle'),
+  EmojiOption('\uD83D\uDFE0', 'Circle'),
+  EmojiOption('\uD83D\uDFE1', 'Circle'),
+  EmojiOption('\uD83D\uDFE2', 'Circle'),
+  EmojiOption('\uD83D\uDD35', 'Circle'),
+  EmojiOption('\uD83D\uDFE3', 'Circle'),
+  EmojiOption('\u2B1B', 'Square'),
+  EmojiOption('\u2B1C', 'Square'),
+  EmojiOption('\uD83D\uDFE5', 'Square'),
+  EmojiOption('\uD83D\uDFE6', 'Square'),
+  EmojiOption('\uD83D\uDFE7', 'Square'),
+  EmojiOption('\uD83D\uDFE8', 'Square'),
+  EmojiOption('\uD83D\uDFE9', 'Square'),
+  EmojiOption('\uD83D\uDFEA', 'Square'),
   EmojiOption('\uD83D\uDD36', 'Diamond'),
-  EmojiOption('\uD83D\uDD37', 'Blue Diamond'),
-  EmojiOption('\uD83D\uDD38', 'Small Diamond'),
-  EmojiOption('\uD83D\uDD39', 'Small Blue Diamond'),
-  EmojiOption('\uD83C\uDF0C', 'Milky Way'),
+  EmojiOption('\uD83D\uDD37', 'Diamond'),
+  EmojiOption('\uD83D\uDD38', 'Diamond'),
+  EmojiOption('\uD83D\uDD39', 'Diamond'),
+  EmojiOption('\uD83C\uDF0C', 'Galaxy'),
   EmojiOption('\uD83E\uDE90', 'Planet'),
   EmojiOption('\u2604\uFE0F', 'Comet'),
-  EmojiOption('\uD83C\uDF20', 'Shooting Star'),
+  EmojiOption('\uD83C\uDF20', 'Meteor'),
   EmojiOption('\uD83D\uDCAF', 'Hundred'),
   EmojiOption('\uD83D\uDCA5', 'Impact'),
   EmojiOption('\uD83D\uDCA6', 'Splash'),
@@ -217,9 +217,9 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83D\uDD73\uFE0F', 'Hole'),
   EmojiOption('\uD83D\uDD76\uFE0F', 'Sunglasses'),
   EmojiOption('\uD83E\uDDE9', 'Puzzle'),
-  EmojiOption('\uD83E\uDE84', 'Magic Wand'),
+  EmojiOption('\uD83E\uDE84', 'Wand'),
   EmojiOption('\uD83D\uDEA9', 'Flag'),
-  EmojiOption('\uD83C\uDFC1', 'Finish Flag'),
+  EmojiOption('\uD83C\uDFC1', 'Flag'),
   EmojiOption('\uD83C\uDF70', 'Cake'),
   EmojiOption('\uD83C\uDF6A', 'Cookie'),
   EmojiOption('\uD83C\uDF6B', 'Chocolate'),
@@ -243,7 +243,7 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83C\uDF5F', 'Fries'),
   EmojiOption('\uD83C\uDF5D', 'Spaghetti'),
   EmojiOption('\uD83C\uDF5B', 'Curry'),
-  EmojiOption('\uD83C\uDF59', 'Rice Ball'),
+  EmojiOption('\uD83C\uDF59', 'Onigiri'),
   EmojiOption('\uD83C\uDF5A', 'Rice'),
   EmojiOption('\uD83C\uDF61', 'Dango'),
   EmojiOption('\uD83C\uDF62', 'Oden'),
@@ -268,12 +268,12 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83D\uDC1B', 'Bug'),
   EmojiOption('\uD83D\uDC1C', 'Ant'),
   EmojiOption('\uD83D\uDC1E', 'Ladybug'),
-  EmojiOption('\uD83D\uDE42', 'Slight Smile'),
+  EmojiOption('\uD83D\uDE42', 'Smile'),
   EmojiOption('\uD83D\uDE09', 'Wink'),
   EmojiOption('\uD83D\uDE0A', 'Happy'),
-  EmojiOption('\uD83D\uDE0D', 'Heart Eyes'),
+  EmojiOption('\uD83D\uDE0D', 'Love'),
   EmojiOption('\uD83D\uDE18', 'Kiss'),
-  EmojiOption('\uD83D\uDE1C', 'Wink Tongue'),
+  EmojiOption('\uD83D\uDE1C', 'Tongue'),
   EmojiOption('\uD83D\uDE2D', 'Cry'),
   EmojiOption('\uD83D\uDE31', 'Scream'),
   EmojiOption('\uD83D\uDE34', 'Sleep'),
@@ -297,9 +297,9 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83D\uDEBD', 'Toilet'),
   EmojiOption('\uD83D\uDEE2\uFE0F', 'Oil'),
   EmojiOption('\u26FD', 'Fuel'),
-  EmojiOption('\uD83D\uDEA6', 'Traffic Light'),
+  EmojiOption('\uD83D\uDEA6', 'Traffic'),
   EmojiOption('\uD83D\uDEA7', 'Construction'),
-  EmojiOption('\uD83D\uDE8F', 'Bus Stop'),
+  EmojiOption('\uD83D\uDE8F', 'Stop'),
   EmojiOption('\uD83C\uDFAB', 'Ticket'),
   EmojiOption('\uD83C\uDF9F\uFE0F', 'Admission'),
   EmojiOption('\uD83C\uDF81', 'Present'),
@@ -324,7 +324,7 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83E\uDD95', 'Sauropod'),
   EmojiOption('\uD83E\uDD88', 'Shark'),
   EmojiOption('\uD83D\uDC0A', 'Crocodile'),
-  EmojiOption('\uD83D\uDC0B', 'Whale Side'),
+  EmojiOption('\uD83D\uDC0B', 'Whale'),
   EmojiOption('\uD83D\uDC2C', 'Dolphin'),
   EmojiOption('\uD83E\uDD90', 'Shrimp'),
   EmojiOption('\uD83E\uDD91', 'Squid'),
@@ -338,29 +338,29 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83E\uDD87', 'Bat'),
   EmojiOption('\uD83E\uDD83', 'Turkey'),
   EmojiOption('\uD83D\uDC13', 'Rooster'),
-  EmojiOption('\uD83D\uDC23', 'Hatching Chick'),
-  EmojiOption('\uD83D\uDC25', 'Front Chick'),
+  EmojiOption('\uD83D\uDC23', 'Chick'),
+  EmojiOption('\uD83D\uDC25', 'Chick'),
   EmojiOption('\uD83E\uDD9D', 'Raccoon'),
   EmojiOption('\uD83E\uDD94', 'Hedgehog'),
   EmojiOption('\uD83D\uDC3F\uFE0F', 'Chipmunk'),
-  EmojiOption('\uD83D\uDC07', 'Rabbit Body'),
-  EmojiOption('\uD83D\uDC08', 'Cat Body'),
-  EmojiOption('\uD83D\uDC15', 'Dog Body'),
-  EmojiOption('\uD83D\uDC16', 'Pig Body'),
-  EmojiOption('\uD83D\uDC04', 'Cow Body'),
+  EmojiOption('\uD83D\uDC07', 'Rabbit'),
+  EmojiOption('\uD83D\uDC08', 'Cat'),
+  EmojiOption('\uD83D\uDC15', 'Dog'),
+  EmojiOption('\uD83D\uDC16', 'Pig'),
+  EmojiOption('\uD83D\uDC04', 'Cow'),
   EmojiOption('\uD83D\uDC02', 'Ox'),
   EmojiOption('\uD83D\uDC03', 'Buffalo'),
   EmojiOption('\uD83D\uDC17', 'Boar'),
   EmojiOption('\uD83D\uDC2B', 'Camel'),
-  EmojiOption('\uD83D\uDC2A', 'Two Hump Camel'),
-  EmojiOption('\uD83D\uDC0E', 'Horse Body'),
+  EmojiOption('\uD83D\uDC2A', 'Camel'),
+  EmojiOption('\uD83D\uDC0E', 'Horse'),
   EmojiOption('\uD83D\uDC10', 'Goat'),
   EmojiOption('\uD83D\uDC0F', 'Ram'),
-  EmojiOption('\uD83D\uDC12', 'Monkey Body'),
+  EmojiOption('\uD83D\uDC12', 'Monkey'),
   EmojiOption('\uD83D\uDC06', 'Leopard'),
-  EmojiOption('\uD83D\uDC05', 'Tiger Body'),
+  EmojiOption('\uD83D\uDC05', 'Tiger'),
   EmojiOption('\uD83D\uDC29', 'Poodle'),
-  EmojiOption('\uD83D\uDC3E', 'Paw Prints'),
+  EmojiOption('\uD83D\uDC3E', 'Paws'),
 ];
 String emojiNameFor(String emoji) {
   for (final EmojiOption option in emojiOptionsCatalog) {
@@ -380,6 +380,52 @@ String emojiLabelForValue(String value) {
     return 'Emoji';
   }
   return labels.join('  ');
+}
+
+String emojiNameLabelForValue(String value) {
+  final List<String> labels = selectedEmojiValuesFromCatalog(
+    value,
+  ).map(emojiNameFor).toList(growable: false);
+  if (labels.isEmpty) {
+    return 'Emoji';
+  }
+  return labels.join(' / ');
+}
+
+String normalizeEmojiAttributeLabel({
+  required String emojiValue,
+  required String rawLabel,
+}) {
+  String label = rawLabel.trim();
+  for (final String emoji in selectedEmojiValuesFromCatalog(emojiValue)) {
+    label = label.replaceAll(RegExp('${RegExp.escape(emoji)}\\s*'), ' / ');
+  }
+  label = label
+      .replaceAll(RegExp(r'\s*/\s*'), ' / ')
+      .replaceAll(RegExp(r'^( / )+'), '')
+      .replaceAll(RegExp(r'( / )+$'), '')
+      .replaceAll(RegExp(r'\s{2,}'), ' ')
+      .trim();
+  if (label.isEmpty) {
+    return emojiNameLabelForValue(emojiValue);
+  }
+
+  final List<String> oldLabels = label
+      .split('/')
+      .map((String value) => value.trim())
+      .where((String value) => value.isNotEmpty)
+      .toList(growable: false);
+  final List<String> currentLabels = selectedEmojiValuesFromCatalog(
+    emojiValue,
+  ).map(emojiNameFor).toList(growable: false);
+  final bool containsLegacyMultiwordLabel = oldLabels.any(
+    (String value) => value.contains(RegExp(r'\s')),
+  );
+  if (containsLegacyMultiwordLabel &&
+      oldLabels.length == currentLabels.length) {
+    return currentLabels.join(' / ');
+  }
+  return label;
 }
 
 List<String> selectedEmojiValuesFromCatalog(String value) {

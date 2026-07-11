@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../l10n/app_localizations.dart';
 import 'pixel_theme.dart';
 
 Future<void> confirmAndOpenLink(BuildContext context, String link) async {
@@ -49,7 +50,7 @@ class _PixelLinkConfirmDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '要前往這個網站嗎？',
+              context.l10n.tr('visitWebsiteTitle'),
               style: TextStyle(
                 color: PixelTheme.accent,
                 fontSize: 16,
@@ -76,7 +77,7 @@ class _PixelLinkConfirmDialog extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              '你即將離開 HITCON NFC Battle App，請確認這是你信任的連結。',
+              context.l10n.tr('visitWebsiteBody'),
               style: TextStyle(
                 color: PixelTheme.textGray,
                 fontSize: 11,
@@ -89,7 +90,7 @@ class _PixelLinkConfirmDialog extends StatelessWidget {
               children: [
                 Expanded(
                   child: _PixelDialogButton(
-                    label: '取消',
+                    label: context.l10n.tr('cancel'),
                     color: PixelTheme.textGray,
                     onTap: () => Navigator.of(context).pop(false),
                   ),
@@ -97,7 +98,7 @@ class _PixelLinkConfirmDialog extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: _PixelDialogButton(
-                    label: '前往',
+                    label: context.l10n.tr('open'),
                     color: PixelTheme.accent,
                     onTap: () => Navigator.of(context).pop(true),
                   ),

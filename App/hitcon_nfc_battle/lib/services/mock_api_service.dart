@@ -48,6 +48,8 @@ class MockApiService {
   static final List<Map<String, dynamic>> _mockTags = _buildMockTags();
   static final Map<String, Map<String, dynamic>> _mockPrizeClaims =
       <String, Map<String, dynamic>>{};
+  static final List<Map<String, dynamic>> _mockPhishingRecords =
+      <Map<String, dynamic>>[];
 
   static List<Map<String, dynamic>> _buildMockTags() {
     const List<Map<String, String>> baseCards = <Map<String, String>>[
@@ -229,7 +231,8 @@ class MockApiService {
     final existingTagIndex = _mockTags.indexWhere((tag) => tag['uid'] == uid);
 
     if (existingTagIndex != -1 &&
-        _mockTags[existingTagIndex]['owner'] != null) {
+        _mockTags[existingTagIndex]['owner'] != null &&
+        _mockTags[existingTagIndex]['owner'] != userId) {
       return {
         'status': 'error',
         'code': 'TAG_ALREADY_IN_USE',
@@ -406,6 +409,29 @@ class MockApiService {
     };
   }
 
+  static Future<Map<String, dynamic>> getStampMission(String userId) async {
+    _log('Mock: GET /missions/stamp for userId: $userId');
+    await Future<void>.delayed(
+      Duration(milliseconds: AppConfig.mockNetworkDelay),
+    );
+
+    final int collected = _mockTags
+        .where((Map<String, dynamic> tag) => tag['owner'] == userId)
+        .length;
+    final int sponsorCount = (collected + 1) ~/ 2;
+    final int communityCount = collected ~/ 2;
+    const int threshold = 10;
+    return <String, dynamic>{
+      'status': 'success',
+      'data': <String, dynamic>{
+        'stamp_threshold': threshold,
+        'sponsor_count': sponsorCount,
+        'community_count': communityCount,
+        'eligible_for_stamp_prize': sponsorCount + communityCount >= threshold,
+      },
+    };
+  }
+
   /// 其他用戶的集卡記錄（查看他人集卡）
   static Future<Map<String, dynamic>> getUserCollection(
     String targetUserId,
@@ -438,6 +464,25 @@ class MockApiService {
         'total_collected': userRecords.length,
         'collection': userRecords,
       },
+    };
+  }
+
+  static Future<Map<String, dynamic>> recordPhishing({
+    required String victim,
+    required String attacker,
+  }) async {
+    _log('Mock: POST /collection/phishing victim=$victim attacker=$attacker');
+    await Future<void>.delayed(
+      Duration(milliseconds: AppConfig.mockNetworkDelay),
+    );
+    _mockPhishingRecords.add(<String, dynamic>{
+      'victim': victim,
+      'attacker': attacker,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+    return <String, dynamic>{
+      'status': 'success',
+      'message': 'Phishing event recorded.',
     };
   }
 
@@ -489,6 +534,7 @@ class MockApiService {
     _log('🔄 Mock: Resetting all mock data to initial state');
     _mockTags.clear();
     _mockPrizeClaims.clear();
+    _mockPhishingRecords.clear();
     _mockTags.addAll([
       {
         'uid': '04:1A:2B:3C:4D:5E:6F',

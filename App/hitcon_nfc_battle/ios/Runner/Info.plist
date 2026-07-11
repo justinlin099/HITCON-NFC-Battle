@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Hitcon Nfc Battle</string>
+	<string>HITCON NFC Battle</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -26,8 +26,14 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>googlegmail</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>需要使用相機掃描登入 QR Code。</string>
 	<key>NFCReaderUsageDescription</key>
-	<string>此 App 需要使用 NFC 來讀取與寫入 NTag 資料。</string>
+	<string>需要使用 NFC 讀取與寫入 NTag。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

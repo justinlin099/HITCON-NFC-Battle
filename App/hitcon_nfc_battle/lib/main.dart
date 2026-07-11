@@ -4,17 +4,72 @@ import 'dart:typed_data';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:nfc_manager/nfc_manager.dart';
+import 'l10n/app_localizations.dart';
 import 'pages/admin/admin_home_page.dart';
 import 'pages/user/card_collection_page.dart';
-import 'pages/user/card_detail_page.dart';
 import 'pages/user/setup_page.dart';
 import 'pages/debug/test_login_page.dart';
 import 'services/auth_service.dart';
-import 'services/local_collection_store.dart';
+import 'services/nfc_deep_link_service.dart';
+import 'services/ntag_security_service.dart';
+import 'services/setup_service.dart';
 
 void main() {
   runApp(const MyApp());
+}
+
+class _SessionGate extends StatefulWidget {
+  const _SessionGate();
+
+  @override
+  State<_SessionGate> createState() => _SessionGateState();
+}
+
+class _SessionGateState extends State<_SessionGate> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_restoreAndRoute());
+    });
+  }
+
+  Future<void> _restoreAndRoute() async {
+    final AuthService auth = AuthService();
+    final bool restored = await auth.restoreSession();
+    if (!mounted) {
+      return;
+    }
+
+    if (!restored) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => const TestLoginPage()),
+      );
+      return;
+    }
+
+    final String? userId = auth.currentUserId;
+    final bool setupComplete =
+        userId != null && await SetupService().isComplete(userId);
+    if (!mounted) {
+      return;
+    }
+
+    final String routeName = auth.isRegularUser
+        ? (setupComplete ? '/collection' : '/setup')
+        : '/admin';
+    Navigator.of(context).pushReplacementNamed(routeName);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFF101820),
+      body: Center(child: CircularProgressIndicator(color: Color(0xFF7CFF6B))),
+    );
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -31,10 +86,9 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    _autoScanner = _AutoNtagScanner(navigatorKey: _navigatorKey);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _autoScanner.start();
-    });
+    unawaited(NfcDeepLinkService.instance.initialize());
+    _autoScanner = _AutoNtagScanner(deepLinks: NfcDeepLinkService.instance);
+    NfcDeepLinkService.instance.registerInAppScanStarter(_autoScanner.start);
   }
 
   @override
@@ -47,11 +101,31 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _navigatorKey,
-      title: 'HITCON NFC Battle',
+      onGenerateTitle: (BuildContext context) => context.l10n.tr('appTitle'),
+      builder: (BuildContext context, Widget? child) {
+        final MediaQueryData mediaQuery = MediaQuery.of(context);
+        final double systemTextScale = mediaQuery.textScaler.scale(1);
+        return MediaQuery(
+          data: mediaQuery.copyWith(
+            textScaler: TextScaler.linear(
+              (systemTextScale * 1.1).clamp(0.8, 2.0),
+            ),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
       ),
-      home: const TestLoginPage(),
+      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
+      localeListResolutionCallback: _resolveLocale,
+      home: const _SessionGate(),
       routes: {
         '/home': (context) => const NTagReaderPage(),
         '/admin': (context) => const AdminHomePage(),
@@ -60,12 +134,36 @@ class _MyAppState extends State<MyApp> {
       },
     );
   }
+
+  Locale _resolveLocale(
+    List<Locale>? preferredLocales,
+    Iterable<Locale> supportedLocales,
+  ) {
+    for (final Locale locale in preferredLocales ?? const <Locale>[]) {
+      final String country = locale.countryCode?.toUpperCase() ?? '';
+      final String script = locale.scriptCode?.toLowerCase() ?? '';
+      final bool traditionalChinese =
+          locale.languageCode == 'zh' &&
+          (script == 'hant' ||
+              country == 'TW' ||
+              country == 'HK' ||
+              country == 'MO');
+      if (traditionalChinese) {
+        return const Locale.fromSubtags(languageCode: 'zh', countryCode: 'TW');
+      }
+      if (locale.languageCode == 'en') {
+        return const Locale('en');
+      }
+    }
+    return const Locale('en');
+  }
 }
 
 class _AutoNtagScanner {
-  _AutoNtagScanner({required this.navigatorKey});
+  _AutoNtagScanner({required this.deepLinks});
 
-  final GlobalKey<NavigatorState> navigatorKey;
+  final NfcDeepLinkService deepLinks;
+  static const NtagSecurityService _ntagSecurity = NtagSecurityService();
   bool _isScanning = false;
   bool _isHandling = false;
   String _lastTagId = '';
@@ -88,7 +186,7 @@ class _AutoNtagScanner {
           return;
         }
 
-        final String uid = _readTagId(tag);
+        final String uid = _ntagSecurity.readTagId(tag);
         final DateTime now = DateTime.now();
         final bool isDuplicate =
             uid.isNotEmpty &&
@@ -108,124 +206,23 @@ class _AutoNtagScanner {
         final String targetUserId = _readTargetUserId(tag);
         await _handleScan(uid, targetUserId);
         _isHandling = false;
-        await Future<void>.delayed(const Duration(milliseconds: 350));
-        await start();
       },
       onError: (_) async {
         await NfcManager.instance.stopSession();
         _isScanning = false;
-        await Future<void>.delayed(const Duration(milliseconds: 800));
-        await start();
+        _isHandling = false;
       },
     );
   }
 
   Future<void> _handleScan(String uid, String targetUserId) async {
-    if (uid.isEmpty) {
-      return;
-    }
-
-    final AuthService auth = AuthService();
-    if (!auth.isLoggedIn) {
-      return;
-    }
-    if (!auth.isRegularUser) {
-      return;
-    }
-
-    final String? currentUserId = auth.currentUserId;
-    final LocalCollectionStore localStore = LocalCollectionStore();
-    final Map<String, dynamic>? scanResult = await auth.scanCollection(
-      targetUserId: targetUserId,
-      scannedNfcUid: uid,
-    );
-    if (scanResult != null && currentUserId != null) {
-      await localStore.saveScanResult(
-        userId: currentUserId,
-        scannedUid: uid,
-        scanResult: scanResult,
-      );
-    }
-
-    final Map<String, dynamic>? collection = await auth
-        .fetchCollectionRecords();
-    if (collection != null && currentUserId != null) {
-      await localStore.saveCollectionIndex(
-        userId: currentUserId,
-        collection: collection,
-      );
-    }
-
-    final List<Map<String, dynamic>> cards = currentUserId == null
-        ? <Map<String, dynamic>>[]
-        : await localStore.loadCards(currentUserId);
-    final int index = cards.indexWhere((card) => card['physical_uid'] == uid);
-    if (index == -1) {
-      return;
-    }
-
-    final Map<String, dynamic> card = cards[index];
-    final String heroTag = 'scan-$uid';
-    final Color cardColor = _colorForIndex(index);
-    final String imageAsset = _imageAssetForIndex(index);
-    final String title = _titleForCard(card);
-    final String attributeEmoji = _attributeEmojiForCard(card);
-    final String attributeLabel = _attributeLabelForCard(card);
-    final String rawLink = card['link'] as String? ?? '';
-    final String link = rawLink.trim().isEmpty ? 'https://hitcon.org' : rawLink;
-    final String collectedAt = card['collected_at'] as String? ?? '';
-
-    final NavigatorState? navigator = navigatorKey.currentState;
-    if (navigator == null) {
-      return;
-    }
-
-    await navigator.push(
-      PageRouteBuilder<void>(
-        opaque: false,
-        barrierColor: Colors.transparent,
-        transitionDuration: const Duration(milliseconds: 450),
-        reverseTransitionDuration: const Duration(milliseconds: 300),
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return CardDetailPage(
-            heroTag: heroTag,
-            title: title,
-            attributeEmoji: attributeEmoji,
-            attributeLabel: attributeLabel,
-            link: link,
-            uid: card['physical_uid'] as String? ?? uid,
-            collectedAt: collectedAt,
-            cardColor: cardColor,
-            imageAsset: imageAsset,
-          );
-        },
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          final Animation<double> curved = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-          return FadeTransition(opacity: curved, child: child);
-        },
+    deepLinks.publish(
+      NfcScanRequest(
+        userId: targetUserId,
+        physicalUid: uid,
+        launchEvidence: NfcLaunchEvidence.physicalTag,
       ),
     );
-  }
-
-  String _readTagId(NfcTag tag) {
-    final Map<String, dynamic> data = tag.data;
-    final dynamic idBytes =
-        data['nfca']?['identifier'] ??
-        data['mifareclassic']?['identifier'] ??
-        data['mifareultralight']?['identifier'];
-
-    if (idBytes is! List) {
-      return '';
-    }
-    final Iterable<int> values = idBytes.whereType<int>();
-    return values
-        .map((int b) => b.toRadixString(16).padLeft(2, '0'))
-        .join(':')
-        .toUpperCase();
   }
 
   String _readTargetUserId(NfcTag tag) {
@@ -281,54 +278,6 @@ class _AutoNtagScanner {
     return '$prefix$uriBody';
   }
 
-  String _titleForCard(Map<String, dynamic> card) {
-    return card['card_title'] as String? ??
-        card['display_name'] as String? ??
-        card['sponsor_stand_name'] as String? ??
-        card['community_stand_name'] as String? ??
-        card['tag_name'] as String? ??
-        'Unknown';
-  }
-
-  String _attributeEmojiForCard(Map<String, dynamic> card) {
-    return card['attribute_emoji'] as String? ??
-        card['emoji_icon'] as String? ??
-        '★';
-  }
-
-  String _attributeLabelForCard(Map<String, dynamic> card) {
-    return card['attribute_label'] as String? ??
-        card['user_type'] as String? ??
-        card['scan_type'] as String? ??
-        'UNKNOWN';
-  }
-
-  Color _colorForIndex(int seed) {
-    const List<Color> colors = <Color>[
-      Color(0xFF00AAFF),
-      Color(0xFFFFAA00),
-      Color(0xFFFF0099),
-      Color(0xFF00FF00),
-      Color(0xFFFFFF00),
-      Color(0xFF9900FF),
-    ];
-    return colors[seed % colors.length];
-  }
-
-  String _imageAssetForIndex(int seed) {
-    const List<String> assets = <String>[
-      'assets/images/mock_card_circuit.png',
-      'assets/images/mock_card_chip.png',
-      'assets/images/mock_card_portal.png',
-      'assets/images/mock_card_lock.png',
-      'assets/images/mock_card_satellite.png',
-      'assets/images/mock_card_skull.png',
-      'assets/images/mock_card_terminal.png',
-      'assets/images/mock_card_badge.png',
-    ];
-    return assets[seed % assets.length];
-  }
-
   void dispose() {
     NfcManager.instance.stopSession();
   }
@@ -351,7 +300,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
   StreamSubscription<Uri>? _linkSubscription;
 
-  String _status = '初始化中...';
+  String _status = '';
   String _tagId = '-';
   List<String> _records = <String>[];
   String _lastIncomingUri = '-';
@@ -367,6 +316,14 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startAutoRead();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_status.isEmpty) {
+      _status = context.l10n.tr('initializing');
+    }
   }
 
   Future<void> _initAppLinks() async {
@@ -385,7 +342,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
       },
       onError: (_) {
         setState(() {
-          _status = '收到連結事件，但解析失敗';
+          _status = context.l10n.tr('linkParseFailed');
         });
       },
     );
@@ -404,14 +361,14 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
     setState(() {
       _lastIncomingUri = uri.toString();
-      _status = '已收到外部掃描連結';
+      _status = context.l10n.tr('externalScanReceived');
     });
 
     if (userId.isNotEmpty && secretKey.isNotEmpty) {
       _userIdController.text = userId;
       _secretKeyController.text = secretKey;
       setState(() {
-        _status = '已由外部連結帶入 user_id / secret_key';
+        _status = context.l10n.tr('externalCredentialsLoaded');
       });
     }
   }
@@ -508,10 +465,11 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   }
 
   Future<void> _startAutoRead() async {
+    final AppLocalizations l10n = context.l10n;
     final bool isAvailable = await NfcManager.instance.isAvailable();
     if (!isAvailable) {
       setState(() {
-        _status = 'NFC is not available on this device.';
+        _status = l10n.tr('nfcUnavailable');
         _isReading = false;
       });
       return;
@@ -523,7 +481,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
     setState(() {
       _isReading = true;
-      _status = '自動感應中... 請將 NTag 貼近手機';
+      _status = l10n.tr('autoReadingNtag');
       _tagId = '-';
       _records = <String>[];
     });
@@ -579,31 +537,32 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
           if (uriMatches && secretMatches) {
             writeMessage = targetSecret.isEmpty
-                ? '（Tag 已是目標 URI，略過寫入）'
-                : '（Tag 已是目標 URI + secret，略過寫入）';
+                ? l10n.tr('tagAlreadyTarget')
+                : l10n.tr('tagAlreadyTargetSecret');
           } else {
             try {
               final bool writeSuccess = await _writeUriToTag(tag, targetUri);
               writeMessage = writeSuccess
-                  ? ' URI written.'
-                  : ' Tag is not writable.';
+                  ? l10n.tr('uriWritten')
+                  : l10n.tr('tagNotWritableShort');
             } catch (e) {
-              writeMessage = ' Write failed: $e';
+              writeMessage = l10n.tr('writeFailed', <String, Object?>{
+                'error': e,
+              });
             }
           }
         }
 
         setState(() {
-          _tagId = parsedTagId.isEmpty ? '(讀不到 Tag ID)' : parsedTagId;
+          _tagId = parsedTagId.isEmpty ? l10n.tr('tagIdMissing') : parsedTagId;
           _records = parsedRecords;
-          _status = parsedRecords.isEmpty
-              ? '已讀取，等待下一張 NTag（無可解析 NDEF）$writeMessage'
-              : '已讀取，等待下一張 NTag$writeMessage';
+          _status =
+              '${l10n.tr(parsedRecords.isEmpty ? 'tagReadNoNdef' : 'tagReadWaiting')} $writeMessage';
         });
       },
       onError: (dynamic error) async {
         setState(() {
-          _status = '讀取失敗: $error';
+          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
           _isReading = false;
         });
         await NfcManager.instance.stopSession();
@@ -693,18 +652,21 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('NTag Reader'),
+        title: Text(context.l10n.tr('ntagReader')),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('狀態：$_status', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              '${context.l10n.tr('status')}: $_status',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 12),
             Text('Tag ID: $_tagId'),
             const SizedBox(height: 8),
-            Text('外部掃描 URI: $_lastIncomingUri'),
+            Text('${context.l10n.tr('externalScanUri')}: $_lastIncomingUri'),
             const SizedBox(height: 16),
             TextField(
               controller: _userIdController,
@@ -725,7 +687,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
             ),
             const SizedBox(height: 8),
             SwitchListTile(
-              title: const Text('自動寫入 URI 到 Tag'),
+              title: Text(context.l10n.tr('autoWriteUri')),
               value: _autoWriteEnabled,
               contentPadding: EdgeInsets.zero,
               onChanged: (bool value) {
@@ -735,15 +697,18 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
               },
             ),
             Text(
-              '目標 URI: ${_buildTargetUri()}',
+              '${context.l10n.tr('targetUri')}: ${_buildTargetUri()}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 20),
-            Text('NDEF 內容', style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              context.l10n.tr('ndefContents'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 8),
             Expanded(
               child: _records.isEmpty
-                  ? const Center(child: Text('尚未讀取到 NDEF 記錄'))
+                  ? Center(child: Text(context.l10n.tr('noNdefRecords')))
                   : ListView.separated(
                       itemCount: _records.length,
                       separatorBuilder: (_, index) => const Divider(),

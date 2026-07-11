@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/ntag_security_service.dart';
 import 'pixel_theme.dart';
@@ -14,6 +15,12 @@ Future<String?> openNtagPairingScanPage(BuildContext context) {
   );
 }
 
+Future<bool?> openNtagUnlockPage(BuildContext context) {
+  return Navigator.of(
+    context,
+  ).push<bool>(MaterialPageRoute<bool>(builder: (_) => const NtagUnlockPage()));
+}
+
 class NtagPairingPage extends StatefulWidget {
   const NtagPairingPage({super.key});
 
@@ -22,10 +29,11 @@ class NtagPairingPage extends StatefulWidget {
 }
 
 class _NtagPairingPageState extends State<NtagPairingPage> {
-  static const String _targetUri = 'https://game.hitcon2026.online/b';
+  static const String _targetHost = 'game.hitcon2026.online';
+  static const String _targetPath = '/b';
   static const NtagSecurityService _security = NtagSecurityService();
 
-  String _status = '準備掃描 NTAG...';
+  String _status = '';
   String _tagId = '-';
   String _userId = '';
   bool _isReading = false;
@@ -44,24 +52,25 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
       return;
     }
 
+    final AppLocalizations l10n = context.l10n;
     final bool isAvailable = await NfcManager.instance.isAvailable();
     if (!isAvailable) {
       setState(() {
-        _status = 'NFC is unavailable or disabled';
+        _status = l10n.tr('nfcUnavailable');
       });
       return;
     }
 
     if (_userId.trim().isEmpty) {
       setState(() {
-        _status = '請先登入取得 user_id';
+        _status = l10n.tr('loginRequiredUserId');
       });
       return;
     }
 
     setState(() {
       _isReading = true;
-      _status = '正在等待 NFC Tag...';
+      _status = l10n.tr('waitingForTag');
     });
 
     await NfcManager.instance.startSession(
@@ -76,14 +85,14 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
             : null;
         final NtagSecurityResult lockResult = ndefWritten
             ? lockSecret == null
-                  ? const NtagSecurityResult(
+                  ? NtagSecurityResult(
                       success: false,
-                      message: '無法從 Server 取得 NTAG 鎖定密碼',
+                      messageKey: 'ntagLockSecretFailed',
                     )
                   : await _security.protectForRewrite(tag, lockSecret)
-            : const NtagSecurityResult(
+            : NtagSecurityResult(
                 success: false,
-                message: '寫入失敗：此 Tag 不支援 NDEF 寫入',
+                messageKey: 'ndefWriteUnsupported',
               );
 
         bool pairSuccess = false;
@@ -96,13 +105,15 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
         }
 
         setState(() {
-          _tagId = parsedTagId.isEmpty ? '(讀不到 Tag ID)' : parsedTagId;
+          _tagId = parsedTagId.isEmpty ? l10n.tr('tagIdMissing') : parsedTagId;
           if (!ndefWritten || !lockResult.success) {
-            _status = lockResult.message;
+            _status = l10n.tr(lockResult.messageKey, lockResult.values);
           } else if (!pairSuccess) {
-            _status = '${lockResult.message}\nAPI 配對失敗，請重試';
+            _status =
+                '${l10n.tr(lockResult.messageKey, lockResult.values)}\n'
+                '${l10n.tr('apiPairFailed')}';
           } else {
-            _status = '已寫入 user_id 並完成 NTAG 密碼鎖定';
+            _status = l10n.tr('ntagWriteLocked');
           }
         });
 
@@ -121,7 +132,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
           return;
         }
         setState(() {
-          _status = 'NFC 讀取失敗：$error';
+          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
           _isReading = false;
         });
         await NfcManager.instance.stopSession();
@@ -135,12 +146,14 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
       return false;
     }
 
-    await ndef.write(
-      NdefMessage(<NdefRecord>[
-        _buildUriRecord(_targetUri),
-        _buildTextRecord('user_id', userId),
-      ]),
-    );
+    final String targetUri = Uri.https(
+      _targetHost,
+      _targetPath,
+      <String, String>{'u': userId},
+    ).toString();
+    final List<NdefRecord> records = <NdefRecord>[_buildUriRecord(targetUri)];
+
+    await ndef.write(NdefMessage(records));
     return true;
   }
 
@@ -172,17 +185,6 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
     );
   }
 
-  NdefRecord _buildTextRecord(String identifier, String text) {
-    final List<int> encodedText = utf8.encode(text);
-    final List<int> languageCode = utf8.encode('en');
-    return NdefRecord(
-      typeNameFormat: NdefTypeNameFormat.nfcWellknown,
-      type: Uint8List.fromList(<int>[0x54]),
-      identifier: Uint8List.fromList(utf8.encode(identifier)),
-      payload: Uint8List.fromList(<int>[0x65, ...languageCode, ...encodedText]),
-    );
-  }
-
   @override
   void dispose() {
     NfcManager.instance.stopSession();
@@ -203,7 +205,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: const Text('NTAG Badge 配對'),
+          title: Text(context.l10n.tr('ntagPairingPageTitle')),
         ),
         body: Center(
           child: Container(
@@ -226,7 +228,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
                 Icon(Icons.nfc_rounded, size: 48, color: PixelTheme.accent),
                 const SizedBox(height: 12),
                 Text(
-                  '請把自己的 Badge 靠近手機',
+                  context.l10n.tr('holdBadgeNearPhone'),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: PixelTheme.textWhite,
@@ -253,6 +255,210 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
                 Text(
                   'user_id: ${_userId.isEmpty ? '-' : _userId}',
                   style: TextStyle(color: PixelTheme.textWhite, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class NtagUnlockPage extends StatefulWidget {
+  const NtagUnlockPage({super.key});
+
+  @override
+  State<NtagUnlockPage> createState() => _NtagUnlockPageState();
+}
+
+class _NtagUnlockPageState extends State<NtagUnlockPage> {
+  static const NtagSecurityService _security = NtagSecurityService();
+
+  String _status = '';
+  String _tagId = '-';
+  bool _isReading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startSession();
+    });
+  }
+
+  Future<void> _startSession() async {
+    if (_isReading) {
+      return;
+    }
+
+    final AppLocalizations l10n = context.l10n;
+    final bool isAvailable = await NfcManager.instance.isAvailable();
+    if (!isAvailable) {
+      setState(() {
+        _status = l10n.tr('nfcUnavailable');
+      });
+      return;
+    }
+
+    setState(() {
+      _isReading = true;
+      _status = l10n.tr('holdOwnNtagNearPhone');
+      _tagId = '-';
+    });
+
+    await NfcManager.instance.stopSession();
+    await NfcManager.instance.startSession(
+      onDiscovered: (NfcTag tag) async {
+        final String parsedTagId = _security.readTagId(tag);
+        final NtagLockSecret? lockSecret = await AuthService()
+            .requestNtagLockSecret(uid: parsedTagId, purpose: 'unlock');
+        final NtagSecurityResult result = lockSecret == null
+            ? NtagSecurityResult(
+                success: false,
+                messageKey: 'unlockSecretFailed',
+              )
+            : await _security.unlockForRewrite(tag, lockSecret);
+
+        await NfcManager.instance.stopSession();
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _isReading = false;
+          _tagId = parsedTagId.isEmpty ? l10n.tr('tagIdMissing') : parsedTagId;
+          _status = l10n.tr(result.messageKey, result.values);
+        });
+
+        if (result.success) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          if (mounted) {
+            Navigator.of(context).pop(true);
+          }
+        }
+      },
+      onError: (dynamic error) async {
+        await NfcManager.instance.stopSession();
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
+          _isReading = false;
+        });
+      },
+    );
+  }
+
+  Future<void> _stopSession() async {
+    await NfcManager.instance.stopSession();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isReading = false;
+      _status = context.l10n.tr('scanStopped');
+    });
+  }
+
+  @override
+  void dispose() {
+    NfcManager.instance.stopSession();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: Theme.of(context).copyWith(
+        textTheme: Theme.of(context).textTheme.apply(fontFamily: 'Unifont'),
+        primaryTextTheme: Theme.of(
+          context,
+        ).primaryTextTheme.apply(fontFamily: 'Unifont'),
+      ),
+      child: Scaffold(
+        backgroundColor: PixelTheme.bgDark,
+        appBar: AppBar(
+          backgroundColor: PixelTheme.bgMid,
+          foregroundColor: PixelTheme.accent,
+          title: Text(context.l10n.tr('unlockNtag')),
+        ),
+        body: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: PixelTheme.bgMid,
+              border: Border.all(color: PixelTheme.textWhite, width: 2),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black,
+                  blurRadius: 0,
+                  offset: Offset(4, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.lock_open_rounded,
+                  size: 48,
+                  color: PixelTheme.accent,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  context.l10n.tr('unlockOwnNtag'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: PixelTheme.textWhite,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _status,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: PixelTheme.textGray, fontSize: 12),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'UID: $_tagId',
+                  style: TextStyle(
+                    color: PixelTheme.textWhite,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                GestureDetector(
+                  onTap: _isReading ? _stopSession : _startSession,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: PixelTheme.bgDark,
+                      border: Border.all(color: PixelTheme.accent, width: 2),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black,
+                          blurRadius: 0,
+                          offset: Offset(3, 3),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      context.l10n.tr(_isReading ? 'stopScan' : 'scanAgain'),
+                      style: TextStyle(
+                        color: PixelTheme.accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),

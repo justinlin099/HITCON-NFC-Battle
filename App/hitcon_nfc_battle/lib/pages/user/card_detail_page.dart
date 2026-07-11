@@ -1,5 +1,10 @@
+import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import 'pixel_theme.dart';
 import 'pixel_card_face.dart';
 import 'pixel_link_dialog.dart';
@@ -13,10 +18,14 @@ class CardDetailPage extends StatefulWidget {
     required this.attributeEmoji,
     required this.attributeLabel,
     required this.link,
+    required this.description,
     required this.uid,
     required this.collectedAt,
     required this.cardColor,
     required this.imageAsset,
+    this.imageBase64,
+    this.playRevealEffect = false,
+    this.showCollectionInfo = true,
   });
 
   final String heroTag;
@@ -24,10 +33,14 @@ class CardDetailPage extends StatefulWidget {
   final String attributeEmoji;
   final String attributeLabel;
   final String link;
+  final String description;
   final String uid;
   final String collectedAt;
   final Color cardColor;
   final String imageAsset;
+  final String? imageBase64;
+  final bool playRevealEffect;
+  final bool showCollectionInfo;
 
   @override
   State<CardDetailPage> createState() => _CardDetailPageState();
@@ -38,10 +51,12 @@ class _CardDetailPageState extends State<CardDetailPage> {
   static const double _dismissVelocity = 350;
 
   bool _showText = false;
+  Uint8List? _imageBytes;
 
   @override
   void initState() {
     super.initState();
+    _imageBytes = _decodeImageBytes(widget.imageBase64);
     Future<void>.delayed(_textDelay, () {
       if (mounted) {
         setState(() {
@@ -49,6 +64,14 @@ class _CardDetailPageState extends State<CardDetailPage> {
         });
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant CardDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageBase64 != widget.imageBase64) {
+      _imageBytes = _decodeImageBytes(widget.imageBase64);
+    }
   }
 
   @override
@@ -122,36 +145,37 @@ class _CardDetailPageState extends State<CardDetailPage> {
                                   watermarkScale: 1.6,
                                   imageToTitleSpacing: s(8),
                                   extraContentSpacing: s(8),
-                                  image: Image.asset(
-                                    widget.imageAsset,
-                                    fit: BoxFit.cover,
-                                    filterQuality: FilterQuality.none,
-                                  ),
+                                  image: _cardImage(),
                                   fixedContent: _LinkRow(
                                     link: widget.link,
                                     fontSize: s(10),
-                                    onTap: () => confirmAndOpenLink(
-                                      context,
-                                      widget.link,
-                                    ),
+                                    onTap: widget.link.trim().isEmpty
+                                        ? null
+                                        : () => confirmAndOpenLink(
+                                            context,
+                                            widget.link,
+                                          ),
                                   ),
                                   extraContent: _CardDescription(
+                                    description: widget.description,
                                     fontSize: s(13),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                          SizedBox(height: s(10)),
-                          SizedBox(
-                            width: cardWidth,
-                            child: _InfoCard(
-                              uid: widget.uid,
-                              collectedAt: _formatDate(widget.collectedAt),
-                              padding: EdgeInsets.all(contentPad),
-                              fontSize: s(12),
+                          if (widget.showCollectionInfo) ...<Widget>[
+                            SizedBox(height: s(10)),
+                            SizedBox(
+                              width: cardWidth,
+                              child: _InfoCard(
+                                uid: widget.uid,
+                                collectedAt: _formatDate(widget.collectedAt),
+                                padding: EdgeInsets.all(contentPad),
+                                fontSize: s(12),
+                              ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),
@@ -159,6 +183,12 @@ class _CardDetailPageState extends State<CardDetailPage> {
                 },
               ),
             ),
+            if (widget.playRevealEffect)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: _CardRevealEffect(cardColor: widget.cardColor),
+                ),
+              ),
           ],
         ),
       ),
@@ -167,9 +197,178 @@ class _CardDetailPageState extends State<CardDetailPage> {
 
   String _formatDate(String raw) {
     if (raw.isEmpty) {
-      return '未知';
+      return context.l10n.tr('unknown');
     }
     return raw.length >= 10 ? raw.substring(0, 10) : raw;
+  }
+
+  Widget _cardImage() {
+    final Uint8List? bytes = _imageBytes;
+    if (bytes != null) {
+      return Image.memory(
+        bytes,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.none,
+        gaplessPlayback: true,
+      );
+    }
+    return Container(
+      color: PixelTheme.bgDark,
+      alignment: Alignment.center,
+      child: Icon(Icons.person_rounded, color: PixelTheme.accent, size: 48),
+    );
+  }
+
+  Uint8List? _decodeImageBytes(String? raw) {
+    final String value = raw?.trim() ?? '';
+    if (value.isEmpty) {
+      return null;
+    }
+    final String payload = value.contains(',') ? value.split(',').last : value;
+    try {
+      return base64Decode(payload);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class _CardRevealEffect extends StatefulWidget {
+  const _CardRevealEffect({required this.cardColor});
+
+  final Color cardColor;
+
+  @override
+  State<_CardRevealEffect> createState() => _CardRevealEffectState();
+}
+
+class _CardRevealEffectState extends State<_CardRevealEffect>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..forward();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (BuildContext context, Widget? child) {
+        return CustomPaint(
+          painter: _SparkleBurstPainter(
+            progress: _controller.value,
+            cardColor: widget.cardColor,
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+}
+
+class _SparkleBurstPainter extends CustomPainter {
+  const _SparkleBurstPainter({required this.progress, required this.cardColor});
+
+  final double progress;
+  final Color cardColor;
+
+  static const List<double> _distanceFactors = <double>[
+    0.82,
+    1.14,
+    0.96,
+    1.28,
+    0.74,
+    1.08,
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double travel = Curves.easeOutCubic.transform(
+      (progress / 0.82).clamp(0.0, 1.0),
+    );
+    final double opacity = (1 - Curves.easeIn.transform(progress)).clamp(
+      0.0,
+      1.0,
+    );
+    final Offset center = Offset(size.width / 2, size.height * 0.44);
+
+    final double flashOpacity = (1 - progress * 5).clamp(0.0, 1.0) * 0.24;
+    if (flashOpacity > 0) {
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()..color = Colors.white.withValues(alpha: flashOpacity),
+      );
+    }
+
+    final List<Color> colors = <Color>[
+      Colors.white,
+      const Color(0xFFFFE45C),
+      const Color(0xFF54F5FF),
+      cardColor,
+    ];
+    final double maxTravel = math.min(size.width, size.height) * 0.43;
+    for (int index = 0; index < 24; index += 1) {
+      final double angle =
+          (math.pi * 2 * index / 24) + (index.isOdd ? 0.09 : -0.05);
+      final double factor = _distanceFactors[index % _distanceFactors.length];
+      final double radius = 24 + maxTravel * travel * factor;
+      final Offset position =
+          center +
+          Offset(math.cos(angle) * radius, math.sin(angle) * radius * 1.12);
+      final double twinkle = math.sin(
+        math.pi * ((progress * 2.15 + index * 0.17) % 1),
+      );
+      final double sparkleSize =
+          (4 + (index % 4) * 1.8) * twinkle.clamp(0.25, 1.0) * opacity;
+      if (sparkleSize < 0.8) {
+        continue;
+      }
+      _drawPixelSparkle(
+        canvas,
+        position,
+        sparkleSize,
+        colors[index % colors.length].withValues(alpha: opacity),
+      );
+    }
+  }
+
+  void _drawPixelSparkle(
+    Canvas canvas,
+    Offset center,
+    double size,
+    Color color,
+  ) {
+    final double pixel = math.max(2, (size * 0.28).roundToDouble());
+    final Paint paint = Paint()..color = color;
+    canvas.drawRect(
+      Rect.fromCenter(center: center, width: pixel, height: size * 2.3),
+      paint,
+    );
+    canvas.drawRect(
+      Rect.fromCenter(center: center, width: size * 2.3, height: pixel),
+      paint,
+    );
+    canvas.drawRect(
+      Rect.fromCenter(center: center, width: pixel * 1.7, height: pixel * 1.7),
+      Paint()..color = Colors.white.withValues(alpha: color.a),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_SparkleBurstPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.cardColor != cardColor;
   }
 }
 
@@ -340,7 +539,7 @@ class _LinkRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String displayLink = link.trim().isEmpty
-        ? 'https://hitcon.org'
+        ? context.l10n.tr('noLink')
         : link;
     return GestureDetector(
       onTap: onTap,
@@ -378,14 +577,17 @@ class _LinkRow extends StatelessWidget {
 }
 
 class _CardDescription extends StatelessWidget {
-  const _CardDescription({required this.fontSize});
+  const _CardDescription({required this.description, required this.fontSize});
 
+  final String description;
   final double fontSize;
 
   @override
   Widget build(BuildContext context) {
     return Text(
-      '我是來自像素維度的漫遊者，喜歡收集閃閃發亮的故事與徽章，遇到新朋友會立刻打招呼。',
+      description.trim().isEmpty
+          ? context.l10n.tr('noDescription')
+          : description.trim(),
       style: TextStyle(
         color: PixelTheme.textWhite,
         fontSize: fontSize,
@@ -421,9 +623,17 @@ class _InfoCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _InfoRow(label: 'UID', value: uid, fontSize: fontSize),
+          _InfoRow(
+            label: context.l10n.tr('uidLabel'),
+            value: uid,
+            fontSize: fontSize,
+          ),
           const SizedBox(height: 4),
-          _InfoRow(label: '收藏時間', value: collectedAt, fontSize: fontSize),
+          _InfoRow(
+            label: context.l10n.tr('collectedDate'),
+            value: collectedAt,
+            fontSize: fontSize,
+          ),
         ],
       ),
     );
