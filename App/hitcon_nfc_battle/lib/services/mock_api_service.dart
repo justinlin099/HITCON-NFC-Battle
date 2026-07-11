@@ -46,6 +46,8 @@ class MockApiService {
 
   /// 模擬 NFC 標籤數據庫
   static final List<Map<String, dynamic>> _mockTags = _buildMockTags();
+  static final Map<String, Map<String, dynamic>> _mockPrizeClaims =
+      <String, Map<String, dynamic>>{};
 
   static List<Map<String, dynamic>> _buildMockTags() {
     const List<Map<String, String>> baseCards = <Map<String, String>>[
@@ -177,7 +179,10 @@ class MockApiService {
     await Future.delayed(Duration(milliseconds: AppConfig.mockNetworkDelay));
 
     if (_mockUsers.containsKey(userId)) {
-      return {'status': 'success', 'data': _mockUsers[userId]};
+      return {
+        'status': 'success',
+        'data': Map<String, dynamic>.from(_mockUsers[userId] as Map),
+      };
     }
 
     return {
@@ -197,7 +202,11 @@ class MockApiService {
     await Future.delayed(Duration(milliseconds: AppConfig.mockNetworkDelay));
 
     if (_mockUsers.containsKey(userId)) {
-      _mockUsers[userId]!.addAll(updates);
+      final Map<String, dynamic> user = Map<String, dynamic>.from(
+        _mockUsers[userId] as Map,
+      );
+      user.addAll(updates);
+      _mockUsers[userId] = user;
       return {'status': 'success', 'message': 'Profile updated'};
     }
 
@@ -243,6 +252,116 @@ class MockApiService {
     }
 
     return {'status': 'success', 'message': 'Tag paired successfully'};
+  }
+
+  static Future<Map<String, dynamic>> getNtagLockSecret({
+    required String uid,
+    required String purpose,
+    required String requesterUserId,
+  }) async {
+    _log(
+      'Mock: POST /ntag/lock-secret uid=$uid purpose=$purpose requester=$requesterUserId',
+    );
+    await Future.delayed(
+      Duration(milliseconds: AppConfig.mockNetworkDelay + 120),
+    );
+
+    final String normalizedUid = uid
+        .replaceAll(RegExp(r'[^0-9a-fA-F]'), '')
+        .toUpperCase();
+    if (normalizedUid.isEmpty) {
+      return {
+        'status': 'error',
+        'code': 'EMPTY_UID',
+        'message': 'Tag UID is required.',
+      };
+    }
+
+    final int passwordSeed = _fnv1a32(
+      'HITCON_NFC_BATTLE_2026:$normalizedUid:PWD',
+    );
+    final int packSeed = _fnv1a32('HITCON_NFC_BATTLE_2026:$normalizedUid:PACK');
+
+    return {
+      'status': 'success',
+      'data': {
+        'password': <int>[
+          passwordSeed & 0xFF,
+          (passwordSeed >> 8) & 0xFF,
+          (passwordSeed >> 16) & 0xFF,
+          (passwordSeed >> 24) & 0xFF,
+        ],
+        'pack': <int>[packSeed & 0xFF, (packSeed >> 8) & 0xFF],
+      },
+    };
+  }
+
+  static Future<Map<String, dynamic>> scanCollection({
+    required String currentUserId,
+    required String targetUserId,
+    required String scannedNfcUid,
+  }) async {
+    _log(
+      'Mock: POST /collections/scan current=$currentUserId target=$targetUserId uid=$scannedNfcUid',
+    );
+
+    await Future.delayed(
+      Duration(milliseconds: AppConfig.mockNetworkDelay + 250),
+    );
+
+    final int tagIndex = _mockTags.indexWhere(
+      (Map<String, dynamic> tag) => tag['uid'] == scannedNfcUid,
+    );
+    if (tagIndex == -1) {
+      return {
+        'status': 'error',
+        'code': 'UID_NOT_FOUND',
+        'message': 'User or physical tag does not exist.',
+      };
+    }
+
+    final Map<String, dynamic> tag = _mockTags[tagIndex];
+    final String ownerId = tag['owner'] as String? ?? '';
+    if (targetUserId.trim().isNotEmpty && ownerId != targetUserId.trim()) {
+      return {
+        'status': 'error',
+        'code': 'SECURITY_VERIFICATION_FAILED',
+        'message': 'UID mismatch or insufficient permissions.',
+      };
+    }
+
+    final String collectedAt = DateTime.now().toIso8601String();
+    tag['collected_at'] = collectedAt;
+    tag['collected_by'] = currentUserId;
+
+    final Map<String, dynamic> owner =
+        _mockUsers[ownerId] ?? <String, dynamic>{};
+    return {
+      'status': 'success',
+      'type': tag['type'] ?? 'ATTENDEE',
+      'data': {
+        'target_info': {
+          'user_id': ownerId,
+          'display_name':
+              owner['display_name'] ?? tag['card_title'] ?? 'Unknown',
+          'user_type': owner['user_type'] ?? 'USER',
+          'emoji_icon': owner['emoji_icon'] ?? tag['attribute_emoji'] ?? '',
+          'total_tags':
+              owner['stats']?['tags_collected'] ??
+              owner['stats']?['cards_collected'] ??
+              0,
+          'tag_name': tag['name'],
+          'card_title': tag['card_title'],
+          'attribute_emoji': tag['attribute_emoji'],
+          'attribute_label': tag['attribute_label'],
+          'image_file': tag['image_file'],
+          'link': tag['link'],
+          'collected_at': collectedAt,
+        },
+        'ciphertext': 'MOCK-CIPHERTEXT-${scannedNfcUid.replaceAll(':', '')}',
+        'pixel_avatar_base64': owner['pixel_avatar_base64'],
+      },
+    };
   }
 
   /// 獲取集卡記錄
@@ -367,6 +486,7 @@ class MockApiService {
   static void resetMockData() {
     _log('🔄 Mock: Resetting all mock data to initial state');
     _mockTags.clear();
+    _mockPrizeClaims.clear();
     _mockTags.addAll([
       {
         'uid': '04:1A:2B:3C:4D:5E:6F',
@@ -472,5 +592,58 @@ class MockApiService {
         'bytes': artworkPng.length,
       },
     };
+  }
+
+  static Future<Map<String, dynamic>> confirmPrizeClaim({
+    required String tagUid,
+    required String userId,
+    required String staffUserId,
+  }) async {
+    _log(
+      'Mock: POST /admin/prize-claims tag=$tagUid user=$userId staff=$staffUserId',
+    );
+    await Future.delayed(
+      Duration(milliseconds: AppConfig.mockNetworkDelay + 250),
+    );
+
+    final String claimKey = userId.trim().isNotEmpty ? userId.trim() : tagUid;
+    if (claimKey.isEmpty) {
+      return {
+        'status': 'error',
+        'code': 'EMPTY_TAG',
+        'message': 'Tag UID or user_id is required.',
+      };
+    }
+
+    final Map<String, dynamic>? existing = _mockPrizeClaims[claimKey];
+    if (existing != null) {
+      return {
+        'status': 'success',
+        'data': <String, dynamic>{...existing, 'already_claimed': true},
+      };
+    }
+
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final String claimCode = 'PRIZE-${now.toRadixString(36).toUpperCase()}';
+    final Map<String, dynamic> claim = <String, dynamic>{
+      'claim_code': claimCode,
+      'tag_uid': tagUid,
+      'user_id': userId,
+      'staff_user_id': staffUserId,
+      'claimed_at': DateTime.now().toIso8601String(),
+      'already_claimed': false,
+    };
+    _mockPrizeClaims[claimKey] = claim;
+
+    return {'status': 'success', 'data': claim};
+  }
+
+  static int _fnv1a32(String input) {
+    int hash = 0x811C9DC5;
+    for (final int codeUnit in input.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+    return hash;
   }
 }

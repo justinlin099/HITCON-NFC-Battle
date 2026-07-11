@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'pixel_theme.dart';
 import 'pixel_card_face.dart';
 import 'pixel_link_dialog.dart';
+import 'pixel_link_icon.dart';
 
 class CardDetailPage extends StatefulWidget {
   const CardDetailPage({
@@ -352,14 +353,9 @@ class _LinkRow extends StatelessWidget {
               color: PixelTheme.bgDark,
               border: Border.all(color: PixelTheme.textWhite, width: 2),
             ),
-            child: Text(
-              '🔗',
-              style: TextStyle(
-                color: PixelTheme.textWhite,
-                fontSize: fontSize,
-                fontWeight: FontWeight.w900,
-                fontFamily: 'Unifont',
-              ),
+            child: PixelLinkIcon(
+              size: fontSize + 8,
+              color: PixelTheme.textWhite,
             ),
           ),
           const SizedBox(width: 6),

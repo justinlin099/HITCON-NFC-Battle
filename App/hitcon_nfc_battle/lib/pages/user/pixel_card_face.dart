@@ -61,6 +61,7 @@ class PixelCardFace extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color textColor = PixelTheme.textWhite;
+    final Color attributeTextColor = _readableAttributeColor(cardColor);
     final double borderSize = 3;
 
     return LayoutBuilder(
@@ -160,6 +161,7 @@ class PixelCardFace extends StatelessWidget {
                                     Text(
                                       attributeEmoji,
                                       style: TextStyle(
+                                        color: attributeTextColor,
                                         fontSize: emojiFontSize,
                                         fontFamily: 'Roboto',
                                         fontFamilyFallback: const <String>[
@@ -177,7 +179,7 @@ class PixelCardFace extends StatelessWidget {
                                       overflow: TextOverflow.ellipsis,
                                       text: TextSpan(
                                         children: _attributeLabelSpans(
-                                          cardColor,
+                                          attributeTextColor,
                                         ),
                                       ),
                                     ),
@@ -244,17 +246,17 @@ class PixelCardFace extends StatelessWidget {
     );
   }
 
-  List<InlineSpan> _attributeLabelSpans(Color cardColor) {
+  List<InlineSpan> _attributeLabelSpans(Color attributeTextColor) {
     final String displayLabel = _displayAttributeLabel();
     final TextStyle labelStyle = TextStyle(
-      color: cardColor,
+      color: attributeTextColor,
       fontSize: attributeFontSize,
       fontWeight: FontWeight.w900,
       fontFamily: 'Unifont',
       letterSpacing: 0.6,
     );
     final TextStyle emojiStyle = TextStyle(
-      color: cardColor,
+      color: attributeTextColor,
       fontSize: emojiFontSize,
       fontFamily: 'Roboto',
       fontFamilyFallback: const <String>[
@@ -272,6 +274,13 @@ class PixelCardFace extends StatelessWidget {
           ),
         )
         .toList(growable: false);
+  }
+
+  Color _readableAttributeColor(Color accentColor) {
+    if (accentColor.computeLuminance() < 0.38) {
+      return PixelTheme.textWhite;
+    }
+    return accentColor;
   }
 
   bool get _showSeparateAttributeEmoji {

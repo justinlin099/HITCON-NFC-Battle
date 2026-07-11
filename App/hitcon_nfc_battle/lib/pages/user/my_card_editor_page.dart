@@ -1,16 +1,160 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
-import 'package:nfc_manager/nfc_manager.dart';
 import 'dart:convert';
 
 import 'pixel_theme.dart';
 import 'pixel_card_face.dart';
 import 'pixel_link_dialog.dart';
+import 'pixel_link_icon.dart';
+import 'emoji_catalog.dart';
+import 'ntag_pairing_page.dart';
 import '../../services/auth_service.dart';
+import '../../services/local_collection_store.dart';
+import '../../services/local_profile_store.dart';
 
 typedef PixelGrid = List<List<Color?>>;
+
+class CardImageCropResult {
+  const CardImageCropResult({required this.bytes, required this.sourceName});
+
+  final Uint8List bytes;
+  final String sourceName;
+}
+
+Future<CardImageCropResult?> openCardImageCropper(BuildContext context) async {
+  final ImagePicker picker = ImagePicker();
+  final XFile? picked = await picker.pickImage(source: ImageSource.gallery);
+
+  if (picked == null) {
+    return null;
+  }
+
+  final Uint8List bytes = await picked.readAsBytes();
+  final img.Image? decoded = img.decodeImage(bytes);
+  if (decoded == null) {
+    return null;
+  }
+
+  final String detectedFormat = _detectImageFormat(bytes);
+
+  if (!context.mounted) {
+    return null;
+  }
+
+  final _ImagePreprocessResult? preprocessed = await Navigator.of(context)
+      .push<_ImagePreprocessResult>(
+        MaterialPageRoute<_ImagePreprocessResult>(
+          builder: (_) => _ImagePreprocessScreen(
+            sourceBytes: bytes,
+            sourceName: picked.name,
+            sourceFormat: detectedFormat,
+          ),
+        ),
+      );
+
+  if (preprocessed == null) {
+    return null;
+  }
+
+  return CardImageCropResult(
+    bytes: Uint8List.fromList(img.encodePng(preprocessed.image)),
+    sourceName: preprocessed.sourceName,
+  );
+}
+
+Future<Uint8List?> openBlankCardPixelEditor(
+  BuildContext context, {
+  required Color cardColor,
+  int canvasSize = 48,
+}) {
+  return _openCardPixelEditorWithGrid(
+    context,
+    initialPixels: _createEmptyGrid(canvasSize),
+    cardColor: cardColor,
+    canvasSize: canvasSize,
+  );
+}
+
+Future<Uint8List?> openImportedCardPixelEditor(
+  BuildContext context, {
+  required Color cardColor,
+  int canvasSize = 48,
+}) async {
+  final CardImageCropResult? cropped = await openCardImageCropper(context);
+  if (cropped == null || !context.mounted) {
+    return null;
+  }
+
+  final img.Image? decoded = img.decodeImage(cropped.bytes);
+  if (decoded == null) {
+    return null;
+  }
+
+  return _openCardPixelEditorWithGrid(
+    context,
+    initialPixels: _imageToPixelGridSimple(decoded, canvasSize),
+    cardColor: cardColor,
+    canvasSize: canvasSize,
+  );
+}
+
+Future<Uint8List?> _openCardPixelEditorWithGrid(
+  BuildContext context, {
+  required PixelGrid initialPixels,
+  required Color cardColor,
+  required int canvasSize,
+}) async {
+  final _PixelEditResult? result = await Navigator.of(context)
+      .push<_PixelEditResult>(
+        MaterialPageRoute<_PixelEditResult>(
+          builder: (_) => _PixelEditorScreen(
+            initialPixels: initialPixels,
+            cardColor: cardColor,
+            canvasSize: canvasSize,
+          ),
+        ),
+      );
+
+  if (result == null) {
+    return null;
+  }
+
+  return encodePixelGridPng(result.pixels);
+}
+
+Uint8List encodePixelGridPng(
+  PixelGrid pixels, {
+  int outputSize = 512,
+  Color backgroundColor = const Color(0xFF001933),
+}) {
+  final img.Image output = img.Image(width: outputSize, height: outputSize);
+  final _Rgba bg = _rgba(backgroundColor);
+  img.fill(output, color: img.ColorRgba8(bg.r, bg.g, bg.b, bg.a));
+
+  final int cellCount = pixels.length;
+  final double cellSize = outputSize / cellCount;
+  for (int y = 0; y < cellCount; y += 1) {
+    for (int x = 0; x < cellCount; x += 1) {
+      final Color? color = pixels[y][x];
+      if (color == null) {
+        continue;
+      }
+      _fillRect(
+        output,
+        (x * cellSize).floor(),
+        (y * cellSize).floor(),
+        cellSize.ceil(),
+        cellSize.ceil(),
+        _rgba(color),
+      );
+    }
+  }
+
+  return Uint8List.fromList(img.encodePng(output, level: 6));
+}
 
 Widget _withUnifont(BuildContext context, Widget child) {
   final ThemeData base = Theme.of(context);
@@ -43,9 +187,10 @@ enum _EditorTool {
 }
 
 class MyCardEditorPage extends StatefulWidget {
-  const MyCardEditorPage({super.key, this.scheme});
+  const MyCardEditorPage({super.key, this.scheme, this.onBackupRestored});
 
   final PixelScheme? scheme;
+  final Future<void> Function()? onBackupRestored;
 
   @override
   State<MyCardEditorPage> createState() => _MyCardEditorPageState();
@@ -54,13 +199,115 @@ class MyCardEditorPage extends StatefulWidget {
 class _MyCardEditorPageState extends State<MyCardEditorPage> {
   static const int _canvasSize = 48;
 
-  String _name = '我的卡片';
+  final AuthService _authService = AuthService();
+  final LocalCollectionStore _localCollectionStore = LocalCollectionStore();
+  final LocalProfileStore _localProfileStore = LocalProfileStore();
+  String _name = '\u6211\u7684\u5361\u7247';
   String _link = 'https://';
   String _emoji = '\u2728';
-  String _description = '卡片介紹文字';
+  String _description = '\u5beb\u4e0b\u4f60\u7684\u81ea\u6211\u4ecb\u7d39';
   Color _cardColor = const Color(0xFFFFD700);
   PixelGrid _pixels = _createEmptyGrid(_canvasSize);
   String? _pairedUid;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    final String? userId = _authService.currentUserId;
+    final Map<String, dynamic>? apiProfile = await _authService
+        .fetchUserProfile();
+    final Map<String, dynamic> localProfile = userId == null
+        ? <String, dynamic>{}
+        : await _localProfileStore.load(userId);
+    final Map<String, dynamic> profile = <String, dynamic>{
+      if (apiProfile != null) ...apiProfile,
+      ...localProfile,
+    };
+
+    if (profile.isEmpty || !mounted) {
+      return;
+    }
+
+    final PixelGrid? loadedPixels = _decodePixelAvatar(
+      profile['pixel_avatar_base64'] as String?,
+    );
+    final Object? rawColor = profile['card_color'];
+
+    setState(() {
+      _name = _profileString(profile, 'display_name', _name);
+      _link = _profileString(profile, 'link', _link);
+      _emoji = _profileString(profile, 'attribute_emoji', _emoji);
+      _description = _profileString(profile, 'bio', _description);
+      _pairedUid = _profileString(profile, 'paired_ntag_uid', _pairedUid ?? '');
+      if (_pairedUid != null && _pairedUid!.trim().isEmpty) {
+        _pairedUid = null;
+      }
+      if (rawColor is int) {
+        _cardColor = Color(rawColor);
+      }
+      if (loadedPixels != null) {
+        _pixels = loadedPixels;
+      }
+    });
+  }
+
+  String _profileString(
+    Map<String, dynamic> profile,
+    String key,
+    String fallback,
+  ) {
+    final String? value = profile[key] as String?;
+    if (value == null || value.trim().isEmpty) {
+      return fallback;
+    }
+    return value;
+  }
+
+  PixelGrid? _decodePixelAvatar(String? raw) {
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+    try {
+      final img.Image? decoded = img.decodeImage(base64Decode(raw));
+      if (decoded == null) {
+        return null;
+      }
+      return _imageToPixelGridSimple(decoded, _canvasSize);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    final Map<String, dynamic> updates = <String, dynamic>{
+      'display_name': _name,
+      'bio': _description,
+      'attribute_emoji': _emoji,
+      'attribute_label': emojiLabelForValue(_emoji),
+      'card_color': _colorInt(_cardColor),
+      'pixel_avatar_base64': base64Encode(encodePixelGridPng(_pixels)),
+      'link': _link,
+      if (_pairedUid != null) 'paired_ntag_uid': _pairedUid,
+    };
+
+    final String? userId = _authService.currentUserId;
+    if (userId != null) {
+      await _localProfileStore.save(userId, updates);
+    }
+    await _authService.updateUserProfile(updates);
+  }
+
+  int _colorInt(Color color) {
+    final int alpha = (color.a * 255).round() & 0xFF;
+    final int red = (color.r * 255).round() & 0xFF;
+    final int green = (color.g * 255).round() & 0xFF;
+    final int blue = (color.b * 255).round() & 0xFF;
+    return alpha << 24 | red << 16 | green << 8 | blue;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +343,7 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
             ),
             const SizedBox(height: 12),
             _EditorActionButton(
-              label: '設定卡片顏色',
+              label: '\u9078\u64c7\u5361\u7247\u984f\u8272',
               onTap: _openColorEditor,
               color: PixelTheme.textWhite,
               leading: Container(
@@ -110,7 +357,9 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
             ),
             const SizedBox(height: 12),
             _EditorActionButton(
-              label: _pairedUid == null ? 'NTAG Badge 配對' : '已配對',
+              label: _pairedUid == null
+                  ? 'NTAG Badge \u914d\u5c0d'
+                  : '\u5df2\u914d\u5c0d',
               subtitle: _pairedUid == null ? null : 'UID: $_pairedUid',
               onTap: _pairedUid == null ? _openNtagScanPage : () {},
               color: PixelTheme.textWhite,
@@ -124,10 +373,169 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
               color: PixelTheme.accent,
               icon: Icons.print_rounded,
             ),
+            const SizedBox(height: 12),
+            _EditorActionButton(
+              label: '\u5099\u4efd / \u9084\u539f',
+              subtitle:
+                  '\u532f\u51fa\u6216\u9084\u539f\u672c\u6a5f\u5361\u7247\u6536\u96c6\u8cc7\u6599',
+              onTap: _openBackupMenu,
+              color: PixelTheme.accentBlue,
+              icon: Icons.inventory_2_outlined,
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _openBackupMenu() async {
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return _BackupActionDialog(
+          onExportFile: () {
+            Navigator.of(context).pop();
+            _exportBackupToFile();
+          },
+          onExportClipboard: () {
+            Navigator.of(context).pop();
+            _exportBackupToClipboard();
+          },
+          onImportFile: () {
+            Navigator.of(context).pop();
+            _importBackupFromFile();
+          },
+          onImportClipboard: () {
+            Navigator.of(context).pop();
+            _importBackupFromClipboard();
+          },
+        );
+      },
+    );
+  }
+
+  Future<String?> _localBackupJson() async {
+    final String? userId = _authService.currentUserId;
+    if (userId == null) {
+      _showEditorSnack(
+        '\u76ee\u524d\u6c92\u6709\u53ef\u532f\u51fa\u7684\u4f7f\u7528\u8005\u8cc7\u6599',
+      );
+      return null;
+    }
+    return _localCollectionStore.exportJson(userId);
+  }
+
+  Future<void> _exportBackupToClipboard() async {
+    final String? userId = _authService.currentUserId;
+    final String? exportText = await _localBackupJson();
+    if (userId == null || exportText == null) {
+      return;
+    }
+
+    await _localCollectionStore.copyExportToClipboard(userId);
+    if (!mounted) {
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return _PixelBackupDialog(
+          title: 'LOCAL BACKUP',
+          body:
+              '\u5099\u4efd JSON \u5df2\u7d93\u8907\u88fd\u5230\u526a\u8cbc\u7c3f\u3002',
+          content: exportText,
+        );
+      },
+    );
+  }
+
+  Future<void> _exportBackupToFile() async {
+    final String? exportText = await _localBackupJson();
+    if (exportText == null) {
+      return;
+    }
+
+    final String fileName =
+        'hitcon_nfc_battle_backup_${DateTime.now().millisecondsSinceEpoch}.json';
+    final String? path = await FilePicker.platform.saveFile(
+      dialogTitle: 'Export HITCON NFC Battle Backup',
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: <String>['json'],
+      bytes: Uint8List.fromList(utf8.encode(exportText)),
+    );
+    if (!mounted || path == null) {
+      return;
+    }
+    _showEditorSnack('\u5099\u4efd JSON \u5df2\u532f\u51fa');
+  }
+
+  Future<void> _restoreBackupText(String backupText) async {
+    final String? userId = _authService.currentUserId;
+    if (userId == null) {
+      _showEditorSnack(
+        '\u76ee\u524d\u6c92\u6709\u53ef\u9084\u539f\u7684\u4f7f\u7528\u8005\u8cc7\u6599',
+      );
+      return;
+    }
+    if (backupText.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      await _localCollectionStore.importJson(userId, backupText);
+      await widget.onBackupRestored?.call();
+      if (!mounted) {
+        return;
+      }
+      _showEditorSnack('\u5099\u4efd\u5df2\u9084\u539f');
+    } on FormatException {
+      _showEditorSnack('\u5099\u4efd\u683c\u5f0f\u4e0d\u6b63\u78ba');
+    } catch (_) {
+      _showEditorSnack(
+        '\u9084\u539f\u5931\u6557\uff0c\u8acb\u6aa2\u67e5\u5099\u4efd\u5167\u5bb9',
+      );
+    }
+  }
+
+  Future<void> _importBackupFromClipboard() async {
+    final String? backupText = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => const _BackupImportDialog(),
+    );
+    if (backupText == null) {
+      return;
+    }
+    await _restoreBackupText(backupText);
+  }
+
+  Future<void> _importBackupFromFile() async {
+    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Import HITCON NFC Battle Backup',
+      type: FileType.custom,
+      allowedExtensions: <String>['json'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) {
+      return;
+    }
+
+    final Uint8List? bytes = result.files.single.bytes;
+    if (bytes == null) {
+      _showEditorSnack('\u7121\u6cd5\u8b80\u53d6\u5099\u4efd\u6a94\u6848');
+      return;
+    }
+    await _restoreBackupText(utf8.decode(bytes));
+  }
+
+  void _showEditorSnack(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _openPrintPreview() {
@@ -169,6 +577,7 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
       _emoji = result.emoji;
       _description = result.description;
     });
+    await _saveProfile();
   }
 
   Future<void> _openColorEditor() async {
@@ -185,6 +594,7 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
     setState(() {
       _cardColor = result;
     });
+    await _saveProfile();
   }
 
   Future<void> _openPixelEditor() async {
@@ -206,256 +616,17 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
     setState(() {
       _pixels = result.pixels;
     });
+    await _saveProfile();
   }
 
   Future<void> _openNtagScanPage() async {
-    final String? result = await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(builder: (_) => const _NtagScanPage()),
-    );
+    final String? result = await openNtagPairingScanPage(context);
     if (result != null && mounted) {
       setState(() {
         _pairedUid = result;
       });
+      await _saveProfile();
     }
-  }
-}
-
-class _NtagScanPage extends StatefulWidget {
-  const _NtagScanPage();
-
-  @override
-  State<_NtagScanPage> createState() => _NtagScanPageState();
-}
-
-class _NtagScanPageState extends State<_NtagScanPage> {
-  static const String _targetUri = 'https://game.hitcon2026.online/b';
-
-  String _status = '初始化中...';
-  String _tagId = '-';
-  String _userId = '';
-  bool _isReading = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _userId = AuthService().currentUserId ?? '';
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _startSession();
-    });
-  }
-
-  Future<void> _startSession() async {
-    if (_isReading) {
-      return;
-    }
-
-    final bool isAvailable = await NfcManager.instance.isAvailable();
-    if (!isAvailable) {
-      setState(() {
-        _status = 'NFC is unavailable or disabled';
-      });
-      return;
-    }
-
-    if (_userId.trim().isEmpty) {
-      setState(() {
-        _status = '缺少使用者 ID，請重新登入';
-      });
-      return;
-    }
-
-    setState(() {
-      _isReading = true;
-      _status = '等待 NFC 標籤...';
-    });
-
-    await NfcManager.instance.startSession(
-      onDiscovered: (NfcTag tag) async {
-        final Map<String, dynamic> data = tag.data;
-        final dynamic idBytes =
-            data['nfca']?['identifier'] ??
-            data['mifareclassic']?['identifier'] ??
-            data['mifareultralight']?['identifier'];
-
-        final String parsedTagId = _toHexString(idBytes);
-
-        final bool writeSuccess = await _writeUserIdToTag(tag, _userId);
-
-        if (!mounted) {
-          return;
-        }
-
-        setState(() {
-          _tagId = parsedTagId.isEmpty ? '(讀不到 Tag ID)' : parsedTagId;
-          _status = writeSuccess ? '已寫入 user_id，配對完成' : '寫入失敗：此 Tag 不支援寫入';
-        });
-
-        final NavigatorState navigator = Navigator.of(context);
-        await NfcManager.instance.stopSession();
-        if (writeSuccess) {
-          navigator.pop(_tagId);
-        }
-      },
-      onError: (dynamic error) async {
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          _status = '讀取失敗: $error';
-          _isReading = false;
-        });
-        await NfcManager.instance.stopSession();
-      },
-    );
-  }
-
-  Future<bool> _writeUserIdToTag(NfcTag tag, String userId) async {
-    final Ndef? ndef = Ndef.from(tag);
-    if (ndef == null || !ndef.isWritable) {
-      return false;
-    }
-
-    final NdefMessage message = NdefMessage(<NdefRecord>[
-      _buildUriRecord(_targetUri),
-      _buildTextRecord('user_id', userId),
-    ]);
-
-    await ndef.write(message);
-    return true;
-  }
-
-  NdefRecord _buildUriRecord(String uri) {
-    const List<String> prefixes = <String>[
-      '',
-      'http://www.',
-      'https://www.',
-      'http://',
-      'https://',
-    ];
-
-    int prefixIndex = 0;
-    String body = uri;
-    for (int i = prefixes.length - 1; i >= 0; i--) {
-      if (prefixes[i].isNotEmpty && uri.startsWith(prefixes[i])) {
-        prefixIndex = i;
-        body = uri.substring(prefixes[i].length);
-        break;
-      }
-    }
-
-    final List<int> payload = <int>[prefixIndex, ...utf8.encode(body)];
-
-    return NdefRecord(
-      typeNameFormat: NdefTypeNameFormat.nfcWellknown,
-      type: Uint8List.fromList(<int>[0x55]),
-      identifier: Uint8List(0),
-      payload: Uint8List.fromList(payload),
-    );
-  }
-
-  NdefRecord _buildTextRecord(String identifier, String text) {
-    final List<int> encodedText = utf8.encode(text);
-    final List<int> identifierBytes = utf8.encode(identifier);
-    final List<int> languageCode = utf8.encode('en');
-
-    final List<int> payload = <int>[0x65, ...languageCode, ...encodedText];
-
-    return NdefRecord(
-      typeNameFormat: NdefTypeNameFormat.nfcWellknown,
-      type: Uint8List.fromList(<int>[0x54]),
-      identifier: Uint8List.fromList(identifierBytes),
-      payload: Uint8List.fromList(payload),
-    );
-  }
-
-  String _toHexString(dynamic bytes) {
-    if (bytes is! List) {
-      return '';
-    }
-    final Iterable<int> values = bytes.whereType<int>();
-    return values
-        .map((int b) => b.toRadixString(16).padLeft(2, '0'))
-        .join(':')
-        .toUpperCase();
-  }
-
-  @override
-  void dispose() {
-    NfcManager.instance.stopSession();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Theme(
-      data: Theme.of(context).copyWith(
-        textTheme: Theme.of(context).textTheme.apply(fontFamily: 'Unifont'),
-        primaryTextTheme: Theme.of(
-          context,
-        ).primaryTextTheme.apply(fontFamily: 'Unifont'),
-      ),
-      child: Scaffold(
-        backgroundColor: PixelTheme.bgDark,
-        appBar: AppBar(
-          backgroundColor: PixelTheme.bgMid,
-          foregroundColor: PixelTheme.accent,
-          title: const Text('NTAG Badge 配對'),
-        ),
-        body: Center(
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 24),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: PixelTheme.bgMid,
-              border: Border.all(color: PixelTheme.textWhite, width: 2),
-              boxShadow: const [
-                BoxShadow(
-                  color: Colors.black,
-                  blurRadius: 0,
-                  offset: Offset(4, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.nfc_rounded, size: 48, color: PixelTheme.accent),
-                const SizedBox(height: 12),
-                Text(
-                  '請將你的 Badge 貼近手機背面',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: PixelTheme.textWhite,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _status,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: PixelTheme.textGray, fontSize: 12),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'UID: $_tagId',
-                  style: TextStyle(
-                    color: PixelTheme.textWhite,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'user_id: ${_userId.isEmpty ? '-' : _userId}',
-                  style: TextStyle(color: PixelTheme.textWhite, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -559,7 +730,7 @@ class _PokemonStyleCard extends StatelessWidget {
                       ),
                       SizedBox(height: s(6)),
                       Text(
-                        '點擊設定圖片',
+                        '點擊編輯圖片',
                         style: TextStyle(
                           color: PixelTheme.textWhite,
                           fontSize: s(12),
@@ -604,17 +775,7 @@ class _PokemonStyleCard extends StatelessWidget {
   }
 
   static String emojiLabel(String value) {
-    final List<String> items = value.characters.take(3).toList(growable: false);
-    if (items.isEmpty) {
-      return 'Emoji';
-    }
-    return items
-        .asMap()
-        .entries
-        .map((entry) {
-          return '${entry.value} Emoji ${entry.key + 1}';
-        })
-        .join('  ');
+    return emojiLabelForValue(value);
   }
 }
 
@@ -647,9 +808,8 @@ class _EditorLinkRow extends StatelessWidget {
                 color: PixelTheme.bgDark,
                 border: Border.all(color: PixelTheme.textWhite, width: 2),
               ),
-              child: Icon(
-                Icons.link_rounded,
-                size: fontSize + 4,
+              child: PixelLinkIcon(
+                size: fontSize + 8,
                 color: PixelTheme.textWhite,
               ),
             ),
@@ -814,6 +974,294 @@ class _EditorActionButton extends StatelessWidget {
   }
 }
 
+class _BackupActionDialog extends StatelessWidget {
+  const _BackupActionDialog({
+    required this.onExportFile,
+    required this.onExportClipboard,
+    required this.onImportFile,
+    required this.onImportClipboard,
+  });
+
+  final VoidCallback onExportFile;
+  final VoidCallback onExportClipboard;
+  final VoidCallback onImportFile;
+  final VoidCallback onImportClipboard;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(color: PixelTheme.accent, width: 3),
+          boxShadow: const [
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'BACKUP',
+              style: TextStyle(
+                color: PixelTheme.accent,
+                fontFamily: 'Unifont',
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _EditorActionButton(
+              label: '\u532f\u51fa JSON \u6a94',
+              subtitle:
+                  '\u4f7f\u7528\u7cfb\u7d71\u6a94\u6848\u7ba1\u7406\u5668\u5132\u5b58',
+              onTap: onExportFile,
+              color: PixelTheme.accentBlue,
+              icon: Icons.file_upload_outlined,
+            ),
+            const SizedBox(height: 10),
+            _EditorActionButton(
+              label: '\u8907\u88fd\u5230\u526a\u8cbc\u7c3f',
+              subtitle:
+                  '\u8907\u88fd\u672c\u6a5f\u5361\u7247\u6536\u96c6\u8cc7\u6599',
+              onTap: onExportClipboard,
+              color: PixelTheme.accentBlue,
+              icon: Icons.content_copy_rounded,
+            ),
+            const SizedBox(height: 10),
+            _EditorActionButton(
+              label: '\u5f9e JSON \u6a94\u9084\u539f',
+              subtitle:
+                  '\u4f7f\u7528\u7cfb\u7d71\u6a94\u6848\u7ba1\u7406\u5668\u9078\u53d6',
+              onTap: onImportFile,
+              color: PixelTheme.textWhite,
+              icon: Icons.file_download_outlined,
+            ),
+            const SizedBox(height: 10),
+            _EditorActionButton(
+              label: '\u5f9e\u526a\u8cbc\u7c3f\u9084\u539f',
+              subtitle:
+                  '\u8cbc\u4e0a\u5099\u4efd JSON \u9084\u539f\u672c\u6a5f\u8cc7\u6599',
+              onTap: onImportClipboard,
+              color: PixelTheme.textWhite,
+              icon: Icons.content_paste_rounded,
+            ),
+            const SizedBox(height: 10),
+            _EditorActionButton(
+              label: 'CANCEL',
+              onTap: () => Navigator.of(context).pop(),
+              color: PixelTheme.textWhite.withValues(alpha: 0.75),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PixelBackupDialog extends StatelessWidget {
+  const _PixelBackupDialog({
+    required this.title,
+    required this.body,
+    required this.content,
+  });
+
+  final String title;
+  final String body;
+  final String content;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxHeight: 560),
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(color: PixelTheme.accent, width: 3),
+          boxShadow: const [
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                color: PixelTheme.accent,
+                fontFamily: 'Unifont',
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              body,
+              style: TextStyle(
+                color: PixelTheme.textWhite,
+                fontFamily: 'Unifont',
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: PixelTheme.bgDark,
+                  border: Border.all(color: PixelTheme.border, width: 2),
+                ),
+                padding: const EdgeInsets.all(10),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    content,
+                    style: TextStyle(
+                      color: PixelTheme.textWhite,
+                      fontFamily: 'Courier New',
+                      fontSize: 10,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _EditorActionButton(
+              label: 'OK',
+              onTap: () => Navigator.of(context).pop(),
+              color: PixelTheme.accent,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BackupImportDialog extends StatefulWidget {
+  const _BackupImportDialog();
+
+  @override
+  State<_BackupImportDialog> createState() => _BackupImportDialogState();
+}
+
+class _BackupImportDialogState extends State<_BackupImportDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final ClipboardData? data = await Clipboard.getData('text/plain');
+    if (!mounted) {
+      return;
+    }
+    _controller.text = data?.text ?? '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxHeight: 560),
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(color: PixelTheme.accent, width: 3),
+          boxShadow: const [
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'RESTORE BACKUP',
+              style: TextStyle(
+                color: PixelTheme.accent,
+                fontFamily: 'Unifont',
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '\u8cbc\u4e0a\u5099\u4efd JSON\uff0c\u9001\u51fa\u5f8c\u6703\u8986\u84cb\u672c\u6a5f\u5361\u7247\u6536\u96c6\u8cc7\u6599\u3002',
+              style: TextStyle(
+                color: PixelTheme.textWhite,
+                fontFamily: 'Unifont',
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: TextField(
+                controller: _controller,
+                minLines: 8,
+                maxLines: 12,
+                style: TextStyle(
+                  color: PixelTheme.textWhite,
+                  fontFamily: 'Courier New',
+                  fontSize: 10,
+                ),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: PixelTheme.bgDark,
+                  hintText: '{ "schema": 1, ... }',
+                  hintStyle: TextStyle(
+                    color: PixelTheme.textWhite.withValues(alpha: 0.45),
+                    fontFamily: 'Courier New',
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.zero,
+                    borderSide: BorderSide(color: PixelTheme.border, width: 2),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.zero,
+                    borderSide: BorderSide(color: PixelTheme.accent, width: 2),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _EditorActionButton(
+              label: '\u5f9e\u526a\u8cbc\u7c3f\u8cbc\u4e0a',
+              onTap: _pasteFromClipboard,
+              color: PixelTheme.textWhite,
+              icon: Icons.content_paste_rounded,
+            ),
+            const SizedBox(height: 10),
+            _EditorActionButton(
+              label: '\u9084\u539f',
+              onTap: () => Navigator.of(context).pop(_controller.text),
+              color: PixelTheme.accent,
+              icon: Icons.restore_rounded,
+            ),
+            const SizedBox(height: 10),
+            _EditorActionButton(
+              label: 'CANCEL',
+              onTap: () => Navigator.of(context).pop(),
+              color: PixelTheme.textWhite.withValues(alpha: 0.75),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _PrintOrder {
   const _PrintOrder({
     required this.id,
@@ -864,7 +1312,7 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: const Text('列印卡片'),
+          title: const Text('\u5217\u5370\u5361\u7247'),
         ),
         body: SafeArea(
           child: LayoutBuilder(
@@ -901,7 +1349,9 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
                     SizedBox(height: s(14)),
                     if (_order == null)
                       _EditorActionButton(
-                        label: _isSubmitting ? '送出中...' : '送出列印需求',
+                        label: _isSubmitting
+                            ? '\u9001\u51fa\u4e2d...'
+                            : '\u9001\u51fa\u5217\u5370\u9700\u6c42',
                         color: PixelTheme.accent,
                         onTap: _isSubmitting ? () {} : _submitPrintOrder,
                       )
@@ -909,13 +1359,13 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
                       _BarcodeCard(order: _order!),
                       SizedBox(height: s(12)),
                       _EditorActionButton(
-                        label: '儲存條碼',
+                        label: '\u5132\u5b58\u689d\u78bc',
                         color: PixelTheme.accent,
                         onTap: () => _openBarcodeSaveScreen(_order!),
                       ),
                       const SizedBox(height: 10),
                       _EditorActionButton(
-                        label: '複製收件編號',
+                        label: '\u8907\u88fd\u6536\u4ef6\u7de8\u865f',
                         color: PixelTheme.accentBlue,
                         onTap: () => _copyOrderId(_order!.id),
                       ),
@@ -965,9 +1415,11 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
       setState(() {
         _isSubmitting = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('送出失敗，請稍後再試')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('\u9001\u51fa\u5217\u5370\u9700\u6c42\u5931\u6557'),
+        ),
+      );
       return;
     }
 
@@ -1350,7 +1802,9 @@ class _PrintInfoPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            order == null ? '列印說明' : '需求已送出',
+            order == null
+                ? '\u5217\u5370\u8aaa\u660e'
+                : '\u9700\u6c42\u5df2\u9001\u51fa',
             style: TextStyle(
               color: PixelTheme.accent,
               fontSize: 15,
@@ -1400,7 +1854,7 @@ class _BarcodeCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${order.format} 繚 ${order.fileName}',
+            '${order.format} - ${order.fileName}',
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.black,
@@ -1417,9 +1871,8 @@ class _BarcodeCard extends StatelessWidget {
               painter: _MockBarcodePainter(order.barcodeValue),
             ),
           ),
-          const SizedBox(height: 8),
           const Text(
-            '請帶著此條碼到紀念品攤位付款列印',
+            '\u8acb\u622a\u5716\u6216\u5132\u5b58\u689d\u78bc\uff0c\u5230\u5927\u6703\u7d00\u5ff5\u54c1\u6524\u4f4d\u4ed8\u8cbb\u5217\u5370\u3002',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.black,
@@ -1448,7 +1901,7 @@ class _BarcodeSaveScreen extends StatelessWidget {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: const Text('儲存條碼'),
+          title: const Text('\u689d\u78bc\u5132\u5b58'),
         ),
         body: SafeArea(
           child: Padding(
@@ -1787,20 +2240,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
   late final TextEditingController _linkController;
   late final TextEditingController _emojiController;
   late final TextEditingController _descriptionController;
-  final List<_EmojiOption> _emojiOptions = const <_EmojiOption>[
-    _EmojiOption('\u2728', 'Sparkle'),
-    _EmojiOption('\uD83D\uDD25', 'Fire'),
-    _EmojiOption('\uD83D\uDCA7', 'Water'),
-    _EmojiOption('\uD83C\uDF31', 'Nature'),
-    _EmojiOption('\u26A1', 'Electric'),
-    _EmojiOption('\uD83C\uDF19', 'Moon'),
-    _EmojiOption('\u2600\uFE0F', 'Sun'),
-    _EmojiOption('\uD83D\uDC8E', 'Gem'),
-    _EmojiOption('\uD83D\uDD11', 'Key'),
-    _EmojiOption('\uD83C\uDFAE', 'Game'),
-    _EmojiOption('\uD83D\uDEE1\uFE0F', 'Shield'),
-    _EmojiOption('\uD83D\uDE80', 'Rocket'),
-  ];
+  static const List<EmojiOption> _emojiOptions = emojiOptionsCatalog;
 
   @override
   void initState() {
@@ -1905,7 +2345,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _emojiOptions.map((_EmojiOption option) {
+            children: _emojiOptions.map((EmojiOption option) {
               final bool selected = _selectedEmojiValues().contains(
                 option.emoji,
               );
@@ -1962,7 +2402,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
           TextField(
             controller: _descriptionController,
             style: TextStyle(color: PixelTheme.textWhite),
-            decoration: _inputDecoration('卡片說明'),
+            decoration: _inputDecoration('?∠?隤芣?'),
             maxLines: 5,
             minLines: 3,
             autofocus: true,
@@ -1992,7 +2432,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
           TextField(
             controller: _descriptionController,
             style: TextStyle(color: PixelTheme.textWhite),
-            decoration: _inputDecoration('卡片說明'),
+            decoration: _inputDecoration('?∠?隤芣?'),
             maxLines: 3,
             minLines: 2,
           ),
@@ -2080,24 +2520,13 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
 
   List<String> _selectedEmojiValues() {
     final String raw = _emojiController.text;
-    final List<String> selected = <String>[];
-
-    for (final _EmojiOption option in _emojiOptions) {
-      if (raw.contains(option.emoji) && !selected.contains(option.emoji)) {
-        selected.add(option.emoji);
-      }
-    }
-
-    return selected.take(_maxEmojiSelection).toList(growable: true);
+    return selectedEmojiValuesFromCatalog(
+      raw,
+    ).take(_maxEmojiSelection).toList(growable: true);
   }
 
   String _emojiName(String emoji) {
-    for (final _EmojiOption option in _emojiOptions) {
-      if (option.emoji == emoji) {
-        return option.label;
-      }
-    }
-    return 'Emoji';
+    return emojiNameFor(emoji);
   }
 
   void _toggleEmoji(String emoji) {
@@ -2155,13 +2584,6 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
       ),
     );
   }
-}
-
-class _EmojiOption {
-  const _EmojiOption(this.emoji, this.label);
-
-  final String emoji;
-  final String label;
 }
 
 class _ColorEditorScreen extends StatefulWidget {
@@ -2224,7 +2646,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: const Text('選擇卡片顏色'),
+          title: const Text('\u9078\u64c7\u5361\u7247\u984f\u8272'),
         ),
         body: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
@@ -2272,7 +2694,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                           final Color? custom = await _showCustomColorDialog(
                             context,
                             initialColor: _selectedColor,
-                            title: '選擇卡片顏色',
+                            title: '\u81ea\u8a02\u5361\u7247\u984f\u8272',
                           );
                           if (custom == null) {
                             return;
@@ -2286,7 +2708,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                           side: BorderSide(color: PixelTheme.accent, width: 2),
                         ),
                         icon: const Icon(Icons.tune_rounded),
-                        label: const Text('?芾?憿 (RGB)'),
+                        label: const Text('\u81ea\u8a02\u984f\u8272 (RGB)'),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -2302,7 +2724,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                       ),
                       alignment: Alignment.center,
                       child: Text(
-                        '?汗?脣?\n#${_hex6(_selectedColor)}',
+                        '\u76ee\u524d\u984f\u8272\n#${_hex6(_selectedColor)}',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: _selectedColor.computeLuminance() > 0.5
@@ -2325,7 +2747,7 @@ class _ColorEditorScreenState extends State<_ColorEditorScreen> {
                             backgroundColor: PixelTheme.accent,
                             foregroundColor: PixelTheme.bgDark,
                           ),
-                          child: const Text('憟憿'),
+                          child: const Text('\u5957\u7528\u984f\u8272'),
                         ),
                       ),
                     ),
@@ -2367,7 +2789,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
   bool _strokeInProgress = false;
   final List<PixelGrid> _undoStack = <PixelGrid>[];
   final List<PixelGrid> _redoStack = <PixelGrid>[];
-  String _status = '初始化中...';
+  String _status = '準備畫圖...';
 
   final List<Color> _swatches = const <Color>[
     Color(0xFFFFFFFF),
@@ -2452,7 +2874,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
           setState(() {
             _brushColor = picked;
             _tool = _EditorTool.brush;
-            _status = '匯入圖片失敗';
+            _status = '已取得筆刷顏色';
           });
         }
         _strokeInProgress = false;
@@ -2594,7 +3016,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
       }
     }
 
-    _status = 'Canvas cleared';
+    _status = '畫布已清空';
   }
 
   @override
@@ -2612,7 +3034,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
         appBar: AppBar(
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
-          title: const Text('編輯卡片圖片'),
+          title: const Text('圖片編輯器'),
         ),
         body: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
@@ -2671,7 +3093,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            '$_status | 撌亙: ${_tool.label} | 蝑: $_brushSize',
+                            '$_status | \u5de5\u5177: ${_tool.label} | \u7b46\u5237: $_brushSize',
                             style: TextStyle(color: PixelTheme.accentBlue),
                           ),
                           const SizedBox(height: 12),
@@ -2682,21 +3104,21 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                               children: [
                                 _PixelToolButton(
                                   iconPattern: _iconImport,
-                                  label: '?臬',
+                                  label: '\u532f\u5165',
                                   onPressed: _importImage,
                                 ),
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconClear,
-                                  label: '匯入圖片',
+                                  label: '\u6e05\u7a7a',
                                   onPressed: _clearCanvas,
                                 ),
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconBrush,
                                   label: _tool == _EditorTool.brush
-                                      ? '?怎? ON'
-                                      : '?怎?',
+                                      ? '\u7b46\u5237 ON'
+                                      : '\u7b46\u5237',
                                   selected: _tool == _EditorTool.brush,
                                   onPressed: () {
                                     setState(() {
@@ -2708,8 +3130,8 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 _PixelToolButton(
                                   iconPattern: _iconEraser,
                                   label: _tool == _EditorTool.eraser
-                                      ? '璈∠??ON'
-                                      : '復原',
+                                      ? '\u6a61\u76ae\u64e6 ON'
+                                      : '\u6a61\u76ae\u64e6',
                                   selected: _tool == _EditorTool.eraser,
                                   onPressed: () {
                                     setState(() {
@@ -2721,8 +3143,8 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 _PixelToolButton(
                                   iconPattern: _iconBucket,
                                   label: _tool == _EditorTool.bucket
-                                      ? '瘝寞?獢?ON'
-                                      : '重做',
+                                      ? '\u586b\u8272 ON'
+                                      : '\u586b\u8272',
                                   selected: _tool == _EditorTool.bucket,
                                   onPressed: () {
                                     setState(() {
@@ -2734,8 +3156,8 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 _PixelToolButton(
                                   iconPattern: _iconPicker,
                                   label: _tool == _EditorTool.picker
-                                      ? '?貊恣 ON'
-                                      : '?貊恣',
+                                      ? '\u53d6\u8272 ON'
+                                      : '\u53d6\u8272',
                                   selected: _tool == _EditorTool.picker,
                                   onPressed: () {
                                     setState(() {
@@ -2746,19 +3168,21 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconUndo,
-                                  label: '敺拙?',
+                                  label: '\u5fa9\u539f',
                                   onPressed: _undo,
                                 ),
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconRedo,
-                                  label: '??',
+                                  label: '\u91cd\u505a',
                                   onPressed: _redo,
                                 ),
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconGrid,
-                                  label: _showGrid ? '?潛? ON' : '?潛? OFF',
+                                  label: _showGrid
+                                      ? '\u7db2\u683c ON'
+                                      : '\u7db2\u683c OFF',
                                   selected: _showGrid,
                                   onPressed: () {
                                     setState(() {
@@ -2769,7 +3193,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconMinus,
-                                  label: '蝑-',
+                                  label: '\u7b46\u5237-',
                                   onPressed: () {
                                     setState(() {
                                       if (_brushSize > 1) {
@@ -2781,7 +3205,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 const SizedBox(width: 8),
                                 _PixelToolButton(
                                   iconPattern: _iconPlus,
-                                  label: '蝑+',
+                                  label: '\u7b46\u5237+',
                                   onPressed: () {
                                     setState(() {
                                       if (_brushSize < 3) {
@@ -2806,12 +3230,13 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                 if (index == _swatches.length) {
                                   return GestureDetector(
                                     onTap: () async {
-                                      final Color? custom =
-                                          await _showCustomColorDialog(
-                                            context,
-                                            initialColor: _brushColor,
-                                            title: '?芾?蝑憿',
-                                          );
+                                      final Color?
+                                      custom = await _showCustomColorDialog(
+                                        context,
+                                        initialColor: _brushColor,
+                                        title:
+                                            '\u81ea\u8a02\u7b46\u5237\u984f\u8272',
+                                      );
                                       if (custom == null) {
                                         return;
                                       }
@@ -2821,7 +3246,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                                             _tool == _EditorTool.picker) {
                                           _tool = _EditorTool.brush;
                                         }
-                                        _status = 'Color picked';
+                                        _status = '已選擇顏色';
                                       });
                                     },
                                     child: Container(
@@ -2900,7 +3325,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                         backgroundColor: PixelTheme.accent,
                         foregroundColor: PixelTheme.bgDark,
                       ),
-                      child: const Text('Apply Pixel Art'),
+                      child: const Text('套用像素圖'),
                     ),
                   ),
                 ),
@@ -3044,7 +3469,7 @@ class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
           backgroundColor: PixelTheme.bgMid,
           foregroundColor: PixelTheme.accent,
           title: Text(
-            '?臬????- ${widget.sourceName} (${widget.sourceFormat})',
+            '\u5716\u7247\u88c1\u5207 - ${widget.sourceName} (${widget.sourceFormat})',
           ),
         ),
         body: LayoutBuilder(
@@ -3165,7 +3590,7 @@ class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
                           },
                         ),
                         _ToolButton(
-                          label: '填滿選取範圍',
+                          label: '重置位置',
                           onPressed: () {
                             setState(() {
                               _viewScale = 1.0;
@@ -3208,7 +3633,7 @@ class _ImagePreprocessScreenState extends State<_ImagePreprocessScreen> {
                             backgroundColor: PixelTheme.accent,
                             foregroundColor: PixelTheme.bgDark,
                           ),
-                          child: const Text('Apply Crop'),
+                          child: const Text('套用裁切'),
                         ),
                       ),
                     ),
@@ -3627,7 +4052,7 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'HEX ?脩Ⅳ (#RRGGBB)',
+                      'HEX \u984f\u8272 (#RRGGBB)',
                       style: TextStyle(
                         color: _previewTextColor,
                         fontWeight: FontWeight.w900,
@@ -3729,7 +4154,7 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('??'),
+            child: const Text('\u53d6\u6d88'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(_preview),
@@ -3737,7 +4162,7 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
               backgroundColor: PixelTheme.accent,
               foregroundColor: PixelTheme.bgDark,
             ),
-            child: const Text('取消'),
+            child: const Text('確定'),
           ),
         ],
       ),

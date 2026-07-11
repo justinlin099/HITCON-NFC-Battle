@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'my_card_editor_page.dart';
@@ -9,6 +11,8 @@ import 'pixel_theme.dart';
 import 'score_board_page.dart';
 
 import '../../services/auth_service.dart';
+import '../../services/local_collection_store.dart';
+import '../../services/local_profile_store.dart';
 import '../../services/mock_api_service.dart';
 
 class CardCollectionPage extends StatefulWidget {
@@ -22,30 +26,80 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   static const int _prizeRequirement = 9;
 
   final AuthService _authService = AuthService();
+  final LocalCollectionStore _localStore = LocalCollectionStore();
+  final LocalProfileStore _localProfileStore = LocalProfileStore();
 
   PixelScheme _selectedScheme = PixelTheme.defaultScheme;
   int _selectedTabIndex = 0;
+  bool _appliedInitialTab = false;
 
   bool _isLoading = true;
+  bool _ntagReminderChecked = false;
+  final ValueNotifier<RefreshIndicatorStatus?> _refreshStatus =
+      ValueNotifier<RefreshIndicatorStatus?>(null);
+  final ValueNotifier<double> _refreshPullDistance = ValueNotifier<double>(0);
   Map<String, dynamic>? _collectionData;
+  List<Map<String, dynamic>> _localCards = <Map<String, dynamic>>[];
   List<Map<String, String>> _featuredBooths = <Map<String, String>>[];
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_showNtagPairingReminderIfNeeded());
+    });
   }
 
-  Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-    });
+  @override
+  void dispose() {
+    _refreshStatus.dispose();
+    _refreshPullDistance.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_appliedInitialTab) {
+      return;
+    }
+    _appliedInitialTab = true;
+
+    final Object? args = ModalRoute.of(context)?.settings.arguments;
+    if (args is Map && args['tab'] is int) {
+      final int tab = args['tab'] as int;
+      if (tab >= 0 && tab <= 2) {
+        _selectedTabIndex = tab;
+      }
+    }
+  }
+
+  Future<void> _loadData({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     try {
+      final String? userId = _authService.currentUserId;
+      List<Map<String, dynamic>> localCards = <Map<String, dynamic>>[];
+      if (userId != null) {
+        localCards = await _localStore.loadCards(userId);
+      }
+
       final List<Map<String, String>> boothResult =
           await MockApiService.getFeaturedBooths();
       final Map<String, dynamic>? collectionResult = await _authService
           .fetchCollectionRecords();
+      if (userId != null && collectionResult != null) {
+        await _localStore.saveCollectionIndex(
+          userId: userId,
+          collection: collectionResult,
+        );
+        localCards = await _localStore.loadCards(userId);
+      }
 
       if (!mounted) {
         return;
@@ -54,9 +108,10 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       setState(() {
         _featuredBooths = boothResult;
         _collectionData = collectionResult;
+        _localCards = localCards;
       });
     } finally {
-      if (mounted) {
+      if (mounted && showLoading) {
         setState(() {
           _isLoading = false;
         });
@@ -65,6 +120,9 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   }
 
   List<Map<String, dynamic>> get _cards {
+    if (_localCards.isNotEmpty) {
+      return _localCards;
+    }
     final dynamic raw = _collectionData?['collection'];
     if (raw is List) {
       return raw.whereType<Map<String, dynamic>>().toList();
@@ -72,10 +130,66 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     return <Map<String, dynamic>>[];
   }
 
-  int get _totalCollected =>
-      _collectionData?['total_collected'] as int? ?? _cards.length;
+  int get _totalCollected {
+    final int remoteTotal = _collectionData?['total_collected'] as int? ?? 0;
+    return math.max(remoteTotal, _cards.length);
+  }
 
   bool get _isComplete => _totalCollected >= _prizeRequirement;
+
+  Future<void> _showNtagPairingReminderIfNeeded() async {
+    if (_ntagReminderChecked || !mounted) {
+      return;
+    }
+    _ntagReminderChecked = true;
+
+    if (!_authService.isRegularUser) {
+      return;
+    }
+    final String? userId = _authService.currentUserId;
+    if (userId == null) {
+      return;
+    }
+
+    final Map<String, dynamic> profile = await _localProfileStore.load(userId);
+    final String pairedUid = (profile['paired_ntag_uid'] as String? ?? '')
+        .trim();
+    if (pairedUid.isNotEmpty || !mounted) {
+      return;
+    }
+
+    final bool? goPair = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => const _NtagPairingReminderDialog(),
+    );
+    if (goPair == true && mounted) {
+      setState(() {
+        _selectedTabIndex = 1;
+      });
+    }
+  }
+
+  String _titleForCard(Map<String, dynamic> card) {
+    return card['card_title'] as String? ??
+        card['display_name'] as String? ??
+        card['sponsor_stand_name'] as String? ??
+        card['community_stand_name'] as String? ??
+        card['tag_name'] as String? ??
+        'Unknown';
+  }
+
+  String _attributeEmojiForCard(Map<String, dynamic> card) {
+    return card['attribute_emoji'] as String? ??
+        card['emoji_icon'] as String? ??
+        '*';
+  }
+
+  String _attributeLabelForCard(Map<String, dynamic> card) {
+    return card['attribute_label'] as String? ??
+        card['user_type'] as String? ??
+        card['scan_type'] as String? ??
+        'UNKNOWN';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -83,7 +197,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     final String pageTitle = switch (_selectedTabIndex) {
       1 => '我的卡片',
       2 => 'SCORE BOARD',
-      _ => 'HITCON NFC 大亂鬥',
+      _ => 'HITCON NFC Battle',
     };
 
     final ThemeData pixelTheme = Theme.of(context).copyWith(
@@ -115,8 +229,8 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
             toolbarHeight: 68,
             actions: [
               PopupMenuButton<PixelScheme>(
-                tooltip: '切換配色',
-                icon: const Icon(Icons.palette_rounded),
+                tooltip: 'Palette',
+                icon: _PixelThemeIcon(color: PixelTheme.accent),
                 onSelected: (PixelScheme scheme) {
                   setState(() {
                     _selectedScheme = scheme;
@@ -127,21 +241,22 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                       .map(
                         (PixelScheme scheme) => PopupMenuItem<PixelScheme>(
                           value: scheme,
-                          child: Text('${PixelTheme.labelOf(scheme)} 配色'),
+                          child: Text('${PixelTheme.labelOf(scheme)} Theme'),
                         ),
                       )
                       .toList();
                 },
               ),
-              if (_selectedTabIndex == 0)
-                _PixelButton(onPressed: _loadData, label: '↻', tooltip: '重新整理'),
             ],
           ),
           body: IndexedStack(
             index: _selectedTabIndex,
             children: [
               _buildCollectionBody(),
-              MyCardEditorPage(scheme: _selectedScheme),
+              MyCardEditorPage(
+                scheme: _selectedScheme,
+                onBackupRestored: _loadData,
+              ),
               ScoreBoardPage(scheme: _selectedScheme),
             ],
           ),
@@ -238,92 +353,147 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: _loadData,
-      color: PixelTheme.accent,
-      backgroundColor: PixelTheme.bgMid,
-      child: CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverToBoxAdapter(
-            child: _HeroHeader(
-              totalCollected: _totalCollected,
-              prizeRequirement: _prizeRequirement,
-              isComplete: _isComplete,
-            ),
-          ),
-          SliverPersistentHeader(
-            pinned: true,
-            delegate: _PinnedBoothHeaderDelegate(
-              child: _PinnedBoothStrip(booths: _featuredBooths),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(8, 12, 8, 24),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 10,
-                childAspectRatio: 53.98 / 85.60,
-              ),
-              delegate: SliverChildBuilderDelegate((
-                BuildContext context,
-                int index,
-              ) {
-                final Map<String, dynamic> card = _cards[index];
-                final String title =
-                    card['card_title'] as String? ??
-                    card['tag_name'] as String? ??
-                    'Unknown';
-                final String attributeEmoji =
-                    card['attribute_emoji'] as String? ?? '❓';
-                final String attributeLabel =
-                    card['attribute_label'] as String? ?? 'UNKNOWN';
-                final String rawLink = card['link'] as String? ?? '';
-                final String link = rawLink.trim().isEmpty
-                    ? 'https://hitcon.org'
-                    : rawLink;
-                final Color cardColor = _PixelCard.colorForIndex(index);
-                final String imageAsset = _PixelCard.imageAssetForIndex(index);
-                final String heroTag = 'card-$index';
-                return _PixelCard(
-                  title: title,
-                  uid: card['physical_uid'] as String? ?? '',
-                  collectedAt: card['collected_at'] as String? ?? '',
-                  index: index,
-                  attributeEmoji: attributeEmoji,
-                  attributeLabel: attributeLabel,
-                  heroTag: heroTag,
-                  onTap: () async => _openCardDetail(
-                    heroTag: heroTag,
-                    title: title,
-                    attributeEmoji: attributeEmoji,
-                    attributeLabel: attributeLabel,
-                    link: link,
-                    uid: card['physical_uid'] as String? ?? '',
-                    collectedAt: card['collected_at'] as String? ?? '',
-                    cardColor: cardColor,
-                    imageAsset: imageAsset,
+    return Stack(
+      children: [
+        RefreshIndicator.noSpinner(
+          onRefresh: () => _loadData(showLoading: false),
+          onStatusChange: (RefreshIndicatorStatus? status) {
+            _handleRefreshStatusChange(status);
+          },
+          child: NotificationListener<ScrollNotification>(
+            onNotification: _handleRefreshScrollNotification,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _HeroHeader(
+                    totalCollected: _totalCollected,
+                    prizeRequirement: _prizeRequirement,
+                    isComplete: _isComplete,
                   ),
-                );
-              }, childCount: _cards.length),
+                ),
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _PinnedBoothHeaderDelegate(
+                    child: _PinnedBoothStrip(booths: _featuredBooths),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(8, 12, 8, 24),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 10,
+                          childAspectRatio: 53.98 / 85.60,
+                        ),
+                    delegate: SliverChildBuilderDelegate((
+                      BuildContext context,
+                      int index,
+                    ) {
+                      final Map<String, dynamic> card = _cards[index];
+                      final String title = _titleForCard(card);
+                      final String attributeEmoji = _attributeEmojiForCard(
+                        card,
+                      );
+                      final String attributeLabel = _attributeLabelForCard(
+                        card,
+                      );
+                      final String rawLink = card['link'] as String? ?? '';
+                      final String link = rawLink.trim().isEmpty
+                          ? 'https://hitcon.org'
+                          : rawLink;
+                      final Color cardColor = _PixelCard.colorForIndex(index);
+                      final String imageAsset = _PixelCard.imageAssetForIndex(
+                        index,
+                      );
+                      final String heroTag = 'card-$index';
+                      return _PixelCard(
+                        title: title,
+                        uid: card['physical_uid'] as String? ?? '',
+                        collectedAt: card['collected_at'] as String? ?? '',
+                        index: index,
+                        attributeEmoji: attributeEmoji,
+                        attributeLabel: attributeLabel,
+                        heroTag: heroTag,
+                        onTap: () async => _openCardDetail(
+                          heroTag: heroTag,
+                          title: title,
+                          attributeEmoji: attributeEmoji,
+                          attributeLabel: attributeLabel,
+                          link: link,
+                          uid: card['physical_uid'] as String? ?? '',
+                          collectedAt: card['collected_at'] as String? ?? '',
+                          cardColor: cardColor,
+                          imageAsset: imageAsset,
+                        ),
+                      );
+                    }, childCount: _cards.length),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 32),
+                    child: _PrizePanel(
+                      totalCollected: _totalCollected,
+                      requiredCount: _prizeRequirement,
+                      isComplete: _isComplete,
+                      onRedeem: null,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 32),
-              child: _PrizePanel(
-                totalCollected: _totalCollected,
-                requiredCount: _prizeRequirement,
-                isComplete: _isComplete,
-                onRedeem: null,
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
+        _PixelRefreshBanner(
+          statusListenable: _refreshStatus,
+          pullDistanceListenable: _refreshPullDistance,
+        ),
+      ],
     );
+  }
+
+  void _handleRefreshStatusChange(RefreshIndicatorStatus? status) {
+    if (_refreshStatus.value == status) {
+      return;
+    }
+    _refreshStatus.value = status;
+    if (status == null || status == RefreshIndicatorStatus.canceled) {
+      _refreshPullDistance.value = 0;
+    }
+    if (status == RefreshIndicatorStatus.done) {
+      Future<void>.delayed(const Duration(milliseconds: 650), () {
+        if (!mounted || _refreshStatus.value != RefreshIndicatorStatus.done) {
+          return;
+        }
+        _refreshStatus.value = null;
+        _refreshPullDistance.value = 0;
+      });
+    }
+  }
+
+  bool _handleRefreshScrollNotification(ScrollNotification notification) {
+    if (notification is OverscrollNotification &&
+        notification.metrics.pixels <= notification.metrics.minScrollExtent &&
+        notification.overscroll < 0) {
+      _refreshPullDistance.value =
+          (_refreshPullDistance.value - notification.overscroll)
+              .clamp(0, 96)
+              .toDouble();
+    } else if (notification is ScrollUpdateNotification &&
+        notification.metrics.pixels <= notification.metrics.minScrollExtent &&
+        notification.dragDetails != null) {
+      _refreshPullDistance.value = (-notification.metrics.pixels)
+          .clamp(0, 96)
+          .toDouble();
+    } else if (notification is ScrollEndNotification &&
+        _refreshStatus.value != RefreshIndicatorStatus.refresh &&
+        _refreshStatus.value != RefreshIndicatorStatus.snap) {
+      _refreshPullDistance.value = 0;
+    }
+    return false;
   }
 
   Future<void> _openCardDetail({
@@ -396,6 +566,372 @@ Widget _wrapShuttle({
 }
 
 /// 英雄區塊 - 顯示進度和統計
+class _NtagPairingReminderDialog extends StatelessWidget {
+  const _NtagPairingReminderDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(color: PixelTheme.accent, width: 3),
+          boxShadow: const [
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'NTAG PAIRING',
+              style: TextStyle(
+                color: PixelTheme.accent,
+                fontFamily: 'Unifont',
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '\u4f60\u9084\u6c92\u6709\u914d\u5c0d NTAG Badge\u3002\u914d\u5c0d\u5f8c\u624d\u80fd\u8b93\u5225\u4eba\u6383\u63cf\u4f60\u7684\u5361\u7247\u3002',
+              style: TextStyle(
+                color: PixelTheme.textWhite,
+                fontFamily: 'Unifont',
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _PixelButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    label: '\u7a0d\u5f8c',
+                    fullWidth: true,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _PixelButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    label: '\u524d\u5f80\u914d\u5c0d',
+                    fullWidth: true,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PixelRefreshBanner extends StatefulWidget {
+  const _PixelRefreshBanner({
+    required this.statusListenable,
+    required this.pullDistanceListenable,
+  });
+
+  final ValueListenable<RefreshIndicatorStatus?> statusListenable;
+  final ValueListenable<double> pullDistanceListenable;
+
+  @override
+  State<_PixelRefreshBanner> createState() => _PixelRefreshBannerState();
+}
+
+class _PixelRefreshBannerState extends State<_PixelRefreshBanner> {
+  RefreshIndicatorStatus? _displayStatus;
+  double _displayPullDistance = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.statusListenable.addListener(_handleRefreshValueChanged);
+    widget.pullDistanceListenable.addListener(_handleRefreshValueChanged);
+    _syncDisplayState();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PixelRefreshBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.statusListenable != widget.statusListenable) {
+      oldWidget.statusListenable.removeListener(_handleRefreshValueChanged);
+      widget.statusListenable.addListener(_handleRefreshValueChanged);
+    }
+    if (oldWidget.pullDistanceListenable != widget.pullDistanceListenable) {
+      oldWidget.pullDistanceListenable.removeListener(
+        _handleRefreshValueChanged,
+      );
+      widget.pullDistanceListenable.addListener(_handleRefreshValueChanged);
+    }
+    _syncDisplayState();
+  }
+
+  @override
+  void dispose() {
+    widget.statusListenable.removeListener(_handleRefreshValueChanged);
+    widget.pullDistanceListenable.removeListener(_handleRefreshValueChanged);
+    super.dispose();
+  }
+
+  RefreshIndicatorStatus? get _status => widget.statusListenable.value;
+
+  double get _pullDistance => widget.pullDistanceListenable.value;
+
+  void _handleRefreshValueChanged() {
+    setState(_syncDisplayState);
+  }
+
+  void _syncDisplayState() {
+    if (_status != null && _status != RefreshIndicatorStatus.canceled) {
+      _displayStatus = _status;
+    }
+    if (_pullDistance > 0 || _visible) {
+      _displayPullDistance = _pullDistance;
+    }
+  }
+
+  bool get _visible {
+    return _status != null && _status != RefreshIndicatorStatus.canceled;
+  }
+
+  String get _message {
+    return switch (_displayStatus) {
+      RefreshIndicatorStatus.drag => '\u4e0b\u62c9\u91cd\u65b0\u6574\u7406',
+      RefreshIndicatorStatus.armed => '\u653e\u958b\u958b\u59cb\u540c\u6b65',
+      RefreshIndicatorStatus.snap ||
+      RefreshIndicatorStatus.refresh => '\u540c\u6b65\u4e2d...',
+      RefreshIndicatorStatus.done => '\u66f4\u65b0\u5b8c\u6210',
+      _ => '',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double top = (_displayPullDistance * 0.72).clamp(8, 62).toDouble();
+    return Positioned(
+      top: top,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          opacity: _visible ? 1 : 0,
+          duration: const Duration(milliseconds: 120),
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: PixelTheme.bgMid,
+                border: Border.all(color: PixelTheme.accent, width: 2),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black,
+                    blurRadius: 0,
+                    offset: Offset(4, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _PixelRefreshGlyph(status: _displayStatus),
+                  const SizedBox(width: 8),
+                  Text(
+                    _message,
+                    style: TextStyle(
+                      color: PixelTheme.accent,
+                      fontFamily: 'Unifont',
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PixelRefreshGlyph extends StatelessWidget {
+  const _PixelRefreshGlyph({required this.status});
+
+  final RefreshIndicatorStatus? status;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 18,
+      child: CustomPaint(painter: _PixelRefreshGlyphPainter(status: status)),
+    );
+  }
+}
+
+class _PixelRefreshGlyphPainter extends CustomPainter {
+  const _PixelRefreshGlyphPainter({required this.status});
+
+  final RefreshIndicatorStatus? status;
+
+  static const List<String> _down = <String>[
+    '00111100',
+    '00111100',
+    '00111100',
+    '11111111',
+    '01111110',
+    '00111100',
+    '00011000',
+    '00000000',
+  ];
+
+  static const List<String> _up = <String>[
+    '00011000',
+    '00111100',
+    '01111110',
+    '11111111',
+    '00111100',
+    '00111100',
+    '00111100',
+    '00000000',
+  ];
+
+  static const List<String> _sync = <String>[
+    '00111100',
+    '01100010',
+    '11000001',
+    '10011001',
+    '10011001',
+    '10000011',
+    '01000110',
+    '00111100',
+  ];
+
+  static const List<String> _done = <String>[
+    '00000001',
+    '00000011',
+    '00000110',
+    '11001100',
+    '11111000',
+    '01110000',
+    '00100000',
+    '00000000',
+  ];
+
+  List<String> get _pattern {
+    return switch (status) {
+      RefreshIndicatorStatus.armed => _up,
+      RefreshIndicatorStatus.snap || RefreshIndicatorStatus.refresh => _sync,
+      RefreshIndicatorStatus.done => _done,
+      _ => _down,
+    };
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint paint = Paint()
+      ..color = PixelTheme.accent
+      ..style = PaintingStyle.fill;
+    final double cell = size.shortestSide / 8;
+    final double left = (size.width - cell * 8) / 2;
+    final double top = (size.height - cell * 8) / 2;
+
+    for (int y = 0; y < _pattern.length; y += 1) {
+      for (int x = 0; x < _pattern[y].length; x += 1) {
+        if (_pattern[y][x] != '1') {
+          continue;
+        }
+        canvas.drawRect(
+          Rect.fromLTWH(left + x * cell, top + y * cell, cell, cell),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PixelRefreshGlyphPainter oldDelegate) {
+    return oldDelegate.status != status;
+  }
+}
+
+class _PixelThemeIcon extends StatelessWidget {
+  const _PixelThemeIcon({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 28,
+      child: CustomPaint(painter: _PixelThemeIconPainter(color: color)),
+    );
+  }
+}
+
+class _PixelThemeIconPainter extends CustomPainter {
+  const _PixelThemeIconPainter({required this.color});
+
+  final Color color;
+
+  static const List<String> _outline = <String>[
+    '00001111100000',
+    '00011111111000',
+    '00111111111100',
+    '0111AA11111110',
+    '1111AA11BB1111',
+    '11111111BB1111',
+    '111CC111111111',
+    '111CC111111111',
+    '01111111100110',
+    '00111111000010',
+    '00011111000110',
+    '00001111111100',
+    '00000111111000',
+    '00000011100000',
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final int columns = _outline.first.length;
+    final int rows = _outline.length;
+    final double cell = size.shortestSide / columns;
+    final double left = (size.width - cell * columns) / 2;
+    final double top = (size.height - cell * rows) / 2;
+    final Paint paint = Paint()..style = PaintingStyle.fill;
+
+    for (int y = 0; y < _outline.length; y += 1) {
+      for (int x = 0; x < _outline[y].length; x += 1) {
+        final String pixel = _outline[y][x];
+        if (pixel == '0') {
+          continue;
+        }
+        paint.color = switch (pixel) {
+          'A' => PixelTheme.warning,
+          'B' => PixelTheme.accentBlue,
+          'C' => PixelTheme.textWhite,
+          _ => color,
+        };
+        canvas.drawRect(
+          Rect.fromLTWH(left + x * cell, top + y * cell, cell, cell),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PixelThemeIconPainter oldDelegate) {
+    return oldDelegate.color != color;
+  }
+}
+
 enum _PixelNavIconType { collection, edit, trophy }
 
 class _PixelNavIcon extends StatelessWidget {
@@ -566,7 +1102,7 @@ class _HeroHeader extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  '◆',
+                  '*',
                   style: TextStyle(fontSize: 28, color: PixelTheme.bgDark),
                 ),
               ),
@@ -635,8 +1171,8 @@ class _HeroHeader extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             isComplete
-                ? '✓ 達成兌換條件'
-                : '還需 ${prizeRequirement - totalCollected} 張',
+                ? 'Prize ready. Please visit the staff booth.'
+                : 'Collect ${prizeRequirement - totalCollected} more cards.',
             style: TextStyle(
               color: isComplete ? PixelTheme.success : PixelTheme.accentBlue,
               fontSize: 11,
@@ -796,7 +1332,7 @@ class _PinnedBoothStrip extends StatelessWidget {
                       ),
                       alignment: Alignment.center,
                       child: Text(
-                        booth['icon'] ?? '◆',
+                        booth['icon'] ?? '*',
                         style: TextStyle(
                           fontSize: 18,
                           color: boothColor,
@@ -1047,7 +1583,7 @@ class _PrizePanel extends StatelessWidget {
           Row(
             children: [
               Text(
-                isComplete ? '★' : '◇',
+                isComplete ? '*' : '!',
                 style: TextStyle(
                   color: isComplete ? PixelTheme.success : PixelTheme.border,
                   fontSize: 16,
@@ -1070,8 +1606,8 @@ class _PrizePanel extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             isComplete
-                ? '達成目標 ✓ 可到櫃台領取獎品'
-                : '已收集 $totalCollected / $requiredCount\n還需 ${requiredCount - totalCollected} 張卡片',
+                ? 'Prize ready. Please visit the staff booth.'
+                : 'Collected $totalCollected / $requiredCount. Need ${requiredCount - totalCollected} more.',
             style: TextStyle(
               color: PixelTheme.textWhite,
               fontSize: 11,
@@ -1098,13 +1634,11 @@ class _PixelButton extends StatefulWidget {
   const _PixelButton({
     required this.onPressed,
     required this.label,
-    this.tooltip,
     this.fullWidth = false,
   });
 
   final VoidCallback? onPressed;
   final String label;
-  final String? tooltip;
   final bool fullWidth;
 
   @override
@@ -1134,7 +1668,7 @@ class _PixelButtonState extends State<_PixelButton> {
           : null,
       onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
       child: Tooltip(
-        message: widget.tooltip ?? '',
+        message: widget.label,
         child: Container(
           height: widget.fullWidth ? 44 : 36,
           width: widget.fullWidth ? double.infinity : null,

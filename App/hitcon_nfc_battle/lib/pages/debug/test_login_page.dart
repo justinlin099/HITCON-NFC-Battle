@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../config/app_config.dart';
 import '../../services/auth_service.dart';
 import '../../services/mock_api_service.dart';
+import '../../services/setup_service.dart';
 
 /// 測試登入頁面 - 用於快速切換不同角色進行測試
 class TestLoginPage extends StatefulWidget {
@@ -47,17 +48,17 @@ class _TestLoginPageState extends State<TestLoginPage> {
                     Text(
                       '🔴 測試模式已啟用',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Colors.amber.shade900,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        color: Colors.amber.shade900,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '使用 Mock 服務進行開發測試\n無需後端 API',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.amber.shade800,
-                          ),
+                        color: Colors.amber.shade800,
+                      ),
                     ),
                   ],
                 ),
@@ -69,16 +70,16 @@ class _TestLoginPageState extends State<TestLoginPage> {
               Text(
                 '選擇角色進行測試',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
 
               const SizedBox(height: 8),
               Text(
                 '各角色有不同的功能和權限',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade600,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
               ),
 
               const SizedBox(height: 40),
@@ -128,8 +129,8 @@ class _TestLoginPageState extends State<TestLoginPage> {
                     Text(
                       '📌 Mock 服務信息',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     _buildInfoRow('模式', 'Mock（本地測試）'),
@@ -181,9 +182,7 @@ class _TestLoginPageState extends State<TestLoginPage> {
         backgroundColor: color,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       child: SizedBox(
         width: double.infinity,
@@ -192,18 +191,12 @@ class _TestLoginPageState extends State<TestLoginPage> {
           children: [
             Text(
               label,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
               description,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-              ),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
             ),
           ],
         ),
@@ -216,15 +209,12 @@ class _TestLoginPageState extends State<TestLoginPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
         Text(
           value,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
         ),
       ],
     );
@@ -241,7 +231,15 @@ class _TestLoginPageState extends State<TestLoginPage> {
       if (mounted) {
         if (success) {
           final AuthService authService = AuthService();
-          final String routeName = authService.isRegularUser ? '/collection' : '/home';
+          final String? userId = authService.currentUserId;
+          final bool setupComplete =
+              userId != null && await SetupService().isComplete(userId);
+          if (!mounted) {
+            return;
+          }
+          final String routeName = authService.isRegularUser
+              ? (setupComplete ? '/collection' : '/setup')
+              : '/admin';
           Navigator.of(context).pushReplacementNamed(routeName);
         } else {
           // 登入失敗

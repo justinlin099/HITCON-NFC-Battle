@@ -3,16 +3,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
 import 'mock_api_service.dart';
+import 'nfc_battle_api_client.dart';
+import 'ntag_security_service.dart';
+import 'staging_jwt_service.dart';
 
-/// 用戶角色枚舉
-enum UserRole {
-  admin, // 管理者 - NFC 寫入工具
-  user, // 普通用戶 - 遊戲/集卡主介面
-  eventStaff, // 活動管理人員 - 獎品發放
-  unknown, // 未知
-}
+enum UserRole { admin, user, eventStaff, unknown }
 
-/// 認證服務 - 管理用戶登入狀態和權限
 class AuthService {
   static final AuthService _instance = AuthService._internal();
 
@@ -22,230 +18,579 @@ class AuthService {
 
   AuthService._internal();
 
+  static const String _stagingJwtKey = 'staging_jwt_token';
+  static const String _stagingUserIdKey = 'staging_user_id';
+  static const String _stagingUserRoleKey = 'staging_user_role';
+
+  final NfcBattleApiClient _api = const NfcBattleApiClient();
+
   String? _currentUserId;
   UserRole _currentRole = UserRole.unknown;
   String? _jwtToken;
   Map<String, dynamic>? _userProfile;
 
-  /// 用戶登入（支援 Mock 和真實 API）
   Future<bool> login(String userType) async {
     try {
-      _log('🔐 Attempting login with userType: $userType');
+      _log('Attempting login with userType: $userType');
 
       if (AppConfig.useMockServices) {
-        // 測試模式：使用 Mock 服務
-        await MockApiService.saveTestJwt(userType);
+        return _mockLogin(userType);
+      }
 
-        final prefs = await SharedPreferences.getInstance();
-        _jwtToken = prefs.getString('test_jwt_token');
-        _currentUserId = prefs.getString('test_user_id');
+      final _StagingIdentity identity = _identityForUserType(userType);
+      final String token = const StagingJwtService().createToken(
+        userId: identity.userId,
+        role: identity.apiRole,
+      );
 
-        // 設定角色
-        _setRoleFromString(userType.toUpperCase());
+      _jwtToken = token;
+      _currentUserId = identity.userId;
+      _currentRole = identity.appRole;
 
-        // 從 Mock 服務獲取用戶資料
-        if (_currentUserId != null) {
-          final profileResult = await MockApiService.getUserProfile(
-            _currentUserId!,
-          );
-          if (profileResult['status'] == 'success') {
-            _userProfile = profileResult['data'];
-            _log(
-              '✅ Login successful - User: $_currentUserId, Role: $_currentRole',
-            );
-            return true;
-          }
-        }
-      } else {
-        // 真實模式：調用後端 SSO
-        _log('⚠️  Real API mode not yet implemented');
-        // TODO: 實現真實 SSO 登入
+      final Map<String, dynamic>? profile = await fetchUserProfile();
+      if (profile == null) {
         return false;
       }
 
-      return false;
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_stagingJwtKey, token);
+      await prefs.setString(_stagingUserIdKey, _currentUserId!);
+      await prefs.setString(_stagingUserRoleKey, identity.apiRole);
+      return true;
     } catch (e) {
-      _log('❌ Login error: $e');
+      _log('Login error: $e');
       return false;
     }
   }
 
-  /// 登出
+  Future<bool> _mockLogin(String userType) async {
+    await MockApiService.saveTestJwt(userType);
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    _jwtToken = prefs.getString('test_jwt_token');
+    _currentUserId = prefs.getString('test_user_id');
+    _setRoleFromString(userType.toUpperCase());
+
+    if (_currentUserId == null) {
+      return false;
+    }
+
+    final Map<String, dynamic> profileResult =
+        await MockApiService.getUserProfile(_currentUserId!);
+    if (profileResult['status'] != 'success') {
+      return false;
+    }
+    _userProfile = _normalizeProfile(profileResult['data']);
+    return true;
+  }
+
   Future<void> logout() async {
     try {
-      _log('🚪 Logging out user: $_currentUserId');
-
       if (AppConfig.useMockServices) {
         await MockApiService.clearTestData();
       }
+
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_stagingJwtKey);
+      await prefs.remove(_stagingUserIdKey);
+      await prefs.remove(_stagingUserRoleKey);
 
       _currentUserId = null;
       _jwtToken = null;
       _userProfile = null;
       _currentRole = UserRole.unknown;
-
-      _log('✅ Logout successful');
     } catch (e) {
-      _log('❌ Logout error: $e');
+      _log('Logout error: $e');
     }
   }
 
-  /// 獲取用戶個人資料
   Future<Map<String, dynamic>?> fetchUserProfile() async {
-    if (_currentUserId == null) {
-      _log('⚠️  No user logged in');
+    if (!_ensureSession()) {
+      _log('No user logged in');
       return null;
     }
 
     try {
       if (AppConfig.useMockServices) {
-        final result = await MockApiService.getUserProfile(_currentUserId!);
+        final Map<String, dynamic> result = await MockApiService.getUserProfile(
+          _currentUserId!,
+        );
         if (result['status'] == 'success') {
-          _userProfile = result['data'];
-          _log('📋 User profile fetched: ${_userProfile?['display_name']}');
+          _userProfile = _normalizeProfile(result['data']);
           return _userProfile;
         }
       } else {
-        // TODO: 呼叫真實 API
+        final Map<String, dynamic> result = await _api.get(
+          '/users/me',
+          token: _jwtToken!,
+        );
+        _userProfile = _normalizeProfile(result['data']);
+        _currentUserId = _userProfile?['user_id'] as String? ?? _currentUserId;
+        _setRoleFromApiRole(_userProfile?['role'] as String?);
+        return _userProfile;
       }
     } catch (e) {
-      _log('❌ Error fetching user profile: $e');
+      _log('Error fetching user profile: $e');
     }
 
     return null;
   }
 
-  /// 更新用戶資料
   Future<bool> updateUserProfile(Map<String, dynamic> updates) async {
-    if (_currentUserId == null) {
-      _log('⚠️  No user logged in');
+    if (!_ensureSession()) {
+      _log('No user logged in');
       return false;
     }
 
     try {
       if (AppConfig.useMockServices) {
-        final result = await MockApiService.updateUserProfile(
-          _currentUserId!,
-          updates,
-        );
+        final Map<String, dynamic> result =
+            await MockApiService.updateUserProfile(_currentUserId!, updates);
         if (result['status'] == 'success') {
-          // 重新獲取更新後的資料
           await fetchUserProfile();
-          _log('✅ User profile updated');
           return true;
         }
       } else {
-        // TODO: 呼叫真實 API
+        final Map<String, dynamic> body = _profileUpdateForApi(updates);
+        if (body.isEmpty) {
+          return true;
+        }
+        final Map<String, dynamic> result = await _api.patch(
+          '/users/me',
+          token: _jwtToken!,
+          body: body,
+        );
+        _userProfile = _normalizeProfile(result['data']);
+        return true;
       }
     } catch (e) {
-      _log('❌ Error updating user profile: $e');
+      _log('Error updating user profile: $e');
     }
 
     return false;
   }
 
-  /// 綁定 NFC 標籤
   Future<bool> pairNfcTag(String uid) async {
-    if (_currentUserId == null) {
-      _log('⚠️  No user logged in');
+    if (!_ensureSession()) {
+      _log('No user logged in');
       return false;
     }
 
     try {
       if (AppConfig.useMockServices) {
-        final result = await MockApiService.pairTag(_currentUserId!, uid);
-        if (result['status'] == 'success') {
-          _log('✅ NFC tag paired successfully: $uid');
-          return true;
-        } else {
-          _log('⚠️  NFC tag pairing failed: ${result['message']}');
-          return false;
-        }
-      } else {
-        // TODO: 呼叫真實 API
-      }
-    } catch (e) {
-      _log('❌ Error pairing NFC tag: $e');
-    }
-
-    return false;
-  }
-
-  /// 獲取集卡記錄
-  Future<Map<String, dynamic>?> fetchCollectionRecords() async {
-    if (_currentUserId == null) {
-      _log('⚠️  No user logged in');
-      return null;
-    }
-
-    try {
-      if (AppConfig.useMockServices) {
-        final result = await MockApiService.getCollectionRecords(
+        final Map<String, dynamic> result = await MockApiService.pairTag(
           _currentUserId!,
+          uid,
         );
-        if (result['status'] == 'success') {
-          _log(
-            '📚 Collection records fetched: ${result['data']['total_collected']} cards',
-          );
-          return result['data'];
-        }
-      } else {
-        // TODO: 呼叫真實 API
+        return result['status'] == 'success';
       }
-    } catch (e) {
-      _log('❌ Error fetching collection records: $e');
-    }
 
-    return null;
+      await _api.post(
+        '/tags/pair',
+        token: _jwtToken!,
+        body: <String, dynamic>{'physical_id': uid},
+      );
+      await fetchUserProfile();
+      return true;
+    } catch (e) {
+      _log('Error pairing NFC tag: $e');
+      return false;
+    }
   }
 
-  /// 獲取他人的集卡記錄
-  Future<Map<String, dynamic>?> fetchUserCollection(String targetUserId) async {
-    try {
-      if (AppConfig.useMockServices) {
-        final result = await MockApiService.getUserCollection(targetUserId);
-        if (result['status'] == 'success') {
-          _log('👤 Fetched collection for user: $targetUserId');
-          return result['data'];
-        }
-      } else {
-        // TODO: 呼叫真實 API
-      }
-    } catch (e) {
-      _log('❌ Error fetching user collection: $e');
-    }
-
-    return null;
-  }
-
-  /// 內部：根據字符串設定角色
-  Future<Map<String, dynamic>?> submitCardPrintOrder({
-    required Uint8List artworkPng,
-    required Map<String, dynamic> metadata,
+  Future<NtagLockSecret?> requestNtagLockSecret({
+    required String uid,
+    required String purpose,
   }) async {
-    if (_currentUserId == null) {
-      _log('??  No user logged in');
+    if (!_ensureSession()) {
+      _log('No user logged in');
       return null;
     }
 
     try {
       if (AppConfig.useMockServices) {
-        final result = await MockApiService.submitCardPrintOrder(
-          userId: _currentUserId!,
-          artworkPng: artworkPng,
-          metadata: metadata,
-        );
+        final Map<String, dynamic> result =
+            await MockApiService.getNtagLockSecret(
+              uid: uid,
+              purpose: purpose,
+              requesterUserId: _currentUserId!,
+            );
+        if (result['status'] == 'success') {
+          return _secretFromData(result['data']);
+        }
+      } else {
+        final Map<String, dynamic>? profile =
+            _userProfile ?? await fetchUserProfile();
+        return _secretFromNfcTagKey(profile?['nfc_tag_key']);
+      }
+    } catch (e) {
+      _log('Error requesting NTAG secret: $e');
+    }
+
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> fetchCollectionRecords() async {
+    if (!_ensureSession()) {
+      _log('No user logged in');
+      return null;
+    }
+
+    try {
+      if (AppConfig.useMockServices) {
+        final Map<String, dynamic> result =
+            await MockApiService.getCollectionRecords(_currentUserId!);
         if (result['status'] == 'success') {
           return result['data'] as Map<String, dynamic>;
         }
       } else {
-        // TODO: POST PNG multipart to /card-print-orders.
+        final Map<String, dynamic> result = await _api.get(
+          '/users/me/bootstrap',
+          token: _jwtToken!,
+        );
+        final Map<String, dynamic> data = _jsonMap(result['data']);
+        final Map<String, dynamic> me = _normalizeProfile(data['me']);
+        _userProfile = me;
+        return _collectionFromUsers(
+          owner: me,
+          users: (data['collected_users'] as List<dynamic>? ?? <dynamic>[]),
+        );
       }
     } catch (e) {
-      _log('??Error submitting card print order: $e');
+      _log('Error fetching collection records: $e');
     }
 
     return null;
+  }
+
+  Future<Map<String, dynamic>?> scanCollection({
+    required String targetUserId,
+    required String scannedNfcUid,
+  }) async {
+    if (!_ensureSession()) {
+      _log('No user logged in');
+      return null;
+    }
+
+    try {
+      if (AppConfig.useMockServices) {
+        final Map<String, dynamic> result = await MockApiService.scanCollection(
+          currentUserId: _currentUserId!,
+          targetUserId: targetUserId,
+          scannedNfcUid: scannedNfcUid,
+        );
+        return result['status'] == 'success' ? result : null;
+      }
+
+      final Map<String, dynamic> result = await _api.post(
+        '/collection/scan',
+        token: _jwtToken!,
+        body: <String, dynamic>{
+          'user_id': targetUserId,
+          'physical_id': scannedNfcUid,
+        },
+      );
+      final Map<String, dynamic> data = _jsonMap(result['data']);
+      final Map<String, dynamic> profile = _normalizeProfile(data['profile']);
+      final Map<String, dynamic> targetInfo = _cardFromProfile(
+        profile,
+        physicalUid: scannedNfcUid,
+      );
+      return <String, dynamic>{
+        'status': 'success',
+        'type': 'user_card',
+        'data': <String, dynamic>{
+          ...data,
+          'profile': profile,
+          'target_info': targetInfo,
+        },
+      };
+    } catch (e) {
+      _log('Error scanning collection: $e');
+    }
+
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> fetchUserCollection(String targetUserId) async {
+    if (!_ensureSession()) {
+      return null;
+    }
+
+    try {
+      if (AppConfig.useMockServices) {
+        final Map<String, dynamic> result =
+            await MockApiService.getUserCollection(targetUserId);
+        return result['status'] == 'success'
+            ? result['data'] as Map<String, dynamic>
+            : null;
+      }
+
+      final Map<String, dynamic> result = await _api.get(
+        '/users/$targetUserId/collection',
+        token: _jwtToken!,
+      );
+      final Map<String, dynamic> data = _jsonMap(result['data']);
+      return _collectionFromUsers(
+        owner: <String, dynamic>{
+          'user_id': data['user_id'] ?? targetUserId,
+          'collection_version': data['collection_version'] ?? 0,
+        },
+        users: data['users'] as List<dynamic>? ?? <dynamic>[],
+      );
+    } catch (e) {
+      _log('Error fetching user collection: $e');
+    }
+
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> fetchScoreboard({
+    int offset = 0,
+    int limit = 50,
+  }) async {
+    if (!_ensureSession()) {
+      return null;
+    }
+
+    try {
+      final Map<String, dynamic> result = await _api.get(
+        '/scoreboard',
+        token: _jwtToken!,
+        query: <String, String>{'offset': '$offset', 'limit': '$limit'},
+      );
+      return _jsonMap(result['data']);
+    } catch (e) {
+      _log('Error fetching scoreboard: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> submitCardPrintOrder({
+    required Uint8List artworkPng,
+    required Map<String, dynamic> metadata,
+  }) async {
+    if (!_ensureSession()) {
+      return null;
+    }
+
+    try {
+      if (AppConfig.useMockServices) {
+        final Map<String, dynamic> result =
+            await MockApiService.submitCardPrintOrder(
+              userId: _currentUserId!,
+              artworkPng: artworkPng,
+              metadata: metadata,
+            );
+        return result['status'] == 'success'
+            ? result['data'] as Map<String, dynamic>
+            : null;
+      }
+      _log('Card print order endpoint is not present in openapi.yaml.');
+    } catch (e) {
+      _log('Error submitting card print order: $e');
+    }
+
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> confirmPrizeClaim({
+    required String tagUid,
+    required String userId,
+  }) async {
+    if (!_ensureSession()) {
+      return null;
+    }
+
+    try {
+      if (AppConfig.useMockServices) {
+        final Map<String, dynamic> result =
+            await MockApiService.confirmPrizeClaim(
+              tagUid: tagUid,
+              userId: userId,
+              staffUserId: _currentUserId!,
+            );
+        return result['status'] == 'success'
+            ? result['data'] as Map<String, dynamic>
+            : null;
+      }
+      _log('Prize claim endpoint is not present in openapi.yaml.');
+    } catch (e) {
+      _log('Error confirming prize claim: $e');
+    }
+
+    return null;
+  }
+
+  Map<String, dynamic> _profileUpdateForApi(Map<String, dynamic> updates) {
+    final Map<String, dynamic> body = <String, dynamic>{};
+    for (final String key in <String>[
+      'display_name',
+      'bio',
+      'pixel_avatar_base64',
+    ]) {
+      if (updates.containsKey(key)) {
+        body[key] = updates[key];
+      }
+    }
+    if (updates.containsKey('emoji_icon')) {
+      body['emoji_icon'] = updates['emoji_icon'];
+    } else if (updates.containsKey('attribute_emoji')) {
+      body['emoji_icon'] = updates['attribute_emoji'];
+    }
+    body.removeWhere((String key, Object? value) => value == null);
+    return body;
+  }
+
+  Map<String, dynamic> _normalizeProfile(Object? raw) {
+    final Map<String, dynamic> profile = _jsonMap(raw);
+    final String emoji =
+        profile['attribute_emoji'] as String? ??
+        profile['emoji_icon'] as String? ??
+        '';
+    final String? physicalId =
+        profile['physical_id'] as String? ??
+        profile['paired_ntag_uid'] as String?;
+
+    final Map<String, dynamic> normalized = <String, dynamic>{
+      ...profile,
+      'emoji_icon': emoji,
+      'attribute_emoji': emoji,
+      'attribute_label':
+          profile['attribute_label'] as String? ??
+          profile['role'] as String? ??
+          'ATTENDEE',
+      'link': profile['link'] as String? ?? 'https://hitcon.org',
+    };
+    if (physicalId != null) {
+      normalized['physical_id'] = physicalId;
+      normalized['paired_ntag_uid'] = physicalId;
+    }
+    return normalized;
+  }
+
+  Map<String, dynamic> _collectionFromUsers({
+    required Map<String, dynamic> owner,
+    required List<dynamic> users,
+  }) {
+    final List<Map<String, dynamic>> cards = users
+        .whereType<Object>()
+        .map(_normalizeProfile)
+        .map(_cardFromProfile)
+        .toList(growable: false);
+    return <String, dynamic>{
+      'owner_display_name': owner['display_name'] ?? owner['user_id'] ?? '',
+      'total_collected': cards.length,
+      'collection': cards,
+      'collection_version': owner['collection_version'] ?? 0,
+    };
+  }
+
+  Map<String, dynamic> _cardFromProfile(
+    Map<String, dynamic> profile, {
+    String? physicalUid,
+  }) {
+    final String userId = profile['user_id'] as String? ?? '';
+    final String uid =
+        physicalUid ??
+        profile['physical_id'] as String? ??
+        profile['paired_ntag_uid'] as String? ??
+        userId;
+    return <String, dynamic>{
+      ...profile,
+      'physical_uid': uid,
+      'owner': userId,
+      'card_title': profile['display_name'] ?? userId,
+      'collected_at': DateTime.now().toIso8601String(),
+      'attribute_emoji': profile['attribute_emoji'] ?? profile['emoji_icon'],
+      'attribute_label': profile['attribute_label'] ?? profile['role'],
+      'link': profile['link'] ?? 'https://hitcon.org',
+    };
+  }
+
+  NtagLockSecret? _secretFromData(Object? raw) {
+    final Map<String, dynamic> data = _jsonMap(raw);
+    final List<int>? password = _parseSecretBytes(data['password'], 4);
+    final List<int>? pack = _parseSecretBytes(data['pack'], 2);
+    if (password == null || pack == null) {
+      return null;
+    }
+    return NtagLockSecret(password: password, pack: pack);
+  }
+
+  NtagLockSecret? _secretFromNfcTagKey(Object? raw) {
+    final List<int>? key = _parseSecretBytes(raw, 6);
+    if (key == null) {
+      return null;
+    }
+    return NtagLockSecret(password: key.sublist(0, 4), pack: key.sublist(4, 6));
+  }
+
+  List<int>? _parseSecretBytes(dynamic value, int expectedLength) {
+    if (value is List) {
+      final List<int> bytes = value
+          .whereType<num>()
+          .map((num byte) => byte.toInt() & 0xFF)
+          .toList(growable: false);
+      return bytes.length == expectedLength ? bytes : null;
+    }
+
+    if (value is String) {
+      final String normalized = value.replaceAll(RegExp(r'[^0-9a-fA-F]'), '');
+      if (normalized.length != expectedLength * 2) {
+        return null;
+      }
+      return List<int>.generate(expectedLength, (int index) {
+        final int offset = index * 2;
+        return int.parse(normalized.substring(offset, offset + 2), radix: 16);
+      }, growable: false);
+    }
+
+    return null;
+  }
+
+  Map<String, dynamic> _jsonMap(Object? value) {
+    if (value is Map<String, dynamic>) {
+      return Map<String, dynamic>.from(value);
+    }
+    if (value is Map) {
+      return value.map((Object? key, Object? value) {
+        return MapEntry<String, dynamic>(key.toString(), value);
+      });
+    }
+    return <String, dynamic>{};
+  }
+
+  bool _ensureSession() {
+    if (_jwtToken != null && _currentUserId != null) {
+      return true;
+    }
+    return false;
+  }
+
+  _StagingIdentity _identityForUserType(String userType) {
+    switch (userType.toUpperCase()) {
+      case 'ADMIN':
+        return const _StagingIdentity(
+          userId: 'staging_admin',
+          apiRole: 'STAFF',
+          appRole: UserRole.admin,
+        );
+      case 'EVENT_STAFF':
+      case 'STAFF':
+        return const _StagingIdentity(
+          userId: 'staging_staff',
+          apiRole: 'STAFF',
+          appRole: UserRole.eventStaff,
+        );
+      case 'USER':
+      default:
+        return const _StagingIdentity(
+          userId: 'staging_attendee',
+          apiRole: 'ATTENDEE',
+          appRole: UserRole.user,
+        );
+    }
   }
 
   void _setRoleFromString(String roleStr) {
@@ -254,23 +599,31 @@ class AuthService {
         _currentRole = UserRole.admin;
         break;
       case 'EVENT_STAFF':
+      case 'STAFF':
         _currentRole = UserRole.eventStaff;
         break;
       case 'USER':
-      default:
+      case 'ATTENDEE':
         _currentRole = UserRole.user;
+        break;
+      default:
+        _currentRole = UserRole.unknown;
         break;
     }
   }
 
-  /// 內部日誌輸出
+  void _setRoleFromApiRole(String? role) {
+    if (_currentRole == UserRole.admin) {
+      return;
+    }
+    _setRoleFromString(role ?? '');
+  }
+
   void _log(String message) {
     if (AppConfig.enableDebugLogging) {
       debugPrint('[AuthService] $message');
     }
   }
-
-  // ========== Getters ==========
 
   String? get currentUserId => _currentUserId;
   UserRole get currentRole => _currentRole;
@@ -280,4 +633,16 @@ class AuthService {
   bool get isAdmin => _currentRole == UserRole.admin;
   bool get isEventStaff => _currentRole == UserRole.eventStaff;
   bool get isRegularUser => _currentRole == UserRole.user;
+}
+
+class _StagingIdentity {
+  const _StagingIdentity({
+    required this.userId,
+    required this.apiRole,
+    required this.appRole,
+  });
+
+  final String userId;
+  final String apiRole;
+  final UserRole appRole;
 }

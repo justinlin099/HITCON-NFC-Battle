@@ -5,11 +5,13 @@ import 'dart:typed_data';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:nfc_manager/nfc_manager.dart';
-import 'config/app_config.dart';
+import 'pages/admin/admin_home_page.dart';
 import 'pages/user/card_collection_page.dart';
 import 'pages/user/card_detail_page.dart';
+import 'pages/user/setup_page.dart';
 import 'pages/debug/test_login_page.dart';
 import 'services/auth_service.dart';
+import 'services/local_collection_store.dart';
 
 void main() {
   runApp(const MyApp());
@@ -49,12 +51,12 @@ class _MyAppState extends State<MyApp> {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
       ),
-      home: AppConfig.useMockServices
-          ? const TestLoginPage() // 測試模式：顯示角色選擇頁面
-          : const NTagReaderPage(), // 生產模式：直接進入主應用
+      home: const TestLoginPage(),
       routes: {
         '/home': (context) => const NTagReaderPage(),
+        '/admin': (context) => const AdminHomePage(),
         '/collection': (context) => const CardCollectionPage(),
+        '/setup': (context) => const SetupPage(),
       },
     );
   }
@@ -103,7 +105,8 @@ class _AutoNtagScanner {
         await NfcManager.instance.stopSession();
         _isScanning = false;
 
-        await _handleScan(uid);
+        final String targetUserId = _readTargetUserId(tag);
+        await _handleScan(uid, targetUserId);
         _isHandling = false;
         await Future<void>.delayed(const Duration(milliseconds: 350));
         await start();
@@ -117,7 +120,7 @@ class _AutoNtagScanner {
     );
   }
 
-  Future<void> _handleScan(String uid) async {
+  Future<void> _handleScan(String uid, String targetUserId) async {
     if (uid.isEmpty) {
       return;
     }
@@ -126,19 +129,36 @@ class _AutoNtagScanner {
     if (!auth.isLoggedIn) {
       return;
     }
-
-    await auth.pairNfcTag(uid);
-    final Map<String, dynamic>? collection = await auth
-        .fetchCollectionRecords();
-    if (collection == null) {
+    if (!auth.isRegularUser) {
       return;
     }
 
-    final List<dynamic> raw =
-        collection['collection'] as List<dynamic>? ?? <dynamic>[];
-    final List<Map<String, dynamic>> cards = raw
-        .whereType<Map<String, dynamic>>()
-        .toList();
+    final String? currentUserId = auth.currentUserId;
+    final LocalCollectionStore localStore = LocalCollectionStore();
+    final Map<String, dynamic>? scanResult = await auth.scanCollection(
+      targetUserId: targetUserId,
+      scannedNfcUid: uid,
+    );
+    if (scanResult != null && currentUserId != null) {
+      await localStore.saveScanResult(
+        userId: currentUserId,
+        scannedUid: uid,
+        scanResult: scanResult,
+      );
+    }
+
+    final Map<String, dynamic>? collection = await auth
+        .fetchCollectionRecords();
+    if (collection != null && currentUserId != null) {
+      await localStore.saveCollectionIndex(
+        userId: currentUserId,
+        collection: collection,
+      );
+    }
+
+    final List<Map<String, dynamic>> cards = currentUserId == null
+        ? <Map<String, dynamic>>[]
+        : await localStore.loadCards(currentUserId);
     final int index = cards.indexWhere((card) => card['physical_uid'] == uid);
     if (index == -1) {
       return;
@@ -148,13 +168,9 @@ class _AutoNtagScanner {
     final String heroTag = 'scan-$uid';
     final Color cardColor = _colorForIndex(index);
     final String imageAsset = _imageAssetForIndex(index);
-    final String title =
-        card['card_title'] as String? ??
-        card['tag_name'] as String? ??
-        'Unknown';
-    final String attributeEmoji = card['attribute_emoji'] as String? ?? '❓';
-    final String attributeLabel =
-        card['attribute_label'] as String? ?? 'UNKNOWN';
+    final String title = _titleForCard(card);
+    final String attributeEmoji = _attributeEmojiForCard(card);
+    final String attributeLabel = _attributeLabelForCard(card);
     final String rawLink = card['link'] as String? ?? '';
     final String link = rawLink.trim().isEmpty ? 'https://hitcon.org' : rawLink;
     final String collectedAt = card['collected_at'] as String? ?? '';
@@ -210,6 +226,81 @@ class _AutoNtagScanner {
         .map((int b) => b.toRadixString(16).padLeft(2, '0'))
         .join(':')
         .toUpperCase();
+  }
+
+  String _readTargetUserId(NfcTag tag) {
+    final Ndef? ndef = Ndef.from(tag);
+    final NdefMessage? message = ndef?.cachedMessage;
+    if (message == null) {
+      return '';
+    }
+
+    for (final NdefRecord record in message.records) {
+      final String? uriText = _parseUriRecord(record);
+      if (uriText == null) {
+        continue;
+      }
+
+      final Uri? uri = Uri.tryParse(uriText);
+      if (uri == null) {
+        continue;
+      }
+
+      final bool hostMatches =
+          uri.host.toLowerCase() == 'game.hitcon2026.online';
+      final bool pathMatches = uri.path == '/b' || uri.path == '/b/';
+      if (hostMatches && pathMatches) {
+        return uri.queryParameters['u'] ?? '';
+      }
+    }
+
+    return '';
+  }
+
+  String? _parseUriRecord(NdefRecord record) {
+    if (record.typeNameFormat != NdefTypeNameFormat.nfcWellknown ||
+        record.type.isEmpty ||
+        record.type.first != 0x55 ||
+        record.payload.isEmpty) {
+      return null;
+    }
+
+    const List<String> uriPrefix = <String>[
+      '',
+      'http://www.',
+      'https://www.',
+      'http://',
+      'https://',
+    ];
+    final int code = record.payload.first;
+    final String prefix = code < uriPrefix.length ? uriPrefix[code] : '';
+    final String uriBody = utf8.decode(
+      record.payload.sublist(1),
+      allowMalformed: true,
+    );
+    return '$prefix$uriBody';
+  }
+
+  String _titleForCard(Map<String, dynamic> card) {
+    return card['card_title'] as String? ??
+        card['display_name'] as String? ??
+        card['sponsor_stand_name'] as String? ??
+        card['community_stand_name'] as String? ??
+        card['tag_name'] as String? ??
+        'Unknown';
+  }
+
+  String _attributeEmojiForCard(Map<String, dynamic> card) {
+    return card['attribute_emoji'] as String? ??
+        card['emoji_icon'] as String? ??
+        '★';
+  }
+
+  String _attributeLabelForCard(Map<String, dynamic> card) {
+    return card['attribute_label'] as String? ??
+        card['user_type'] as String? ??
+        card['scan_type'] as String? ??
+        'UNKNOWN';
   }
 
   Color _colorForIndex(int seed) {
@@ -420,7 +511,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
     final bool isAvailable = await NfcManager.instance.isAvailable();
     if (!isAvailable) {
       setState(() {
-        _status = '此裝置不支援 NFC 或 NFC 未開啟';
+        _status = 'NFC is not available on this device.';
         _isReading = false;
       });
       return;
@@ -493,9 +584,11 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
           } else {
             try {
               final bool writeSuccess = await _writeUriToTag(tag, targetUri);
-              writeMessage = writeSuccess ? '（已寫入 URI）' : '（無法寫入：Tag 不支援寫入）';
+              writeMessage = writeSuccess
+                  ? ' URI written.'
+                  : ' Tag is not writable.';
             } catch (e) {
-              writeMessage = '（寫入失敗：$e）';
+              writeMessage = ' Write failed: $e';
             }
           }
         }
