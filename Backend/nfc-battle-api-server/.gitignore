@@ -21,6 +21,8 @@ node_modules/
 .env.*
 .cloudflare.env
 .dev.vars
+!scripts/k6/.env.example
+scripts/k6/fixtures/
 !.cloudflare.env.example
 
 # logs

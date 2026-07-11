@@ -13,6 +13,9 @@ concurrency:
   group: backend-staging-deploy
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy Worker backend to staging
