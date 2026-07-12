@@ -1,0 +1,27 @@
+{
+  "name": "hitcon-nfc-battle-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HITCON 2026 NFC Battle backend API (Cloudflare Workers + D1)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply hitcon_nfc_battle --local",
+    "db:migrate:remote": "wrangler d1 migrations apply hitcon_nfc_battle --remote",
+    "db:studio:local": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "jose": "^5.9.6",
+    "drizzle-orm": "^0.36.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "drizzle-kit": "^0.30.1",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.95.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

@@ -1,0 +1,36 @@
+# Local dev — `docker compose up` from Backend/api/.
+#
+# - Code is bind-mounted, so edits hot-reload via wrangler dev.
+# - node_modules / .wrangler / .docker-home live in named volumes (faster on
+#   Linux, and isolates Linux-container artefacts from a host install).
+# - The entrypoint (docker-entrypoint.sh) chowns those volume mounts to the
+#   host project owner and drops privileges via su-exec, so generated files
+#   (drizzle migrations, .wrangler state) match host ownership.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    environment:
+      HOME: /app/.docker-home
+    volumes:
+      - .:/app
+      - node-modules:/app/node_modules
+      - wrangler-state:/app/.wrangler
+      - docker-home:/app/.docker-home
+    ports:
+      - "8787:8787"
+    command: >
+      sh -c "
+        pnpm install --prefer-offline &&
+        pnpm db:generate &&
+        pnpm db:migrate:local &&
+        pnpm exec wrangler dev --ip 0.0.0.0 --port 8787
+      "
+
+volumes:
+  node-modules:
+  wrangler-state:
+  docker-home:

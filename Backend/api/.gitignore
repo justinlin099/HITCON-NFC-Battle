@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+.pnpm-store/
+.docker-home/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+!.env.example
+dist/
+*.log
+.DS_Store
