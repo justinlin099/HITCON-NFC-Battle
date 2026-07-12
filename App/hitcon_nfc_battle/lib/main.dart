@@ -57,7 +57,9 @@ class _SessionGateState extends State<_SessionGate> {
       return;
     }
 
-    final String routeName = auth.isRegularUser
+    final bool useUserFlow =
+        auth.isRegularUser || (!auth.isAdmin && !auth.isEventStaff);
+    final String routeName = useUserFlow
         ? (setupComplete ? '/collection' : '/setup')
         : '/admin';
     Navigator.of(context).pushReplacementNamed(routeName);

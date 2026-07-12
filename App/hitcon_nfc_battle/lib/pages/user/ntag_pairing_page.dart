@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -6,8 +7,19 @@ import 'package:nfc_manager/nfc_manager.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
+import '../../services/nfc_session_controller.dart';
 import '../../services/ntag_security_service.dart';
 import 'pixel_theme.dart';
+
+const Duration _tagDisposalGracePeriod = Duration(milliseconds: 120);
+
+Future<void> _stopNfcSessionQuietly() async {
+  try {
+    await NfcManager.instance.stopSession();
+  } catch (_) {
+    // A stale Android Tag must not escape cleanup and break navigation.
+  }
+}
 
 Future<String?> openNtagPairingScanPage(BuildContext context) {
   return Navigator.of(context).push<String>(
@@ -37,6 +49,9 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
   String _tagId = '-';
   String _userId = '';
   bool _isReading = false;
+  bool _isHandlingTag = false;
+  bool _isDisposed = false;
+  NfcSessionLease? _nfcLease;
 
   @override
   void initState() {
@@ -48,16 +63,28 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
   }
 
   Future<void> _startSession() async {
-    if (_isReading) {
+    if (_isReading || _isDisposed) {
       return;
     }
 
     final AppLocalizations l10n = context.l10n;
-    final bool isAvailable = await NfcManager.instance.isAvailable();
+    bool isAvailable = false;
+    try {
+      isAvailable = await NfcManager.instance.isAvailable();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
+        });
+      }
+      return;
+    }
     if (!isAvailable) {
-      setState(() {
-        _status = l10n.tr('nfcUnavailable');
-      });
+      if (mounted) {
+        setState(() {
+          _status = l10n.tr('nfcUnavailable');
+        });
+      }
       return;
     }
 
@@ -68,76 +95,172 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
       return;
     }
 
-    setState(() {
-      _isReading = true;
-      _status = l10n.tr('waitingForTag');
-    });
-
-    await NfcManager.instance.startSession(
-      onDiscovered: (NfcTag tag) async {
-        final String parsedTagId = _security.readTagId(tag);
-        final bool ndefWritten = await _writeUserIdToTag(tag, _userId);
-        final NtagLockSecret? lockSecret = ndefWritten
-            ? await AuthService().requestNtagLockSecret(
-                uid: parsedTagId,
-                purpose: 'lock',
-              )
-            : null;
-        final NtagSecurityResult lockResult = ndefWritten
-            ? lockSecret == null
-                  ? NtagSecurityResult(
-                      success: false,
-                      messageKey: 'ntagLockSecretFailed',
-                    )
-                  : await _security.protectForRewrite(tag, lockSecret)
-            : NtagSecurityResult(
-                success: false,
-                messageKey: 'ndefWriteUnsupported',
-              );
-
-        bool pairSuccess = false;
-        if (ndefWritten && lockResult.success && parsedTagId.isNotEmpty) {
-          pairSuccess = await AuthService().pairNfcTag(parsedTagId);
-        }
-
-        if (!mounted) {
-          return;
-        }
-
+    final NfcSessionLease? lease = await NfcSessionController.instance.acquire(
+      NfcSessionOwner.badgePairing,
+      preemptExisting: true,
+      onPreempt: _handleSessionPreempted,
+    );
+    if (lease == null || _isDisposed) {
+      lease?.release();
+      if (mounted) {
         setState(() {
-          _tagId = parsedTagId.isEmpty ? l10n.tr('tagIdMissing') : parsedTagId;
-          if (!ndefWritten || !lockResult.success) {
-            _status = l10n.tr(lockResult.messageKey, lockResult.values);
-          } else if (!pairSuccess) {
-            _status =
-                '${l10n.tr(lockResult.messageKey, lockResult.values)}\n'
-                '${l10n.tr('apiPairFailed')}';
-          } else {
-            _status = l10n.tr('ntagWriteLocked');
-          }
+          _status = l10n.tr('nfcSessionBusy');
         });
+      }
+      return;
+    }
 
-        final NavigatorState navigator = Navigator.of(context);
-        await NfcManager.instance.stopSession();
-        if (pairSuccess) {
-          navigator.pop(_tagId);
-        } else {
+    _nfcLease = lease;
+    await _stopNfcSessionQuietly();
+    if (!lease.isActive || _isDisposed) {
+      lease.release();
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _isReading = true;
+        _status = l10n.tr('waitingForTag');
+      });
+    }
+
+    try {
+      await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
+        onDiscovered: (NfcTag tag) async {
+          if (!lease.isActive || _isHandlingTag || _isDisposed) {
+            return;
+          }
+          _isHandlingTag = true;
+
+          String parsedTagId = '';
+          bool pairSuccess = false;
+          String status = '';
+          try {
+            parsedTagId = _security.readTagId(tag);
+            final bool ndefWritten = await _writeUserIdToTag(tag, _userId);
+            final NtagLockSecret? lockSecret = ndefWritten
+                ? await AuthService().requestNtagLockSecret(
+                    uid: parsedTagId,
+                    purpose: 'lock',
+                  )
+                : null;
+            final NtagSecurityResult lockResult = ndefWritten
+                ? lockSecret == null
+                      ? const NtagSecurityResult(
+                          success: false,
+                          messageKey: 'ntagLockSecretFailed',
+                        )
+                      : await _security.protectForRewrite(tag, lockSecret)
+                : const NtagSecurityResult(
+                    success: false,
+                    messageKey: 'ndefWriteUnsupported',
+                  );
+
+            if (ndefWritten && lockResult.success && parsedTagId.isNotEmpty) {
+              pairSuccess = await AuthService().pairNfcTag(parsedTagId);
+            }
+
+            if (!ndefWritten || !lockResult.success) {
+              status = l10n.tr(lockResult.messageKey, lockResult.values);
+            } else if (!pairSuccess) {
+              status =
+                  '${l10n.tr(lockResult.messageKey, lockResult.values)}\n'
+                  '${l10n.tr('apiPairFailed')}';
+            } else {
+              status = l10n.tr('ntagWriteLocked');
+            }
+          } catch (error) {
+            status = l10n.tr('nfcReadFailed', <String, Object?>{
+              'error': error,
+            });
+          }
+
+          if (mounted) {
+            setState(() {
+              _tagId = parsedTagId.isEmpty
+                  ? l10n.tr('tagIdMissing')
+                  : parsedTagId;
+              _status = status;
+            });
+          }
+
+          unawaited(
+            _finishTagHandling(
+              lease,
+              pairSuccess: pairSuccess,
+              parsedTagId: parsedTagId,
+            ),
+          );
+        },
+        onError: (dynamic error) async {
+          if (!lease.isActive || _isDisposed) {
+            return;
+          }
+          await _stopOwnedSession(lease);
+          if (!mounted) {
+            return;
+          }
           setState(() {
+            _status = l10n.tr('nfcReadFailed', <String, Object?>{
+              'error': error,
+            });
             _isReading = false;
+            _isHandlingTag = false;
           });
-        }
-      },
-      onError: (dynamic error) async {
-        if (!mounted) {
-          return;
-        }
+        },
+      );
+    } catch (error) {
+      await _stopOwnedSession(lease);
+      if (mounted) {
         setState(() {
           _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
           _isReading = false;
+          _isHandlingTag = false;
         });
-        await NfcManager.instance.stopSession();
-      },
-    );
+      }
+    }
+  }
+
+  Future<void> _finishTagHandling(
+    NfcSessionLease lease, {
+    required bool pairSuccess,
+    required String parsedTagId,
+  }) async {
+    await Future<void>.delayed(_tagDisposalGracePeriod);
+    await _stopOwnedSession(lease);
+    _isHandlingTag = false;
+    _isReading = false;
+
+    if (!mounted || _isDisposed) {
+      return;
+    }
+    if (pairSuccess) {
+      Navigator.of(context).pop(parsedTagId);
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _stopOwnedSession(NfcSessionLease lease) async {
+    if (!lease.isActive) {
+      return;
+    }
+    try {
+      await _stopNfcSessionQuietly();
+    } finally {
+      if (identical(_nfcLease, lease)) {
+        _nfcLease = null;
+      }
+      lease.release();
+    }
+  }
+
+  Future<void> _handleSessionPreempted() async {
+    _nfcLease = null;
+    _isReading = false;
+    _isHandlingTag = false;
+    await _stopNfcSessionQuietly();
   }
 
   Future<bool> _writeUserIdToTag(NfcTag tag, String userId) async {
@@ -187,7 +310,12 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
 
   @override
   void dispose() {
-    NfcManager.instance.stopSession();
+    _isDisposed = true;
+    final NfcSessionLease? lease = _nfcLease;
+    _nfcLease = null;
+    if (lease != null && lease.isActive && !_isHandlingTag) {
+      unawaited(_stopNfcSessionQuietly().whenComplete(lease.release));
+    }
     super.dispose();
   }
 
@@ -278,6 +406,9 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
   String _status = '';
   String _tagId = '-';
   bool _isReading = false;
+  bool _isHandlingTag = false;
+  bool _isDisposed = false;
+  NfcSessionLease? _nfcLease;
 
   @override
   void initState() {
@@ -288,83 +419,199 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
   }
 
   Future<void> _startSession() async {
-    if (_isReading) {
+    if (_isReading || _isDisposed) {
       return;
     }
 
     final AppLocalizations l10n = context.l10n;
-    final bool isAvailable = await NfcManager.instance.isAvailable();
+    bool isAvailable = false;
+    try {
+      isAvailable = await NfcManager.instance.isAvailable();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
+        });
+      }
+      return;
+    }
     if (!isAvailable) {
-      setState(() {
-        _status = l10n.tr('nfcUnavailable');
-      });
+      if (mounted) {
+        setState(() {
+          _status = l10n.tr('nfcUnavailable');
+        });
+      }
       return;
     }
 
-    setState(() {
-      _isReading = true;
-      _status = l10n.tr('holdOwnNtagNearPhone');
-      _tagId = '-';
-    });
-
-    await NfcManager.instance.stopSession();
-    await NfcManager.instance.startSession(
-      onDiscovered: (NfcTag tag) async {
-        final String parsedTagId = _security.readTagId(tag);
-        final NtagLockSecret? lockSecret = await AuthService()
-            .requestNtagLockSecret(uid: parsedTagId, purpose: 'unlock');
-        final NtagSecurityResult result = lockSecret == null
-            ? NtagSecurityResult(
-                success: false,
-                messageKey: 'unlockSecretFailed',
-              )
-            : await _security.unlockForRewrite(tag, lockSecret);
-
-        await NfcManager.instance.stopSession();
-        if (!mounted) {
-          return;
-        }
-
+    final NfcSessionLease? lease = await NfcSessionController.instance.acquire(
+      NfcSessionOwner.badgePairing,
+      preemptExisting: true,
+      onPreempt: _handleSessionPreempted,
+    );
+    if (lease == null || _isDisposed) {
+      lease?.release();
+      if (mounted) {
         setState(() {
-          _isReading = false;
-          _tagId = parsedTagId.isEmpty ? l10n.tr('tagIdMissing') : parsedTagId;
-          _status = l10n.tr(result.messageKey, result.values);
+          _status = l10n.tr('nfcSessionBusy');
         });
+      }
+      return;
+    }
 
-        if (result.success) {
-          await Future<void>.delayed(const Duration(milliseconds: 500));
-          if (mounted) {
-            Navigator.of(context).pop(true);
+    _nfcLease = lease;
+    await _stopNfcSessionQuietly();
+    if (!lease.isActive || _isDisposed) {
+      lease.release();
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _isReading = true;
+        _status = l10n.tr('holdOwnNtagNearPhone');
+        _tagId = '-';
+      });
+    }
+
+    try {
+      await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
+        onDiscovered: (NfcTag tag) async {
+          if (!lease.isActive || _isHandlingTag || _isDisposed) {
+            return;
           }
-        }
-      },
-      onError: (dynamic error) async {
-        await NfcManager.instance.stopSession();
-        if (!mounted) {
-          return;
-        }
+          _isHandlingTag = true;
+
+          String parsedTagId = '';
+          NtagSecurityResult result;
+          try {
+            parsedTagId = _security.readTagId(tag);
+            final NtagLockSecret? lockSecret = await AuthService()
+                .requestNtagLockSecret(uid: parsedTagId, purpose: 'unlock');
+            result = lockSecret == null
+                ? const NtagSecurityResult(
+                    success: false,
+                    messageKey: 'unlockSecretFailed',
+                  )
+                : await _security.unlockForRewrite(tag, lockSecret);
+          } catch (error) {
+            result = NtagSecurityResult(
+              success: false,
+              messageKey: 'nfcReadFailed',
+              values: <String, Object?>{'error': error},
+            );
+          }
+
+          if (mounted) {
+            setState(() {
+              _tagId = parsedTagId.isEmpty
+                  ? l10n.tr('tagIdMissing')
+                  : parsedTagId;
+              _status = l10n.tr(result.messageKey, result.values);
+            });
+          }
+
+          unawaited(
+            _finishUnlockHandling(lease, unlockSucceeded: result.success),
+          );
+        },
+        onError: (dynamic error) async {
+          if (!lease.isActive || _isDisposed) {
+            return;
+          }
+          await _stopOwnedSession(lease);
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _status = l10n.tr('nfcReadFailed', <String, Object?>{
+              'error': error,
+            });
+            _isReading = false;
+            _isHandlingTag = false;
+          });
+        },
+      );
+    } catch (error) {
+      await _stopOwnedSession(lease);
+      if (mounted) {
         setState(() {
           _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
           _isReading = false;
+          _isHandlingTag = false;
         });
-      },
-    );
+      }
+    }
   }
 
   Future<void> _stopSession() async {
-    await NfcManager.instance.stopSession();
+    final NfcSessionLease? lease = _nfcLease;
+    if (lease != null) {
+      await _stopOwnedSession(lease);
+    } else {
+      await _stopNfcSessionQuietly();
+    }
     if (!mounted) {
       return;
     }
     setState(() {
       _isReading = false;
+      _isHandlingTag = false;
       _status = context.l10n.tr('scanStopped');
     });
   }
 
+  Future<void> _finishUnlockHandling(
+    NfcSessionLease lease, {
+    required bool unlockSucceeded,
+  }) async {
+    await Future<void>.delayed(_tagDisposalGracePeriod);
+    await _stopOwnedSession(lease);
+    _isHandlingTag = false;
+    _isReading = false;
+
+    if (!mounted || _isDisposed) {
+      return;
+    }
+    setState(() {});
+    if (unlockSucceeded) {
+      await Future<void>.delayed(const Duration(milliseconds: 380));
+      if (mounted && !_isDisposed) {
+        Navigator.of(context).pop(true);
+      }
+    }
+  }
+
+  Future<void> _stopOwnedSession(NfcSessionLease lease) async {
+    if (!lease.isActive) {
+      return;
+    }
+    try {
+      await _stopNfcSessionQuietly();
+    } finally {
+      if (identical(_nfcLease, lease)) {
+        _nfcLease = null;
+      }
+      lease.release();
+    }
+  }
+
+  Future<void> _handleSessionPreempted() async {
+    _nfcLease = null;
+    _isReading = false;
+    _isHandlingTag = false;
+    await _stopNfcSessionQuietly();
+  }
+
   @override
   void dispose() {
-    NfcManager.instance.stopSession();
+    _isDisposed = true;
+    final NfcSessionLease? lease = _nfcLease;
+    _nfcLease = null;
+    if (lease != null && lease.isActive && !_isHandlingTag) {
+      unawaited(_stopNfcSessionQuietly().whenComplete(lease.release));
+    }
     super.dispose();
   }
 

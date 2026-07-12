@@ -75,9 +75,7 @@ class _SetupPageState extends State<SetupPage> {
     }
 
     final String displayName = profile?['display_name'] as String? ?? '';
-    _displayNameController.text = _isGeneratedMockName(displayName)
-        ? ''
-        : displayName;
+    _displayNameController.text = displayName;
     _bioController.text = profile?['bio'] as String? ?? '';
     final String loadedLink = profile?['link'] as String? ?? '';
     _linkController.text = validateHttpsLink(loadedLink) == null
@@ -108,13 +106,6 @@ class _SetupPageState extends State<SetupPage> {
     } catch (_) {
       return null;
     }
-  }
-
-  bool _isGeneratedMockName(String value) {
-    final String normalized = value.trim().toLowerCase();
-    return normalized == 'player_test' ||
-        normalized == 'admin_test' ||
-        normalized == 'staff_test';
   }
 
   bool get _hasName => _displayNameController.text.trim().isNotEmpty;

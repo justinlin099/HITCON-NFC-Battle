@@ -5,6 +5,7 @@ const Map<String, String> appStringsEn = <String, String>{
   'invalidHttpsLink':
       'Enter a safe, valid public HTTPS address, such as hitcon.org.',
   'readingImage': 'Reading image...',
+  'imageTooLarge': 'The image is too large. Choose an image under 20 MB.',
   'preparingImage': 'Preparing crop preview...',
   'processingCrop': 'Applying crop...',
   'pixelatingImage': 'Converting to 48 x 48 pixels...',
@@ -32,6 +33,10 @@ const Map<String, String> appStringsEn = <String, String>{
       'Could not collect this card. Check your connection and scan again.',
   'collectionPreviewFailed':
       'The card was collected, but its preview could not be opened.',
+  'nfcScanDetected': 'TAG SIGNAL DETECTED',
+  'nfcScanVerifying': 'VERIFYING PHYSICAL CARD',
+  'nfcScanSyncing': 'SYNCING CARD DATA',
+  'nfcScanReady': 'CARD LOCKED',
   'openedLink': 'I OPENED A LINK',
   'phishingRecorded':
       'This was not a physical Tag scan. The link event was recorded and no card was collected.',
@@ -206,6 +211,7 @@ const Map<String, String> appStringsEn = <String, String>{
   'ntagWriteLocked':
       'The user ID was written and the NTAG was password protected.',
   'nfcReadFailed': 'NFC read failed: {error}',
+  'nfcSessionBusy': 'Another NFC operation is still finishing. Try again.',
   'ntagPairingPageTitle': 'Pair NTAG Badge',
   'holdBadgeNearPhone': 'Hold your Badge near the phone',
   'scanOwnNtagToUnlock': 'Scan your NTAG to unlock it',
@@ -224,11 +230,6 @@ const Map<String, String> appStringsEn = <String, String>{
   'openGmail': 'Open email app',
   'loginEmailHint':
       'Open the login email sent to the email account used for registration. You can sign in with either its QR Code or token.',
-  'mockLogin': 'Mock test login',
-  'administrator': 'Administrator',
-  'attendee': 'Attendee',
-  'staff': 'Staff',
-  'resetMockData': 'Reset mock data',
   'readingQrImage': 'Reading QR image...',
   'importCanceled': 'Import canceled.',
   'tokenQrNotFound': 'No token QR Code was found in this image.',
@@ -236,10 +237,9 @@ const Map<String, String> appStringsEn = <String, String>{
   'tokenRequired': 'Provide a token first.',
   'loginFailedToken':
       'Sign-in failed. Check whether the token is correct or expired.',
+  'tokenExpired':
+      'This sign-in token has expired. Use a newer login email or QR Code.',
   'loginFailed': 'Sign-in failed: {error}',
-  'mockSigningIn': 'Signing in to mock account...',
-  'mockLoginFailed': 'Mock sign-in failed.',
-  'mockDataReset': 'Mock data reset.',
   'scanLoginQr': 'Scan login QR Code',
   'qrFrameHint':
       'Place the QR Code from the event login email inside the frame.',

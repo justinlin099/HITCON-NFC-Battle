@@ -26,7 +26,7 @@ Get Team ID from Apple Developer account.
 
 ### `/b/index.html`
 
-- Replace `id=com.example.hitcon_nfc_battle` if your final Android package id changes.
+- Android package id is `org.hitcon.nfcbattle`.
 - Replace `idREPLACE_WITH_APP_STORE_ID` with your real App Store ID.
 
 ## 2) Host recommendation for Spaceship domain

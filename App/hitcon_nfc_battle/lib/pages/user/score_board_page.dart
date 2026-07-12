@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../config/app_config.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import 'pixel_theme.dart';
@@ -22,7 +21,6 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
   final ValueNotifier<double> _refreshPullDistance = ValueNotifier<double>(0);
   final AuthService _authService = AuthService();
 
-  int _refreshCount = 0;
   bool _isLoading = false;
   List<Map<String, Object>> _remoteRanks = <Map<String, Object>>[];
   int _rankThreshold = 0;
@@ -50,7 +48,6 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
       return;
     }
     setState(() {
-      _refreshCount += 1;
       if (board != null) {
         _rankThreshold = board['rank_threshold'] as int? ?? 0;
         _frozen = board['frozen'] as bool? ?? false;
@@ -84,60 +81,7 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
   }
 
   List<Map<String, Object>> get _ranks {
-    if (_remoteRanks.isNotEmpty) {
-      return _remoteRanks;
-    }
-    if (!AppConfig.useMockServices) {
-      return <Map<String, Object>>[];
-    }
-    final int boost = _refreshCount % 3;
-    return <Map<String, Object>>[
-      <String, Object>{
-        'userId': 'mock-team-boss',
-        'name': 'TEAM BOSS',
-        'score': 1280 + boost * 5,
-        'rank': 1,
-        'badge': 'S',
-        'emoji': '🏆',
-        'color': PixelTheme.accent,
-      },
-      <String, Object>{
-        'userId': 'mock-pixel-hunter',
-        'name': 'PIXEL HUNTER',
-        'score': 1160 + boost * 3,
-        'rank': 2,
-        'badge': 'A',
-        'emoji': '🎯',
-        'color': PixelTheme.accentBlue,
-      },
-      <String, Object>{
-        'userId': 'mock-nfc-ranger',
-        'name': 'NFC RANGER',
-        'score': 1040 + boost * 2,
-        'rank': 3,
-        'badge': 'B',
-        'emoji': '📡',
-        'color': PixelTheme.success,
-      },
-      <String, Object>{
-        'userId': 'mock-tag-wizard',
-        'name': 'TAG WIZARD',
-        'score': 920 + boost,
-        'rank': 4,
-        'badge': 'C',
-        'emoji': '✨',
-        'color': PixelTheme.warning,
-      },
-      <String, Object>{
-        'userId': 'mock-reader',
-        'name': 'REEDER',
-        'score': 780,
-        'rank': 5,
-        'badge': 'D',
-        'emoji': '📖',
-        'color': PixelTheme.textGray,
-      },
-    ];
+    return _remoteRanks;
   }
 
   Color _rankColor(int rank) {

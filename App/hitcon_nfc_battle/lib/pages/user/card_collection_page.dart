@@ -9,6 +9,7 @@ import '../../l10n/app_localizations.dart';
 import 'my_card_editor_page.dart';
 import 'card_detail_page.dart';
 import 'emoji_catalog.dart';
+import 'nfc_scan_transition.dart';
 import 'pixel_card_face.dart';
 import 'pixel_card_hero.dart';
 import 'pixel_theme.dart';
@@ -17,7 +18,6 @@ import 'score_board_page.dart';
 import '../../services/auth_service.dart';
 import '../../services/local_collection_store.dart';
 import '../../services/local_profile_store.dart';
-import '../../services/mock_api_service.dart';
 import '../../services/nfc_deep_link_service.dart';
 import '../../widgets/admin_mode_switch_button.dart';
 
@@ -43,7 +43,10 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
 
   bool _isLoading = true;
   bool _isHandlingNfcRequest = false;
+  bool _isCardDetailOpen = false;
   bool _ntagReminderChecked = false;
+  int _nfcRequestGeneration = 0;
+  NfcScanTransitionPhase? _nfcScanPhase;
   StreamSubscription<NfcScanRequest>? _nfcRequestSubscription;
   final ValueNotifier<RefreshIndicatorStatus?> _refreshStatus =
       ValueNotifier<RefreshIndicatorStatus?>(null);
@@ -51,21 +54,45 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   Map<String, dynamic>? _collectionData;
   Map<String, dynamic>? _stampMission;
   List<Map<String, dynamic>> _localCards = <Map<String, dynamic>>[];
-  List<Map<String, String>> _featuredBooths = <Map<String, String>>[];
 
   @override
   void initState() {
     super.initState();
-    _nfcRequestSubscription = _deepLinks.requests.listen((_) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(_consumePendingNfcRequest());
-      });
-    });
+    _nfcRequestSubscription = _deepLinks.requests.listen(
+      _handleIncomingNfcRequest,
+    );
     _loadData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_consumePendingNfcRequest());
       unawaited(_showNtagPairingReminderIfNeeded());
     });
+  }
+
+  void _handleIncomingNfcRequest(NfcScanRequest request) {
+    if (!mounted) {
+      return;
+    }
+    _nfcRequestGeneration += 1;
+    final int generation = _nfcRequestGeneration;
+    final bool isPhysicalScan = request.physicalUid.isNotEmpty;
+    final bool dismissingCard = isPhysicalScan && _isCardDetailOpen;
+
+    if (isPhysicalScan) {
+      _setNfcScanPhase(NfcScanTransitionPhase.detected, generation);
+      if (dismissingCard) {
+        _returnToCollectionRoute();
+      }
+    }
+
+    Future<void>.delayed(
+      dismissingCard ? const Duration(milliseconds: 320) : Duration.zero,
+      () {
+        if (!mounted || generation != _nfcRequestGeneration) {
+          return;
+        }
+        unawaited(_consumePendingNfcRequest());
+      },
+    );
   }
 
   @override
@@ -117,13 +144,10 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         localCards = await _localStore.loadCards(userId);
       }
 
-      final Future<List<Map<String, String>>> boothFuture =
-          MockApiService.getFeaturedBooths();
       final Future<Map<String, dynamic>?> collectionFuture = _authService
           .fetchCollectionRecords();
       final Future<Map<String, dynamic>?> stampMissionFuture = _authService
           .fetchStampMission();
-      final List<Map<String, String>> boothResult = await boothFuture;
       final Map<String, dynamic>? collectionResult = await collectionFuture;
       final Map<String, dynamic>? stampMission = await stampMissionFuture;
       if (userId != null && collectionResult != null) {
@@ -139,7 +163,6 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       }
 
       setState(() {
-        _featuredBooths = boothResult;
         _collectionData = collectionResult;
         _stampMission = stampMission;
         _localCards = localCards;
@@ -306,6 +329,38 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     }
   }
 
+  void _setNfcScanPhase(NfcScanTransitionPhase phase, int generation) {
+    if (!mounted || generation != _nfcRequestGeneration) {
+      return;
+    }
+    setState(() {
+      _nfcScanPhase = phase;
+    });
+  }
+
+  void _hideNfcScanTransition(int generation) {
+    if (!mounted || generation != _nfcRequestGeneration) {
+      return;
+    }
+    setState(() {
+      _nfcScanPhase = null;
+    });
+  }
+
+  bool _isCurrentNfcRequest(int generation) {
+    return mounted && generation == _nfcRequestGeneration;
+  }
+
+  String _nfcScanPhaseLabel(NfcScanTransitionPhase phase) {
+    final String key = switch (phase) {
+      NfcScanTransitionPhase.detected => 'nfcScanDetected',
+      NfcScanTransitionPhase.verifying => 'nfcScanVerifying',
+      NfcScanTransitionPhase.syncing => 'nfcScanSyncing',
+      NfcScanTransitionPhase.ready => 'nfcScanReady',
+    };
+    return context.l10n.tr(key);
+  }
+
   @override
   Widget build(BuildContext context) {
     PixelTheme.active = PixelTheme.getPalette(_selectedScheme);
@@ -321,157 +376,178 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       data: pixelTheme,
       child: DefaultTextStyle.merge(
         style: const TextStyle(fontFamily: 'Unifont'),
-        child: Scaffold(
-          backgroundColor: PixelTheme.bgDark,
-          appBar: AppBar(
-            leading: _showAdminModeSwitch
-                ? AdminModeSwitchButton(
-                    target: AdminModeTarget.adminTools,
-                    color: PixelTheme.accent,
-                  )
-                : null,
-            title: ValueListenableBuilder<int>(
-              valueListenable: _selectedTab,
-              builder: (BuildContext context, int tab, Widget? child) {
-                final String title = switch (tab) {
-                  1 => context.l10n.tr('myCardTab'),
-                  2 => context.l10n.tr('scoreboardTab'),
-                  _ => context.l10n.tr('appTitle'),
-                };
-                return Text(title);
-              },
-            ),
-            titleTextStyle: TextStyle(
-              color: PixelTheme.accent,
-              fontFamily: 'Unifont',
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 2.5,
-            ),
-            centerTitle: true,
-            backgroundColor: PixelTheme.bgMid,
-            foregroundColor: PixelTheme.accent,
-            elevation: 0,
-            toolbarHeight: 68,
-            actions: [
-              PopupMenuButton<PixelScheme>(
-                tooltip: context.l10n.tr('paletteTooltip'),
-                icon: _PixelThemeIcon(color: PixelTheme.accent),
-                onSelected: (PixelScheme scheme) {
-                  setState(() {
-                    _selectedScheme = scheme;
-                  });
-                },
-                itemBuilder: (BuildContext context) {
-                  return PixelScheme.values
-                      .map(
-                        (PixelScheme scheme) => PopupMenuItem<PixelScheme>(
-                          value: scheme,
-                          child: Text(
-                            context.l10n.tr('themeName', <String, Object?>{
-                              'name': PixelTheme.labelOf(scheme),
-                            }),
-                          ),
-                        ),
+        child: Stack(
+          children: <Widget>[
+            Scaffold(
+              backgroundColor: PixelTheme.bgDark,
+              appBar: AppBar(
+                leading: _showAdminModeSwitch
+                    ? AdminModeSwitchButton(
+                        target: AdminModeTarget.adminTools,
+                        color: PixelTheme.accent,
                       )
-                      .toList();
-                },
+                    : null,
+                title: ValueListenableBuilder<int>(
+                  valueListenable: _selectedTab,
+                  builder: (BuildContext context, int tab, Widget? child) {
+                    final String title = switch (tab) {
+                      1 => context.l10n.tr('myCardTab'),
+                      2 => context.l10n.tr('scoreboardTab'),
+                      _ => context.l10n.tr('appTitle'),
+                    };
+                    return Text(title);
+                  },
+                ),
+                titleTextStyle: TextStyle(
+                  color: PixelTheme.accent,
+                  fontFamily: 'Unifont',
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2.5,
+                ),
+                centerTitle: true,
+                backgroundColor: PixelTheme.bgMid,
+                foregroundColor: PixelTheme.accent,
+                elevation: 0,
+                toolbarHeight: 68,
+                actions: [
+                  PopupMenuButton<PixelScheme>(
+                    tooltip: context.l10n.tr('paletteTooltip'),
+                    icon: _PixelThemeIcon(color: PixelTheme.accent),
+                    onSelected: (PixelScheme scheme) {
+                      setState(() {
+                        _selectedScheme = scheme;
+                      });
+                    },
+                    itemBuilder: (BuildContext context) {
+                      return PixelScheme.values
+                          .map(
+                            (PixelScheme scheme) => PopupMenuItem<PixelScheme>(
+                              value: scheme,
+                              child: Text(
+                                context.l10n.tr('themeName', <String, Object?>{
+                                  'name': PixelTheme.labelOf(scheme),
+                                }),
+                              ),
+                            ),
+                          )
+                          .toList();
+                    },
+                  ),
+                ],
               ),
-            ],
-          ),
-          body: PageView(
-            controller: _pageController,
-            onPageChanged: (int index) {
-              _selectedTab.value = index;
-            },
-            children: [
-              _KeepAlivePage(child: _buildCollectionBody()),
-              _KeepAlivePage(
-                child: MyCardEditorPage(
-                  scheme: _selectedScheme,
-                  onBackupRestored: _loadData,
+              body: PageView(
+                controller: _pageController,
+                onPageChanged: (int index) {
+                  _selectedTab.value = index;
+                },
+                children: [
+                  _KeepAlivePage(child: _buildCollectionBody()),
+                  _KeepAlivePage(
+                    child: MyCardEditorPage(
+                      scheme: _selectedScheme,
+                      onBackupRestored: _loadData,
+                    ),
+                  ),
+                  _KeepAlivePage(
+                    child: ScoreBoardPage(scheme: _selectedScheme),
+                  ),
+                ],
+              ),
+              bottomNavigationBar: NavigationBarTheme(
+                data: NavigationBarThemeData(
+                  backgroundColor: PixelTheme.bgMid,
+                  indicatorColor: Colors.transparent,
+                  indicatorShape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.zero,
+                  ),
+                  overlayColor: WidgetStateProperty.all<Color>(
+                    Colors.transparent,
+                  ),
+                  labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
+                    Set<WidgetState> states,
+                  ) {
+                    if (states.contains(WidgetState.selected)) {
+                      return TextStyle(
+                        color: PixelTheme.accent,
+                        fontFamily: 'Unifont',
+                        fontWeight: FontWeight.w900,
+                      );
+                    }
+                    return TextStyle(
+                      color: PixelTheme.textWhite,
+                      fontFamily: 'Unifont',
+                      fontWeight: FontWeight.w700,
+                    );
+                  }),
+                  iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((
+                    Set<WidgetState> states,
+                  ) {
+                    if (states.contains(WidgetState.selected)) {
+                      return IconThemeData(color: PixelTheme.accent);
+                    }
+                    return IconThemeData(color: PixelTheme.textGray);
+                  }),
+                ),
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _selectedTab,
+                  builder: (BuildContext context, int tab, Widget? child) {
+                    return NavigationBar(
+                      selectedIndex: tab,
+                      onDestinationSelected: (int index) {
+                        unawaited(_selectTab(index));
+                      },
+                      destinations: [
+                        NavigationDestination(
+                          icon: _PixelNavIcon(
+                            type: _PixelNavIconType.collection,
+                            color: PixelTheme.textGray,
+                          ),
+                          selectedIcon: _PixelNavSelectedIcon(
+                            type: _PixelNavIconType.collection,
+                          ),
+                          label: context.l10n.tr('collectionTab'),
+                        ),
+                        NavigationDestination(
+                          icon: _PixelNavIcon(
+                            type: _PixelNavIconType.edit,
+                            color: PixelTheme.textGray,
+                          ),
+                          selectedIcon: _PixelNavSelectedIcon(
+                            type: _PixelNavIconType.edit,
+                          ),
+                          label: context.l10n.tr('myCardTab'),
+                        ),
+                        NavigationDestination(
+                          icon: _PixelNavIcon(
+                            type: _PixelNavIconType.trophy,
+                            color: PixelTheme.textGray,
+                          ),
+                          selectedIcon: _PixelNavSelectedIcon(
+                            type: _PixelNavIconType.trophy,
+                          ),
+                          label: context.l10n.tr('scoreboardTab'),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
-              _KeepAlivePage(child: ScoreBoardPage(scheme: _selectedScheme)),
-            ],
-          ),
-          bottomNavigationBar: NavigationBarTheme(
-            data: NavigationBarThemeData(
-              backgroundColor: PixelTheme.bgMid,
-              indicatorColor: Colors.transparent,
-              indicatorShape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.zero,
+            ),
+            Positioned.fill(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                reverseDuration: const Duration(milliseconds: 120),
+                child: _nfcScanPhase == null
+                    ? const SizedBox.shrink()
+                    : NfcScanTransition(
+                        key: ValueKey<int>(_nfcRequestGeneration),
+                        phase: _nfcScanPhase!,
+                        label: _nfcScanPhaseLabel(_nfcScanPhase!),
+                      ),
               ),
-              overlayColor: WidgetStateProperty.all<Color>(Colors.transparent),
-              labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
-                Set<WidgetState> states,
-              ) {
-                if (states.contains(WidgetState.selected)) {
-                  return TextStyle(
-                    color: PixelTheme.accent,
-                    fontFamily: 'Unifont',
-                    fontWeight: FontWeight.w900,
-                  );
-                }
-                return TextStyle(
-                  color: PixelTheme.textWhite,
-                  fontFamily: 'Unifont',
-                  fontWeight: FontWeight.w700,
-                );
-              }),
-              iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((
-                Set<WidgetState> states,
-              ) {
-                if (states.contains(WidgetState.selected)) {
-                  return IconThemeData(color: PixelTheme.accent);
-                }
-                return IconThemeData(color: PixelTheme.textGray);
-              }),
             ),
-            child: ValueListenableBuilder<int>(
-              valueListenable: _selectedTab,
-              builder: (BuildContext context, int tab, Widget? child) {
-                return NavigationBar(
-                  selectedIndex: tab,
-                  onDestinationSelected: (int index) {
-                    unawaited(_selectTab(index));
-                  },
-                  destinations: [
-                    NavigationDestination(
-                      icon: _PixelNavIcon(
-                        type: _PixelNavIconType.collection,
-                        color: PixelTheme.textGray,
-                      ),
-                      selectedIcon: _PixelNavSelectedIcon(
-                        type: _PixelNavIconType.collection,
-                      ),
-                      label: context.l10n.tr('collectionTab'),
-                    ),
-                    NavigationDestination(
-                      icon: _PixelNavIcon(
-                        type: _PixelNavIconType.edit,
-                        color: PixelTheme.textGray,
-                      ),
-                      selectedIcon: _PixelNavSelectedIcon(
-                        type: _PixelNavIconType.edit,
-                      ),
-                      label: context.l10n.tr('myCardTab'),
-                    ),
-                    NavigationDestination(
-                      icon: _PixelNavIcon(
-                        type: _PixelNavIconType.trophy,
-                        color: PixelTheme.textGray,
-                      ),
-                      selectedIcon: _PixelNavSelectedIcon(
-                        type: _PixelNavIconType.trophy,
-                      ),
-                      label: context.l10n.tr('scoreboardTab'),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
+          ],
         ),
       ),
     );
@@ -514,12 +590,6 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                     onRedeem: _isComplete ? _handleRedeem : null,
                   ),
                 ),
-                SliverPersistentHeader(
-                  pinned: true,
-                  delegate: _PinnedBoothHeaderDelegate(
-                    child: _PinnedBoothStrip(booths: _featuredBooths),
-                  ),
-                ),
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(8, 12, 8, 24),
                   sliver: SliverGrid(
@@ -549,9 +619,6 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                           card['description'] as String? ??
                           '';
                       final Color cardColor = _cardColorForCard(card, index);
-                      final String imageAsset = _PixelCard.imageAssetForIndex(
-                        index,
-                      );
                       final String heroTag = 'card-$index';
                       return _PixelCard(
                         title: title,
@@ -573,7 +640,6 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                           uid: card['physical_uid'] as String? ?? '',
                           collectedAt: card['collected_at'] as String? ?? '',
                           cardColor: cardColor,
-                          imageAsset: imageAsset,
                           imageBase64: card['pixel_avatar_base64'] as String?,
                         ),
                       );
@@ -646,13 +712,23 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       return;
     }
     final AppLocalizations l10n = context.l10n;
+    if (_nfcRequestGeneration == 0) {
+      _nfcRequestGeneration = 1;
+    }
+    final int generation = _nfcRequestGeneration;
+    final bool showScanTransition = request.physicalUid.isNotEmpty;
+    if (showScanTransition && _nfcScanPhase == null) {
+      _setNfcScanPhase(NfcScanTransitionPhase.detected, generation);
+    }
 
     final String? currentUserId = _authService.currentUserId;
     if (currentUserId == null || !_authService.isRegularUser) {
+      _hideNfcScanTransition(generation);
       return;
     }
 
     if (request.hasUserIdMismatch) {
+      _hideNfcScanTransition(generation);
       await _showIosRescanPrompt(
         expectedUserId: request.expectedUserId!,
         mismatch: true,
@@ -662,11 +738,13 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
 
     if (request.userId == currentUserId) {
       _returnToCollectionRoute();
+      _hideNfcScanTransition(generation);
       await _selectTab(1);
       return;
     }
 
     if (request.physicalUid.isEmpty) {
+      _hideNfcScanTransition(generation);
       switch (request.launchEvidence) {
         case NfcLaunchEvidence.directLink:
           await _recordPhishing(request.userId);
@@ -692,13 +770,22 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     _isHandlingNfcRequest = true;
     _returnToCollectionRoute();
     try {
+      _setNfcScanPhase(NfcScanTransitionPhase.verifying, generation);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!_isCurrentNfcRequest(generation)) {
+        return;
+      }
+
       final Map<String, dynamic>? scanResult = await _authService
           .scanCollection(
             targetUserId: request.userId,
             scannedNfcUid: request.physicalUid,
           );
       if (scanResult == null) {
-        _showNfcMessage(l10n.tr('collectionFailed'));
+        if (_isCurrentNfcRequest(generation)) {
+          _hideNfcScanTransition(generation);
+          _showNfcMessage(l10n.tr('collectionFailed'));
+        }
         return;
       }
       final Map<String, dynamic> scanData = Map<String, dynamic>.from(
@@ -712,6 +799,11 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         scannedUid: request.physicalUid,
         scanResult: scanResult,
       );
+      if (!_isCurrentNfcRequest(generation)) {
+        return;
+      }
+
+      _setNfcScanPhase(NfcScanTransitionPhase.syncing, generation);
       final Future<Map<String, dynamic>?> collectionFuture = _authService
           .fetchCollectionRecords();
       final Future<Map<String, dynamic>?> stampMissionFuture = _authService
@@ -727,6 +819,10 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       final List<Map<String, dynamic>> cards = await _localStore.loadCards(
         currentUserId,
       );
+      if (!_isCurrentNfcRequest(generation)) {
+        return;
+      }
+
       int cardIndex = cards.indexWhere((Map<String, dynamic> card) {
         final String owner =
             (card['owner'] as String? ?? card['user_id'] as String? ?? '')
@@ -741,6 +837,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         );
       }
       if (cardIndex < 0 || !mounted) {
+        _hideNfcScanTransition(generation);
         _showNfcMessage(l10n.tr('collectionPreviewFailed'));
         return;
       }
@@ -753,12 +850,24 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       await _selectTab(0);
       await WidgetsBinding.instance.endOfFrame;
       await _scrollCardIntoView(cardIndex);
-      if (mounted) {
-        await _openScannedCard(
-          cards[cardIndex],
-          cardIndex,
-          playRevealEffect: firstTimeCollected,
+      if (_isCurrentNfcRequest(generation)) {
+        _setNfcScanPhase(NfcScanTransitionPhase.ready, generation);
+        await Future<void>.delayed(const Duration(milliseconds: 320));
+      }
+      if (_isCurrentNfcRequest(generation)) {
+        _hideNfcScanTransition(generation);
+        unawaited(
+          _openScannedCard(
+            cards[cardIndex],
+            cardIndex,
+            playRevealEffect: firstTimeCollected,
+          ),
         );
+      }
+    } catch (_) {
+      if (_isCurrentNfcRequest(generation)) {
+        _hideNfcScanTransition(generation);
+        _showNfcMessage(l10n.tr('collectionFailed'));
       }
     } finally {
       _isHandlingNfcRequest = false;
@@ -874,7 +983,6 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       uid: uid,
       collectedAt: card['collected_at'] as String? ?? '',
       cardColor: _cardColorForCard(card, index),
-      imageAsset: _PixelCard.imageAssetForIndex(index),
       imageBase64: card['pixel_avatar_base64'] as String?,
       playRevealEffect: playRevealEffect,
     );
@@ -890,42 +998,45 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     required String uid,
     required String collectedAt,
     required Color cardColor,
-    required String imageAsset,
     String? imageBase64,
     bool playRevealEffect = false,
-  }) {
-    return Navigator.of(context).push(
-      PageRouteBuilder<void>(
-        opaque: false,
-        barrierColor: Colors.transparent,
-        transitionDuration: const Duration(milliseconds: 450),
-        reverseTransitionDuration: const Duration(milliseconds: 300),
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return CardDetailPage(
-            heroTag: heroTag,
-            title: title,
-            attributeEmoji: attributeEmoji,
-            attributeLabel: attributeLabel,
-            link: link,
-            description: description,
-            uid: uid,
-            collectedAt: collectedAt,
-            cardColor: cardColor,
-            imageAsset: imageAsset,
-            imageBase64: imageBase64,
-            playRevealEffect: playRevealEffect,
-          );
-        },
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          final Animation<double> curved = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-          return FadeTransition(opacity: curved, child: child);
-        },
-      ),
-    );
+  }) async {
+    _isCardDetailOpen = true;
+    try {
+      await Navigator.of(context).push(
+        PageRouteBuilder<void>(
+          opaque: false,
+          barrierColor: Colors.transparent,
+          transitionDuration: const Duration(milliseconds: 450),
+          reverseTransitionDuration: const Duration(milliseconds: 300),
+          pageBuilder: (context, animation, secondaryAnimation) {
+            return CardDetailPage(
+              heroTag: heroTag,
+              title: title,
+              attributeEmoji: attributeEmoji,
+              attributeLabel: attributeLabel,
+              link: link,
+              description: description,
+              uid: uid,
+              collectedAt: collectedAt,
+              cardColor: cardColor,
+              imageBase64: imageBase64,
+              playRevealEffect: playRevealEffect,
+            );
+          },
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            final Animation<double> curved = CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+              reverseCurve: Curves.easeInCubic,
+            );
+            return FadeTransition(opacity: curved, child: child);
+          },
+        ),
+      );
+    } finally {
+      _isCardDetailOpen = false;
+    }
   }
 }
 
@@ -1686,165 +1797,6 @@ class _StatItem extends StatelessWidget {
   }
 }
 
-/// 釘選區域委派器
-class _PinnedBoothHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _PinnedBoothHeaderDelegate({required this.child});
-
-  final Widget child;
-
-  @override
-  double get minExtent => 110;
-
-  @override
-  double get maxExtent => 110;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    return Container(
-      color: PixelTheme.bgDark,
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: child,
-    );
-  }
-
-  @override
-  bool shouldRebuild(covariant _PinnedBoothHeaderDelegate oldDelegate) {
-    return oldDelegate.child != child;
-  }
-}
-
-/// 釘選攤位列
-class _PinnedBoothStrip extends StatelessWidget {
-  const _PinnedBoothStrip({required this.booths});
-
-  final List<Map<String, String>> booths;
-
-  Color _getBoothColor(String accent) {
-    switch (accent) {
-      case 'amber':
-        return const Color(0xFFFFAA00);
-      case 'cyan':
-        return const Color(0xFF00FFFF);
-      case 'green':
-        return const Color(0xFF00FF00);
-      case 'pink':
-        return const Color(0xFFFF0099);
-      default:
-        return PixelTheme.accent;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Row(
-            children: [
-              Text(
-                '📌 SPONSORS',
-                style: TextStyle(
-                  color: PixelTheme.accent,
-                  fontFamily: 'Unifont',
-                  fontWeight: FontWeight.w900,
-                  fontSize: 11,
-                  letterSpacing: 1.0,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: 70,
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            scrollDirection: Axis.horizontal,
-            itemCount: booths.length,
-            separatorBuilder: (context, index) => const SizedBox(width: 8),
-            itemBuilder: (BuildContext context, int index) {
-              final Map<String, String> booth = booths[index];
-              final Color boothColor = _getBoothColor(booth['accent'] ?? '');
-
-              return Container(
-                width: 200,
-                decoration: BoxDecoration(
-                  color: PixelTheme.bgMid,
-                  border: Border.all(color: boothColor, width: 2),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black,
-                      blurRadius: 0,
-                      offset: Offset(3, 3),
-                    ),
-                  ],
-                ),
-                padding: const EdgeInsets.all(8),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: boothColor.withValues(alpha: 0.2),
-                        border: Border.all(color: boothColor),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        booth['icon'] ?? '*',
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: boothColor,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            booth['name'] ?? '',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: PixelTheme.textWhite,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 10,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            booth['tag'] ?? '',
-                            style: TextStyle(
-                              color: boothColor,
-                              fontSize: 8,
-                              fontWeight: FontWeight.w700,
-                              fontFamily: 'Unifont',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 /// 像素卡片
 class _PixelCard extends StatefulWidget {
   const _PixelCard({
@@ -1881,20 +1833,6 @@ class _PixelCard extends StatefulWidget {
       Color(0xFF9900FF), // 紫
     ];
     return colors[seed % colors.length];
-  }
-
-  static String imageAssetForIndex(int seed) {
-    const List<String> assets = <String>[
-      'assets/images/mock_card_circuit.png',
-      'assets/images/mock_card_chip.png',
-      'assets/images/mock_card_portal.png',
-      'assets/images/mock_card_lock.png',
-      'assets/images/mock_card_satellite.png',
-      'assets/images/mock_card_skull.png',
-      'assets/images/mock_card_terminal.png',
-      'assets/images/mock_card_badge.png',
-    ];
-    return assets[seed % assets.length];
   }
 
   @override

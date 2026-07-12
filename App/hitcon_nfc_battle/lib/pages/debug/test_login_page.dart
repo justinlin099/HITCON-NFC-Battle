@@ -7,10 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../config/app_config.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
-import '../../services/mock_api_service.dart';
 import '../../services/setup_service.dart';
 import '../user/pixel_theme.dart';
 
@@ -173,45 +171,6 @@ class _TestLoginPageState extends State<TestLoginPage> {
                     ),
                   ),
                 ),
-                if (AppConfig.useMockServices) ...<Widget>[
-                  const SizedBox(height: 18),
-                  _LoginPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        _PixelSectionTitle(label: context.l10n.tr('mockLogin')),
-                        const SizedBox(height: 12),
-                        _MockLoginButton(
-                          label: context.l10n.tr('administrator'),
-                          onPressed: _isLoading
-                              ? null
-                              : () => _handleLogin('ADMIN'),
-                        ),
-                        const SizedBox(height: 10),
-                        _MockLoginButton(
-                          label: context.l10n.tr('attendee'),
-                          onPressed: _isLoading
-                              ? null
-                              : () => _handleLogin('USER'),
-                        ),
-                        const SizedBox(height: 10),
-                        _MockLoginButton(
-                          label: context.l10n.tr('staff'),
-                          onPressed: _isLoading
-                              ? null
-                              : () => _handleLogin('EVENT_STAFF'),
-                        ),
-                        const SizedBox(height: 10),
-                        _PixelLoginButton(
-                          onPressed: _resetMockData,
-                          icon: Icons.refresh_rounded,
-                          label: context.l10n.tr('resetMockData'),
-                          accent: PixelTheme.warning,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
@@ -328,12 +287,22 @@ class _TestLoginPageState extends State<TestLoginPage> {
     });
 
     try {
-      final bool success = await AuthService().loginWithToken(token);
+      final AuthService authService = AuthService();
+      final bool success = await authService.loginWithToken(token);
       if (!mounted) {
         return;
       }
       if (!success) {
-        _showError(l10n.tr('loginFailedToken'));
+        final String? detail = authService.lastAuthError;
+        if (detail == 'Token has expired.') {
+          _showError(l10n.tr('tokenExpired'));
+        } else if (kDebugMode && detail != null && detail.isNotEmpty) {
+          _showError(
+            l10n.tr('loginFailed', <String, Object?>{'error': detail}),
+          );
+        } else {
+          _showError(l10n.tr('loginFailedToken'));
+        }
         return;
       }
       await _goNext();
@@ -341,31 +310,6 @@ class _TestLoginPageState extends State<TestLoginPage> {
       if (mounted) {
         _showError(l10n.tr('loginFailed', <String, Object?>{'error': error}));
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _handleLogin(String userType) async {
-    setState(() {
-      _isLoading = true;
-      _status = context.l10n.tr('mockSigningIn');
-    });
-
-    try {
-      final bool success = await AuthService().login(userType);
-      if (!mounted) {
-        return;
-      }
-      if (!success) {
-        _showError(context.l10n.tr('mockLoginFailed'));
-        return;
-      }
-      await _goNext();
     } finally {
       if (mounted) {
         setState(() {
@@ -434,23 +378,6 @@ class _TestLoginPageState extends State<TestLoginPage> {
           ),
         ),
         backgroundColor: PixelTheme.warning,
-      ),
-    );
-  }
-
-  void _resetMockData() {
-    MockApiService.resetMockData();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: PixelTheme.bgMid,
-        content: Text(
-          context.l10n.tr('mockDataReset'),
-          style: TextStyle(
-            color: PixelTheme.accent,
-            fontFamily: 'Unifont',
-            fontWeight: FontWeight.w700,
-          ),
-        ),
       ),
     );
   }
@@ -726,23 +653,6 @@ class _LoginPanel extends StatelessWidget {
         ],
       ),
       child: child,
-    );
-  }
-}
-
-class _MockLoginButton extends StatelessWidget {
-  const _MockLoginButton({required this.label, required this.onPressed});
-
-  final String label;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return _PixelLoginButton(
-      onPressed: onPressed,
-      icon: Icons.person_rounded,
-      label: label,
-      accent: PixelTheme.accentBlue,
     );
   }
 }

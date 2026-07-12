@@ -1,4 +1,4 @@
-package com.example.hitcon_nfc_battle
+package org.hitcon.nfcbattle
 
 import android.content.Intent
 import android.content.ActivityNotFoundException

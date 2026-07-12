@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class LocalCollectionStore {
   static const String _prefix = 'local_collection_cache_v1';
+  static const int maxBackupBytes = 10 * 1024 * 1024;
+  static const int _maxCards = 10000;
 
   Future<Map<String, dynamic>> load(String userId) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -123,15 +125,24 @@ class LocalCollectionStore {
   }
 
   Future<void> importJson(String userId, String rawJson) async {
+    if (utf8.encode(rawJson).length > maxBackupBytes) {
+      throw const FormatException('Backup exceeds the size limit.');
+    }
     final dynamic decoded = jsonDecode(rawJson);
     if (decoded is! Map) {
       throw const FormatException('Backup must be a JSON object.');
     }
 
-    final Map<String, dynamic> cache = _normalizeCache(
-      userId,
-      _jsonMap(decoded),
-    );
+    final Map<String, dynamic> imported = _jsonMap(decoded);
+    if (imported['schema'] != null && imported['schema'] != 1) {
+      throw const FormatException('Unsupported backup schema.');
+    }
+    final Object? rawCards = imported['cards_by_uid'];
+    if (rawCards is! Map || rawCards.length > _maxCards) {
+      throw const FormatException('Invalid cards collection.');
+    }
+
+    final Map<String, dynamic> cache = _normalizeCache(userId, imported);
     cache['user_id'] = userId;
     cache['imported_at'] = DateTime.now().toIso8601String();
     cache['updated_at'] = DateTime.now().toIso8601String();

@@ -3,7 +3,7 @@
     "apps": [],
     "details": [
       {
-        "appID": "REPLACE_WITH_APPLE_TEAM_ID.com.example.hitconNfcBattle",
+        "appID": "REPLACE_WITH_APPLE_TEAM_ID.org.hitcon.nfcbattle",
         "paths": [
           "/b",
           "/b/*"

@@ -22,7 +22,6 @@ class CardDetailPage extends StatefulWidget {
     required this.uid,
     required this.collectedAt,
     required this.cardColor,
-    required this.imageAsset,
     this.imageBase64,
     this.playRevealEffect = false,
     this.showCollectionInfo = true,
@@ -37,7 +36,6 @@ class CardDetailPage extends StatefulWidget {
   final String uid;
   final String collectedAt;
   final Color cardColor;
-  final String imageAsset;
   final String? imageBase64;
   final bool playRevealEffect;
   final bool showCollectionInfo;

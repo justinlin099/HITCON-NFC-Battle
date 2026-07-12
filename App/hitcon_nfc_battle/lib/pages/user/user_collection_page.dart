@@ -205,7 +205,6 @@ class _UserCollectionPageState extends State<UserCollectionPage> {
           uid: card['physical_id'] as String? ?? '',
           collectedAt: '',
           cardColor: _cardColor(card, index),
-          imageAsset: '',
           imageBase64: card['pixel_avatar_base64'] as String?,
           showCollectionInfo: false,
         ),

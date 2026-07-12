@@ -85,10 +85,18 @@ class NfcDeepLinkService {
 
   Future<void> acceptUri(Uri uri) async {
     final bool validTarget =
+        uri.scheme.toLowerCase() == 'https' &&
         uri.host.toLowerCase() == 'game.hitcon2026.online' &&
+        !uri.hasPort &&
+        uri.userInfo.isEmpty &&
+        !uri.hasFragment &&
         (uri.path == '/b' || uri.path == '/b/');
     final String userId = uri.queryParameters['u']?.trim() ?? '';
-    if (!validTarget || userId.isEmpty) {
+    final bool validUserId =
+        userId.isNotEmpty &&
+        userId.length <= 128 &&
+        !userId.contains(RegExp(r'[\x00-\x1F\x7F]'));
+    if (!validTarget || !validUserId) {
       return;
     }
 

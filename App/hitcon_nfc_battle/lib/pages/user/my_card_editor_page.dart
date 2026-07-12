@@ -37,13 +37,21 @@ class CardImageCropResult {
 }
 
 Future<CardImageCropResult?> openCardImageCropper(BuildContext context) async {
+  const int maxSourceImageBytes = 20 * 1024 * 1024;
   final ImagePicker picker = ImagePicker();
   final XFile? picked = await picker.pickImage(source: ImageSource.gallery);
 
   if (picked == null) {
     return null;
   }
+  final int sourceImageBytes = await picked.length();
   if (!context.mounted) {
+    return null;
+  }
+  if (sourceImageBytes > maxSourceImageBytes) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(context.l10n.tr('imageTooLarge'))));
     return null;
   }
   final String readingLabel = context.l10n.tr('readingImage');
@@ -587,6 +595,11 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
       withData: true,
     );
     if (result == null || result.files.isEmpty) {
+      return;
+    }
+
+    if (result.files.single.size > LocalCollectionStore.maxBackupBytes) {
+      _showEditorSnack(l10n.tr('invalidBackup'));
       return;
     }
 
@@ -1504,12 +1517,23 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
       return;
     }
 
-    final String id = response['order_id'] as String? ?? 'HITCON26-MOCK';
+    final String id = (response['order_id'] as String? ?? '').trim();
+    final String barcodeValue = (response['barcode_value'] as String? ?? '')
+        .trim();
+    if (id.isEmpty || barcodeValue.isEmpty) {
+      setState(() {
+        _isSubmitting = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.tr('printRequestFailed'))),
+      );
+      return;
+    }
     setState(() {
       _isSubmitting = false;
       _order = _PrintOrder(
         id: id,
-        barcodeValue: response['barcode_value'] as String? ?? 'PRINT:$id',
+        barcodeValue: barcodeValue,
         fileName: response['file_name'] as String? ?? 'card-print-$id.png',
         format:
             response['format'] as String? ?? 'EVOLIS_PRIMACY_CR80_300DPI_PNG',
@@ -1949,7 +1973,7 @@ class _BarcodeCard extends StatelessWidget {
             height: 92,
             width: double.infinity,
             child: CustomPaint(
-              painter: _MockBarcodePainter(order.barcodeValue),
+              painter: _PixelBarcodePainter(order.barcodeValue),
             ),
           ),
           Text(
@@ -2023,8 +2047,8 @@ class _BarcodeSaveScreen extends StatelessWidget {
   }
 }
 
-class _MockBarcodePainter extends CustomPainter {
-  const _MockBarcodePainter(this.value);
+class _PixelBarcodePainter extends CustomPainter {
+  const _PixelBarcodePainter(this.value);
 
   final String value;
 
@@ -2067,7 +2091,7 @@ class _MockBarcodePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_MockBarcodePainter oldDelegate) {
+  bool shouldRepaint(_PixelBarcodePainter oldDelegate) {
     return oldDelegate.value != value;
   }
 }

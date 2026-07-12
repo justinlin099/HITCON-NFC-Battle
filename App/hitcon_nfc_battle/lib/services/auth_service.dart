@@ -1,14 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
 import 'card_bio_codec.dart';
-import 'mock_api_service.dart';
 import 'nfc_battle_api_client.dart';
 import 'ntag_security_service.dart';
-import 'staging_jwt_service.dart';
 
 enum UserRole { admin, user, eventStaff, unknown }
 
@@ -21,69 +20,49 @@ class AuthService {
 
   AuthService._internal();
 
-  static const String _stagingJwtKey = 'staging_jwt_token';
+  static const String _jwtKey = 'auth_jwt_token';
+  static const String _legacyJwtKey = 'staging_jwt_token';
   static const String _stagingUserIdKey = 'staging_user_id';
-  static const String _stagingUserRoleKey = 'staging_user_role';
+  static const String _roleKey = 'auth_user_role';
 
   final NfcBattleApiClient _api = const NfcBattleApiClient();
   final CardBioCodec _cardBioCodec = const CardBioCodec();
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   String? _currentUserId;
   UserRole _currentRole = UserRole.unknown;
   String? _jwtToken;
   Map<String, dynamic>? _userProfile;
-
-  Future<bool> login(String userType) async {
-    try {
-      _log('Attempting login with userType: $userType');
-
-      if (AppConfig.useMockServices) {
-        return _mockLogin(userType);
-      }
-
-      final _StagingIdentity identity = _identityForUserType(userType);
-      final String token = const StagingJwtService().createToken(
-        userId: identity.userId,
-        role: identity.apiRole,
-      );
-
-      _jwtToken = token;
-      _currentUserId = identity.userId;
-      _currentRole = identity.appRole;
-
-      final Map<String, dynamic>? profile = await fetchUserProfile();
-      if (profile == null) {
-        return false;
-      }
-
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_stagingJwtKey, token);
-      await prefs.setString(_stagingUserIdKey, _currentUserId!);
-      await prefs.setString(_stagingUserRoleKey, identity.apiRole);
-      return true;
-    } catch (e) {
-      _log('Login error: $e');
-      return false;
-    }
-  }
+  String? _lastAuthError;
+  int? _lastAuthStatusCode;
 
   Future<bool> loginWithToken(String token) async {
+    _lastAuthError = null;
+    _lastAuthStatusCode = null;
     final String normalizedToken = token.trim();
     if (normalizedToken.isEmpty) {
+      _lastAuthError = 'Token is empty.';
       return false;
     }
 
     try {
       final Map<String, dynamic> claims = _decodeJwtClaims(normalizedToken);
       final String? userId = claims['sub'] as String?;
-      final String? role = claims['role'] as String?;
       if (userId == null || userId.trim().isEmpty) {
+        _lastAuthError = 'Token does not contain a valid subject.';
+        return false;
+      }
+
+      final Object? expiresAt = claims['exp'];
+      if (expiresAt is num &&
+          expiresAt.toInt() <= DateTime.now().millisecondsSinceEpoch ~/ 1000) {
+        _lastAuthError = 'Token has expired.';
         return false;
       }
 
       _jwtToken = normalizedToken;
       _currentUserId = userId;
-      _setRoleFromString(role ?? '');
+      _currentRole = UserRole.unknown;
 
       final Map<String, dynamic>? profile = await fetchUserProfile();
       if (profile == null) {
@@ -93,14 +72,18 @@ class AuthService {
         return false;
       }
 
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_stagingJwtKey, normalizedToken);
-      await prefs.setString(_stagingUserIdKey, _currentUserId!);
-      if (role != null) {
-        await prefs.setString(_stagingUserRoleKey, role);
+      try {
+        final SharedPreferences prefs = await SharedPreferences.getInstance();
+        await _secureStorage.write(key: _jwtKey, value: normalizedToken);
+        await prefs.remove(_legacyJwtKey);
+        await prefs.setString(_stagingUserIdKey, _currentUserId!);
+        await prefs.setString(_roleKey, _roleStorageValue(_currentRole));
+      } catch (e) {
+        _log('Authenticated session could not be persisted securely: $e');
       }
       return true;
     } catch (e) {
+      _lastAuthError = e.toString();
       _log('Token login error: $e');
       _jwtToken = null;
       _currentUserId = null;
@@ -116,77 +99,80 @@ class AuthService {
 
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
-      if (AppConfig.useMockServices) {
-        _jwtToken = prefs.getString('test_jwt_token');
-        _currentUserId = prefs.getString('test_user_id');
-        if (_jwtToken == null || _currentUserId == null) {
-          return false;
-        }
-        final Map<String, dynamic>? profile = await fetchUserProfile();
-        return profile != null;
+      String? token = await _secureStorage.read(key: _jwtKey);
+      final String? legacyToken = prefs.getString(_legacyJwtKey);
+      if (token == null && legacyToken != null) {
+        token = legacyToken;
+        await _secureStorage.write(key: _jwtKey, value: legacyToken);
+        await prefs.remove(_legacyJwtKey);
+      }
+      final String? userId = prefs.getString(_stagingUserIdKey);
+      if (token == null) {
+        return false;
       }
 
-      final String? token = prefs.getString(_stagingJwtKey);
-      final String? userId = prefs.getString(_stagingUserIdKey);
-      final String? role = prefs.getString(_stagingUserRoleKey);
-      if (token == null || userId == null) {
+      final Map<String, dynamic> claims = _decodeJwtClaims(token);
+      final String? tokenUserId = claims['sub'] as String?;
+      final String restoredUserId = (tokenUserId ?? userId ?? '').trim();
+      if (restoredUserId.isEmpty) {
+        await logout();
+        return false;
+      }
+
+      final Object? expiresAt = claims['exp'];
+      if (expiresAt is num &&
+          expiresAt.toInt() <= DateTime.now().millisecondsSinceEpoch ~/ 1000) {
+        await logout();
         return false;
       }
 
       _jwtToken = token;
-      _currentUserId = userId;
-      _setRoleFromString(role ?? '');
+      _currentUserId = restoredUserId;
+      _currentRole = UserRole.unknown;
+      _setRoleFromString((claims['role'] ?? '').toString().toUpperCase());
+      if (_currentRole == UserRole.unknown) {
+        _setRoleFromString((prefs.getString(_roleKey) ?? '').toUpperCase());
+      }
 
       final Map<String, dynamic>? profile = await fetchUserProfile();
       if (profile != null) {
+        await prefs.setString(_stagingUserIdKey, _currentUserId!);
+        await prefs.setString(_roleKey, _roleStorageValue(_currentRole));
         return true;
       }
 
-      await logout();
-      return false;
+      if (_lastAuthStatusCode == 401 || _lastAuthStatusCode == 403) {
+        await logout();
+        return false;
+      }
+
+      _log(
+        'Keeping the stored session because profile restoration failed '
+        'without an authentication rejection.',
+      );
+      return true;
     } catch (e) {
       _log('Restore session error: $e');
-      await logout();
+      if (e is FormatException) {
+        await logout();
+      }
       return false;
     }
-  }
-
-  Future<bool> _mockLogin(String userType) async {
-    await MockApiService.saveTestJwt(userType);
-
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    _jwtToken = prefs.getString('test_jwt_token');
-    _currentUserId = prefs.getString('test_user_id');
-    _setRoleFromString(userType.toUpperCase());
-
-    if (_currentUserId == null) {
-      return false;
-    }
-
-    final Map<String, dynamic> profileResult =
-        await MockApiService.getUserProfile(_currentUserId!);
-    if (profileResult['status'] != 'success') {
-      return false;
-    }
-    _userProfile = _normalizeProfile(profileResult['data']);
-    return true;
   }
 
   Future<void> logout() async {
     try {
-      if (AppConfig.useMockServices) {
-        await MockApiService.clearTestData();
-      }
-
       final SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_stagingJwtKey);
+      await _secureStorage.delete(key: _jwtKey);
+      await prefs.remove(_legacyJwtKey);
       await prefs.remove(_stagingUserIdKey);
-      await prefs.remove(_stagingUserRoleKey);
+      await prefs.remove(_roleKey);
 
       _currentUserId = null;
       _jwtToken = null;
       _userProfile = null;
       _currentRole = UserRole.unknown;
+      _lastAuthStatusCode = null;
     } catch (e) {
       _log('Logout error: $e');
     }
@@ -198,26 +184,19 @@ class AuthService {
       return null;
     }
 
+    _lastAuthStatusCode = null;
     try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result = await MockApiService.getUserProfile(
-          _currentUserId!,
-        );
-        if (result['status'] == 'success') {
-          _userProfile = _normalizeProfile(result['data']);
-          return _userProfile;
-        }
-      } else {
-        final Map<String, dynamic> result = await _api.get(
-          '/users/me',
-          token: _jwtToken!,
-        );
-        _userProfile = _normalizeProfile(result['data']);
-        _currentUserId = _userProfile?['user_id'] as String? ?? _currentUserId;
-        _setRoleFromApiRole(_userProfile?['role'] as String?);
-        return _userProfile;
-      }
+      final Map<String, dynamic> result = await _api.get(
+        '/users/me',
+        token: _jwtToken!,
+      );
+      _userProfile = _normalizeProfile(result['data']);
+      _currentUserId = _userProfile?['user_id'] as String? ?? _currentUserId;
+      _setRoleFromApiRole(_userProfile?['role'] as String?);
+      return _userProfile;
     } catch (e) {
+      _lastAuthError = e.toString();
+      _lastAuthStatusCode = e is ApiException ? e.statusCode : null;
       _log('Error fetching user profile: $e');
     }
 
@@ -235,22 +214,13 @@ class AuthService {
       if (body.isEmpty) {
         return true;
       }
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result =
-            await MockApiService.updateUserProfile(_currentUserId!, body);
-        if (result['status'] == 'success') {
-          await fetchUserProfile();
-          return true;
-        }
-      } else {
-        final Map<String, dynamic> result = await _api.patch(
-          '/users/me',
-          token: _jwtToken!,
-          body: body,
-        );
-        _userProfile = _normalizeProfile(result['data']);
-        return true;
-      }
+      final Map<String, dynamic> result = await _api.patch(
+        '/users/me',
+        token: _jwtToken!,
+        body: body,
+      );
+      _userProfile = _normalizeProfile(result['data']);
+      return true;
     } catch (e) {
       _log('Error updating user profile: $e');
     }
@@ -265,14 +235,6 @@ class AuthService {
     }
 
     try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result = await MockApiService.pairTag(
-          _currentUserId!,
-          uid,
-        );
-        return result['status'] == 'success';
-      }
-
       await _api.post(
         '/tags/pair',
         token: _jwtToken!,
@@ -311,35 +273,23 @@ class AuthService {
     }
 
     try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result =
-            await MockApiService.getNtagLockSecret(
-              uid: uid,
-              purpose: purpose,
-              requesterUserId: _currentUserId!,
-            );
-        if (result['status'] == 'success') {
-          return _secretFromData(result['data']);
+      final Map<String, dynamic>? profile =
+          _userProfile ?? await fetchUserProfile();
+      if (purpose == 'unlock') {
+        final String pairedUid =
+            (profile?['paired_ntag_uid'] as String? ??
+                    profile?['physical_id'] as String? ??
+                    '')
+                .trim()
+                .toUpperCase();
+        if (pairedUid.isNotEmpty && pairedUid != uid.trim().toUpperCase()) {
+          _log(
+            'Server API only exposes the current user nfc_tag_key; cannot unlock another user tag uid=$uid paired=$pairedUid',
+          );
+          return null;
         }
-      } else {
-        final Map<String, dynamic>? profile =
-            _userProfile ?? await fetchUserProfile();
-        if (purpose == 'unlock') {
-          final String pairedUid =
-              (profile?['paired_ntag_uid'] as String? ??
-                      profile?['physical_id'] as String? ??
-                      '')
-                  .trim()
-                  .toUpperCase();
-          if (pairedUid.isNotEmpty && pairedUid != uid.trim().toUpperCase()) {
-            _log(
-              'Server API only exposes the current user nfc_tag_key; cannot unlock another user tag uid=$uid paired=$pairedUid',
-            );
-            return null;
-          }
-        }
-        return _secretFromNfcTagKey(profile?['nfc_tag_key']);
       }
+      return _secretFromNfcTagKey(profile?['nfc_tag_key']);
     } catch (e) {
       _log('Error requesting NTAG secret: $e');
     }
@@ -354,25 +304,17 @@ class AuthService {
     }
 
     try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result =
-            await MockApiService.getCollectionRecords(_currentUserId!);
-        if (result['status'] == 'success') {
-          return result['data'] as Map<String, dynamic>;
-        }
-      } else {
-        final Map<String, dynamic> result = await _api.get(
-          '/users/me/bootstrap',
-          token: _jwtToken!,
-        );
-        final Map<String, dynamic> data = _jsonMap(result['data']);
-        final Map<String, dynamic> me = _normalizeProfile(data['me']);
-        _userProfile = me;
-        return _collectionFromUsers(
-          owner: me,
-          users: (data['collected_users'] as List<dynamic>? ?? <dynamic>[]),
-        );
-      }
+      final Map<String, dynamic> result = await _api.get(
+        '/users/me/bootstrap',
+        token: _jwtToken!,
+      );
+      final Map<String, dynamic> data = _jsonMap(result['data']);
+      final Map<String, dynamic> me = _normalizeProfile(data['me']);
+      _userProfile = me;
+      return _collectionFromUsers(
+        owner: me,
+        users: (data['collected_users'] as List<dynamic>? ?? <dynamic>[]),
+      );
     } catch (e) {
       _log('Error fetching collection records: $e');
     }
@@ -387,12 +329,6 @@ class AuthService {
     }
 
     try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result =
-            await MockApiService.getStampMission(_currentUserId!);
-        return result['status'] == 'success' ? _jsonMap(result['data']) : null;
-      }
-
       final Map<String, dynamic> result = await _api.get(
         '/missions/stamp',
         token: _jwtToken!,
@@ -420,15 +356,6 @@ class AuthService {
     }
 
     try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result = await MockApiService.scanCollection(
-          currentUserId: _currentUserId!,
-          targetUserId: normalizedTargetUserId,
-          scannedNfcUid: scannedNfcUid,
-        );
-        return result['status'] == 'success' ? result : null;
-      }
-
       final Map<String, dynamic> result = await _api.post(
         '/collection/scan',
         token: _jwtToken!,
@@ -470,14 +397,6 @@ class AuthService {
     }
 
     try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result = await MockApiService.recordPhishing(
-          victim: victim,
-          attacker: attacker,
-        );
-        return result['status'] == 'success';
-      }
-
       await _api.post(
         '/collection/phishing',
         token: _jwtToken!,
@@ -496,14 +415,6 @@ class AuthService {
     }
 
     try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result =
-            await MockApiService.getUserCollection(targetUserId);
-        return result['status'] == 'success'
-            ? result['data'] as Map<String, dynamic>
-            : null;
-      }
-
       final Map<String, dynamic> result = await _api.get(
         '/users/$targetUserId/collection',
         token: _jwtToken!,
@@ -531,15 +442,6 @@ class AuthService {
     }
 
     try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result = await MockApiService.getUserProfile(
-          targetUserId,
-        );
-        return result['status'] == 'success'
-            ? _normalizeVisibleProfile(_jsonMap(result['data']))
-            : null;
-      }
-
       final Map<String, dynamic> result = await _api.get(
         '/users/$targetUserId',
         token: _jwtToken!,
@@ -581,23 +483,7 @@ class AuthService {
       return null;
     }
 
-    try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result =
-            await MockApiService.submitCardPrintOrder(
-              userId: _currentUserId!,
-              artworkPng: artworkPng,
-              metadata: metadata,
-            );
-        return result['status'] == 'success'
-            ? result['data'] as Map<String, dynamic>
-            : null;
-      }
-      _log('Card print order endpoint is not present in openapi.yaml.');
-    } catch (e) {
-      _log('Error submitting card print order: $e');
-    }
-
+    _log('Card print order endpoint is not present in openapi.yaml.');
     return null;
   }
 
@@ -609,23 +495,7 @@ class AuthService {
       return null;
     }
 
-    try {
-      if (AppConfig.useMockServices) {
-        final Map<String, dynamic> result =
-            await MockApiService.confirmPrizeClaim(
-              tagUid: tagUid,
-              userId: userId,
-              staffUserId: _currentUserId!,
-            );
-        return result['status'] == 'success'
-            ? result['data'] as Map<String, dynamic>
-            : null;
-      }
-      _log('Prize claim endpoint is not present in openapi.yaml.');
-    } catch (e) {
-      _log('Error confirming prize claim: $e');
-    }
-
+    _log('Prize claim endpoint is not present in openapi.yaml.');
     return null;
   }
 
@@ -746,16 +616,6 @@ class AuthService {
     };
   }
 
-  NtagLockSecret? _secretFromData(Object? raw) {
-    final Map<String, dynamic> data = _jsonMap(raw);
-    final List<int>? password = _parseSecretBytes(data['password'], 4);
-    final List<int>? pack = _parseSecretBytes(data['pack'], 2);
-    if (password == null || pack == null) {
-      return null;
-    }
-    return NtagLockSecret(password: password, pack: pack);
-  }
-
   NtagLockSecret? _secretFromNfcTagKey(Object? raw) {
     final List<int>? key = _parseSecretBytes(raw, 6);
     if (key == null) {
@@ -830,31 +690,6 @@ class AuthService {
     return false;
   }
 
-  _StagingIdentity _identityForUserType(String userType) {
-    switch (userType.toUpperCase()) {
-      case 'ADMIN':
-        return const _StagingIdentity(
-          userId: 'staging_admin',
-          apiRole: 'STAFF',
-          appRole: UserRole.admin,
-        );
-      case 'EVENT_STAFF':
-      case 'STAFF':
-        return const _StagingIdentity(
-          userId: 'staging_staff',
-          apiRole: 'STAFF',
-          appRole: UserRole.eventStaff,
-        );
-      case 'USER':
-      default:
-        return const _StagingIdentity(
-          userId: 'staging_attendee',
-          apiRole: 'ATTENDEE',
-          appRole: UserRole.user,
-        );
-    }
-  }
-
   void _setRoleFromString(String roleStr) {
     switch (roleStr) {
       case 'ADMIN':
@@ -875,10 +710,16 @@ class AuthService {
   }
 
   void _setRoleFromApiRole(String? role) {
-    if (_currentRole == UserRole.admin) {
-      return;
-    }
     _setRoleFromString(role ?? '');
+  }
+
+  String _roleStorageValue(UserRole role) {
+    return switch (role) {
+      UserRole.admin => 'ADMIN',
+      UserRole.eventStaff => 'EVENT_STAFF',
+      UserRole.user => 'USER',
+      UserRole.unknown => '',
+    };
   }
 
   void _log(String message) {
@@ -891,20 +732,9 @@ class AuthService {
   UserRole get currentRole => _currentRole;
   String? get jwtToken => _jwtToken;
   Map<String, dynamic>? get userProfile => _userProfile;
+  String? get lastAuthError => _lastAuthError;
   bool get isLoggedIn => _jwtToken != null && _currentUserId != null;
   bool get isAdmin => _currentRole == UserRole.admin;
   bool get isEventStaff => _currentRole == UserRole.eventStaff;
   bool get isRegularUser => _currentRole == UserRole.user;
-}
-
-class _StagingIdentity {
-  const _StagingIdentity({
-    required this.userId,
-    required this.apiRole,
-    required this.appRole,
-  });
-
-  final String userId;
-  final String apiRole;
-  final UserRole appRole;
 }
