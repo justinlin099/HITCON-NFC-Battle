@@ -3,7 +3,7 @@ import Flutter
 import UIKit
 
 @main
-@objc class AppDelegate: FlutterAppDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var nativeNfcWriter: NativeNfcWriter?
   private var nfcLaunchChannel: FlutterMethodChannel?
 
@@ -11,15 +11,20 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    GeneratedPluginRegistrant.register(with: self)
-    if let registrar = registrar(forPlugin: "NativeNfcWriter") {
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    let registry = engineBridge.pluginRegistry
+    GeneratedPluginRegistrant.register(with: registry)
+    if let registrar = registry.registrar(forPlugin: "NativeNfcWriter") {
       let channel = FlutterMethodChannel(
         name: "hitcon_nfc_battle/native_nfc_writer",
         binaryMessenger: registrar.messenger()
       )
       nativeNfcWriter = NativeNfcWriter(channel: channel)
     }
-    if let registrar = registrar(forPlugin: "IosNfcLaunchEvidence") {
+    if let registrar = registry.registrar(forPlugin: "IosNfcLaunchEvidence") {
       let channel = FlutterMethodChannel(
         name: "hitcon_nfc_battle/nfc_intent",
         binaryMessenger: registrar.messenger()
@@ -33,7 +38,6 @@ import UIKit
       }
       nfcLaunchChannel = channel
     }
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
   override func application(
