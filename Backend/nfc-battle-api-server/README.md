@@ -9,7 +9,8 @@ Copy local secrets before running the Worker:
 cp .dev.vars.example .dev.vars
 ```
 
-Use `.dev.vars` only for local Worker runtime secrets such as `JWT_SECRET` and `STAFF_DANGER_TOKEN`.
+Use `.dev.vars` for local Worker runtime settings such as `JWT_SECRET`,
+`STAFF_DANGER_TOKEN`, and `PRINT_CARD_MAX_UPLOAD_BYTES`.
 
 ## Local Wrangler Auth
 
@@ -83,6 +84,13 @@ Create the staging D1 database:
 npm run wrangler -- d1 create nfc-battle-api-server-staging
 ```
 
+Create the staging R2 bucket used for print-card PNGs. The Worker stores only
+print-card metadata in D1; image bytes are stored in this private bucket.
+
+```txt
+npm run wrangler -- r2 bucket create nfc-battle-print-cards-staging
+```
+
 Replace the staging placeholder `database_id` in
 [`wrangler.jsonc`](./wrangler.jsonc), then regenerate types and apply remote
 migrations:
@@ -134,6 +142,12 @@ production D1 database:
 
 ```txt
 npm run wrangler -- d1 create nfc-battle-api-server
+```
+
+Create the production R2 bucket used for print-card PNGs:
+
+```txt
+npm run wrangler -- r2 bucket create nfc-battle-print-cards
 ```
 
 Replace the production placeholder `database_id` in

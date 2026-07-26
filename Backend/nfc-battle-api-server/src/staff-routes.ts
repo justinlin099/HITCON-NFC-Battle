@@ -72,10 +72,15 @@ staffRoutes.get("/print-cards/:short_token", async (c) => {
     return errorResponse(c, 404, "PRINT_CARD_NOT_FOUND", "Print-card token not found.");
   }
 
-  return new Response(card.image, {
+  const image = await c.env.PRINT_CARD_IMAGES.get(card.object_key);
+  if (!image) {
+    return errorResponse(c, 404, "PRINT_CARD_NOT_FOUND", "Print-card token not found.");
+  }
+
+  return new Response(image.body, {
     status: 200,
     headers: {
-      "Content-Type": "image/png",
+      "Content-Type": image.httpMetadata?.contentType ?? "image/png",
       "Content-Disposition": `attachment; filename="${shortToken}.png"`,
       "Cache-Control": "private, no-store",
     },

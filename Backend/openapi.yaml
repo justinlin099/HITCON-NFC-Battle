@@ -815,9 +815,9 @@ paths:
       tags: [Print cards]
       summary: Upload a PNG for staff to print
       description: |
-        Stores one PNG image for the authenticated user and returns a compact,
-        opaque `short_token`. The app renders that token as a barcode on the
-        print card. The image is only downloadable by STAFF through
+        Stores one PNG image in protected object storage for the authenticated
+        user and returns a compact, opaque `short_token`. The app renders that
+        token as a barcode on the print card. The image is only downloadable by STAFF through
         `GET /staff/print-cards/{short_token}`.
       requestBody:
         required: true
@@ -831,7 +831,7 @@ paths:
                 image:
                   type: string
                   format: binary
-                  description: PNG image, at most 5 MiB.
+                  description: PNG image. Its maximum size is configured by the Worker `PRINT_CARD_MAX_UPLOAD_BYTES` environment variable.
       responses:
         '200':
           description: Image stored and barcode token issued.
@@ -844,7 +844,7 @@ paths:
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '413':
-          description: PNG image is larger than 5 MiB.
+          description: PNG image is larger than the configured upload limit.
           content:
             application/json:
               schema:

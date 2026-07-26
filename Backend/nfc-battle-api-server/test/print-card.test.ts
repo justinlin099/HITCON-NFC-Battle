@@ -20,6 +20,20 @@ describe("print cards", () => {
     expect(upload.status).toBe(200);
     const uploaded = await readJson(upload) as { data: { short_token: string } };
     expect(uploaded.data.short_token).toMatch(/^[A-Za-z0-9_-]{11}$/);
+    await expect(
+      server.db
+        .prepare("SELECT object_key, content_length FROM print_card_objects WHERE short_token = ?1")
+        .bind(uploaded.data.short_token)
+        .first<{ object_key: string; content_length: number }>(),
+    ).resolves.toEqual({
+      object_key: expect.stringMatching(/^print-cards\/.+\.png$/),
+      content_length: PNG_BYTES.byteLength,
+    });
+    await expect(
+      server.db
+        .prepare("SELECT name FROM pragma_table_info('print_card_objects') WHERE name = 'image'")
+        .first<{ name: string }>(),
+    ).resolves.toBeNull();
 
     const denied = await server.request(`/staff/print-cards/${uploaded.data.short_token}`, {
       headers: attendeeHeaders,
@@ -47,5 +61,21 @@ describe("print cards", () => {
 
     expect(response.status).toBe(400);
     await expect(readJson(response)).resolves.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("uses the configured environment upload limit", async () => {
+    const server = await createTestServer();
+    (server.env as unknown as { PRINT_CARD_MAX_UPLOAD_BYTES: string }).PRINT_CARD_MAX_UPLOAD_BYTES = "8";
+    const form = new FormData();
+    form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");
+
+    const response = await server.request("/print-cards", {
+      method: "POST",
+      headers: await authHeaders("alice"),
+      body: form,
+    });
+
+    expect(response.status).toBe(413);
+    await expect(readJson(response)).resolves.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
   });
 });

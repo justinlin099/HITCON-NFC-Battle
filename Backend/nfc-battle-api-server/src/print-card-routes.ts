@@ -5,7 +5,6 @@ import { errorResponse, success } from "./responses";
 import type { AppEnv } from "./types";
 import { lazyInitializeUser } from "./user-store";
 
-const MAX_PNG_BYTES = 5 * 1024 * 1024;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 const printCards = new Hono<AppEnv>();
@@ -13,9 +12,10 @@ const printCards = new Hono<AppEnv>();
 printCards.use("*", requireAuth);
 
 printCards.post("/", async (c) => {
-  const image = await readPngUpload(c.req.raw);
+  const maxPngBytes = readUploadLimit(c.env.PRINT_CARD_MAX_UPLOAD_BYTES);
+  const image = await readPngUpload(c.req.raw, maxPngBytes);
   if (image === "too_large") {
-    return errorResponse(c, 413, "PAYLOAD_TOO_LARGE", "PNG image must be at most 5 MiB.");
+    return errorResponse(c, 413, "PAYLOAD_TOO_LARGE", `PNG image must be at most ${maxPngBytes} bytes.`);
   }
   if (!image) {
     return errorResponse(c, 400, "BAD_REQUEST", "A single PNG image is required.");
@@ -23,14 +23,22 @@ printCards.post("/", async (c) => {
 
   const authUser = c.get("authUser");
   await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
-  const shortToken = await createPrintCard(c.env.DB, authUser.userId, image);
+  const shortToken = await createPrintCard(
+    c.env.DB,
+    c.env.PRINT_CARD_IMAGES,
+    authUser.userId,
+    image,
+  );
 
   return success(c, { short_token: shortToken });
 });
 
 export default printCards;
 
-async function readPngUpload(request: Request): Promise<Uint8Array | "too_large" | null> {
+async function readPngUpload(
+  request: Request,
+  maxPngBytes: number,
+): Promise<Uint8Array | "too_large" | null> {
   let form: FormData;
   try {
     form = await request.formData();
@@ -47,7 +55,7 @@ async function readPngUpload(request: Request): Promise<Uint8Array | "too_large"
   if (!(image instanceof File) || image.type !== "image/png" || image.size === 0) {
     return null;
   }
-  if (image.size > MAX_PNG_BYTES) {
+  if (image.size > maxPngBytes) {
     return "too_large";
   }
 
@@ -57,6 +65,19 @@ async function readPngUpload(request: Request): Promise<Uint8Array | "too_large"
   }
 
   return bytes;
+}
+
+function readUploadLimit(rawLimit: string) {
+  if (!/^\d+$/.test(rawLimit)) {
+    throw new Error("PRINT_CARD_MAX_UPLOAD_BYTES must be a positive integer.");
+  }
+
+  const limit = Number(rawLimit);
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new Error("PRINT_CARD_MAX_UPLOAD_BYTES must be a positive integer.");
+  }
+
+  return limit;
 }
 
 function isPng(bytes: Uint8Array) {

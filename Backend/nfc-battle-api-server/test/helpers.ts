@@ -63,6 +63,42 @@ class TestD1Database {
   }
 }
 
+class TestR2Bucket {
+  private readonly objects = new Map<string, { body: Uint8Array; contentType?: string }>();
+
+  async put(key: string, value: Uint8Array, options?: R2PutOptions) {
+    this.objects.set(key, {
+      body: new Uint8Array(value),
+      contentType: options?.httpMetadata instanceof Headers
+        ? options.httpMetadata.get("Content-Type") ?? undefined
+        : options?.httpMetadata?.contentType,
+    });
+    return {} as R2Object;
+  }
+
+  async get(key: string) {
+    const object = this.objects.get(key);
+    if (!object) {
+      return null;
+    }
+
+    const body = new Uint8Array(object.body);
+    return {
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(body);
+          controller.close();
+        },
+      }),
+      httpMetadata: { contentType: object.contentType },
+    } as R2ObjectBody;
+  }
+
+  async delete(key: string) {
+    this.objects.delete(key);
+  }
+}
+
 export interface TestServer {
   env: AppBindings;
   db: D1Database;
@@ -81,6 +117,8 @@ export async function createTestServer(): Promise<TestServer> {
   const env = {
     DB: db,
     ASSETS: {} as Fetcher,
+    PRINT_CARD_IMAGES: new TestR2Bucket() as unknown as R2Bucket,
+    PRINT_CARD_MAX_UPLOAD_BYTES: "5242880",
     JWT_SECRET,
     STAFF_DANGER_TOKEN: "test-staff-token",
     JWT_ISSUER,
