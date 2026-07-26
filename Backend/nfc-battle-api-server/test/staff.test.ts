@@ -16,7 +16,7 @@ describe("staff scoreboard edge cases", () => {
 
     for (const [path, method] of [
       ["/staff/scoreboard_status", "GET"],
-      ["/staff/replace_user_tag", "POST"],
+      ["/staff/pair_user_tag", "POST"],
       ["/staff/freeze_scoreboard", "POST"],
       ["/staff/resume_scoreboard", "POST"],
     ] as const) {
@@ -35,7 +35,7 @@ describe("staff scoreboard edge cases", () => {
 
     for (const [path, method] of [
       ["/staff/scoreboard_status", "GET"],
-      ["/staff/replace_user_tag", "POST"],
+      ["/staff/pair_user_tag", "POST"],
       ["/staff/freeze_scoreboard", "POST"],
       ["/staff/resume_scoreboard", "POST"],
     ] as const) {
@@ -66,22 +66,22 @@ describe("staff scoreboard edge cases", () => {
     }
   });
 
-  it("requires a staff JWT for replacing a user's NFC tag", async () => {
+  it("requires a staff JWT for pairing a user's NFC tag", async () => {
     const server = await createTestServer();
 
-    const missingJwt = await server.request("/staff/replace_user_tag", { method: "POST" });
+    const missingJwt = await server.request("/staff/pair_user_tag", { method: "POST" });
     expect(missingJwt.status).toBe(401);
     await expect(readJson(missingJwt)).resolves.toMatchObject({
       code: "UNAUTHORIZED",
     });
 
     const attendeeJwt = await server.request(
-      "/staff/replace_user_tag",
+      "/staff/pair_user_tag",
       await jsonRequest(
         "POST",
         {
           user_id: "alice",
-          new_physical_id: "tag-alice",
+          physical_id: "tag-alice",
         },
         await authHeaders("attendee", "ATTENDEE"),
       ),
@@ -101,21 +101,18 @@ describe("staff scoreboard edge cases", () => {
 
     const before = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
-        physical_id: string;
-        physical_ids: string[];
         profile_version: number;
         collection_version: number;
       };
     };
-    expect(before.data.physical_id).toBe("tag-alice-old");
 
     const update = await server.request(
-      "/staff/replace_user_tag",
+      "/staff/pair_user_tag",
       await jsonRequest(
         "POST",
         {
           user_id: " alice ",
-          new_physical_id: " tag-alice-new ",
+          physical_id: " tag-alice-new ",
         },
         staffJwt,
       ),
@@ -141,32 +138,28 @@ describe("staff scoreboard edge cases", () => {
 
     const after = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
-        physical_id: string;
-        physical_ids: string[];
         profile_version: number;
         collection_version: number;
       };
     };
     expect(after.data).toMatchObject({
-      physical_id: "tag-alice-old",
-      physical_ids: ["tag-alice-old", "tag-alice-new"],
       profile_version: before.data.profile_version,
       collection_version: before.data.collection_version,
     });
+    expect(after.data).not.toHaveProperty("physical_id");
+    expect(after.data).not.toHaveProperty("physical_ids");
 
     const bootstrap = await readJson(
       await server.request("/users/me/bootstrap", { headers: alice.headers }),
     ) as {
       data: {
         me: {
-          physical_id: string;
-          physical_ids: string[];
           nfc_tag_key: string;
         };
       };
     };
-    expect(bootstrap.data.me.physical_id).toBe("tag-alice-old");
-    expect(bootstrap.data.me.physical_ids).toEqual(["tag-alice-old", "tag-alice-new"]);
+    expect(bootstrap.data.me).not.toHaveProperty("physical_id");
+    expect(bootstrap.data.me).not.toHaveProperty("physical_ids");
     expect(bootstrap.data.me.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
   });
 
@@ -177,12 +170,12 @@ describe("staff scoreboard edge cases", () => {
     await pairTag(server, alice.headers, "tag-alice");
 
     const update = await server.request(
-      "/staff/replace_user_tag",
+      "/staff/pair_user_tag",
       await jsonRequest(
         "POST",
         {
           user_id: "alice",
-          new_physical_id: "tag-alice",
+          physical_id: "tag-alice",
         },
         staffJwt,
       ),
@@ -203,12 +196,12 @@ describe("staff scoreboard edge cases", () => {
     await pairTag(server, bob.headers, "tag-bob");
 
     const update = await server.request(
-      "/staff/replace_user_tag",
+      "/staff/pair_user_tag",
       await jsonRequest(
         "POST",
         {
           user_id: "alice",
-          new_physical_id: "tag-bob",
+          physical_id: "tag-bob",
         },
         staffJwt,
       ),
@@ -230,7 +223,7 @@ describe("staff scoreboard edge cases", () => {
     ).resolves.toEqual({ physical_id: "tag-bob" });
   });
 
-  it("returns a tag conflict if another request pairs the replacement tag during the write", async () => {
+  it("returns a tag conflict if another request pairs the tag during the write", async () => {
     const server = await createTestServer();
     const alice = await initializeUser(server, "alice");
     await initializeUser(server, "bob");
@@ -243,12 +236,12 @@ describe("staff scoreboard edge cases", () => {
     ) as unknown as D1Database;
 
     const update = await server.request(
-      "/staff/replace_user_tag",
+      "/staff/pair_user_tag",
       await jsonRequest(
         "POST",
         {
           user_id: "alice",
-          new_physical_id: "tag-race",
+          physical_id: "tag-race",
         },
         staffJwt,
       ),
@@ -278,12 +271,12 @@ describe("staff scoreboard edge cases", () => {
       null,
       "nope",
       {},
-      { user_id: "", new_physical_id: "tag-alice" },
-      { user_id: "alice", new_physical_id: "" },
-      { user_id: "alice", new_physical_id: "tag-alice", extra: true },
+      { user_id: "", physical_id: "tag-alice" },
+      { user_id: "alice", physical_id: "" },
+      { user_id: "alice", physical_id: "tag-alice", extra: true },
     ]) {
       const response = await server.request(
-        "/staff/replace_user_tag",
+        "/staff/pair_user_tag",
         await jsonRequest("POST", body, staffJwt),
       );
 
@@ -294,12 +287,12 @@ describe("staff scoreboard edge cases", () => {
     }
 
     const unknownUser = await server.request(
-      "/staff/replace_user_tag",
+      "/staff/pair_user_tag",
       await jsonRequest(
         "POST",
         {
           user_id: "missing",
-          new_physical_id: "tag-missing",
+          physical_id: "tag-missing",
         },
         staffJwt,
       ),

@@ -24,7 +24,6 @@ describe("NFC Battle API flow", () => {
       data: {
         user_id: "alice",
         role: "ATTENDEE",
-        physical_id: null,
         collection: [],
       },
     });

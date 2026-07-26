@@ -8,8 +8,8 @@ interface UserTagRow {
   physical_id: string;
 }
 
-export interface ReplaceUserTagResult {
-  replaced: boolean;
+export interface PairUserTagResult {
+  paired: boolean;
   conflict: boolean;
 }
 
@@ -43,6 +43,8 @@ export async function getTagOwner(db: D1Database, physicalId: string) {
     .first<TagOwnerRow>();
 }
 
+// This intentionally stays server-side. STAFF workflows can inspect a user's
+// paired UIDs without exposing them through profile responses.
 export async function getUserTags(db: D1Database, userId: string) {
   const { results } = await db
     .prepare(
@@ -59,22 +61,22 @@ export async function getUserTags(db: D1Database, userId: string) {
   return results.map((row) => row.physical_id);
 }
 
-export async function replaceUserTag(
+export async function pairUserTag(
   db: D1Database,
   userId: string,
-  newPhysicalId: string,
-): Promise<ReplaceUserTagResult> {
-  const existingOwner = await getTagOwner(db, newPhysicalId);
+  physicalId: string,
+): Promise<PairUserTagResult> {
+  const existingOwner = await getTagOwner(db, physicalId);
   if (existingOwner && existingOwner.user_id !== userId) {
     return {
-      replaced: false,
+      paired: false,
       conflict: true,
     };
   }
 
   if (existingOwner?.user_id === userId) {
     return {
-      replaced: true,
+      paired: true,
       conflict: false,
     };
   }
@@ -89,13 +91,13 @@ export async function replaceUserTag(
         VALUES (?1, ?2, ?3, ?3)
         `,
       )
-      .bind(newPhysicalId, userId, timestamp)
+      .bind(physicalId, userId, timestamp)
       .run();
   } catch (error) {
-    const ownerAfterFailedWrite = await getTagOwner(db, newPhysicalId);
+    const ownerAfterFailedWrite = await getTagOwner(db, physicalId);
     if (ownerAfterFailedWrite && ownerAfterFailedWrite.user_id !== userId) {
       return {
-        replaced: false,
+        paired: false,
         conflict: true,
       };
     }
@@ -104,17 +106,17 @@ export async function replaceUserTag(
   }
 
   if (result.meta.changes === 0) {
-    const ownerAfterIgnoredWrite = await getTagOwner(db, newPhysicalId);
+    const ownerAfterIgnoredWrite = await getTagOwner(db, physicalId);
     if (ownerAfterIgnoredWrite && ownerAfterIgnoredWrite.user_id !== userId) {
       return {
-        replaced: false,
+        paired: false,
         conflict: true,
       };
     }
   }
 
   return {
-    replaced: true,
+    paired: true,
     conflict: false,
   };
 }

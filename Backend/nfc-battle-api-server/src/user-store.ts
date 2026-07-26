@@ -1,6 +1,5 @@
 import { newNfcTagKey, nowIso } from "./ids";
 import { getCollection } from "./collection-store";
-import { getUserTags } from "./tag-store";
 import type { UserRole } from "./types";
 
 const MAX_USER_ROW_BATCH_SIZE = 100;
@@ -14,7 +13,6 @@ export interface UserRow {
   pixel_avatar_base64: string;
   profile_version: number;
   collection_version: number;
-  physical_id: string | null;
   nfc_tag_key: string | null;
 }
 
@@ -109,14 +107,7 @@ export async function getUserRow(db: D1Database, userId: string) {
         users.pixel_avatar_base64,
         users.profile_version,
         users.collection_version,
-        users.nfc_tag_key,
-        (
-          SELECT physical_id
-          FROM nfc_tags
-          WHERE nfc_tags.user_id = users.user_id
-          ORDER BY paired_at ASC, physical_id ASC
-          LIMIT 1
-        ) AS physical_id
+        users.nfc_tag_key
       FROM users
       WHERE users.user_id = ?1
       `,
@@ -146,14 +137,7 @@ export async function getUserRowsById(db: D1Database, userIds: string[]) {
           users.pixel_avatar_base64,
           users.profile_version,
           users.collection_version,
-          users.nfc_tag_key,
-          (
-            SELECT physical_id
-            FROM nfc_tags
-            WHERE nfc_tags.user_id = users.user_id
-            ORDER BY paired_at ASC, physical_id ASC
-            LIMIT 1
-          ) AS physical_id
+          users.nfc_tag_key
         FROM users
         WHERE users.user_id IN (${placeholders})
         `,
@@ -170,10 +154,7 @@ export async function getUserRowsById(db: D1Database, userIds: string[]) {
 }
 
 export async function profileFromRow(db: D1Database, row: UserRow) {
-  const [collection, physicalIds] = await Promise.all([
-    getCollection(db, row.user_id),
-    getUserTags(db, row.user_id),
-  ]);
+  const collection = await getCollection(db, row.user_id);
 
   return {
     user_id: row.user_id,
@@ -184,8 +165,6 @@ export async function profileFromRow(db: D1Database, row: UserRow) {
     pixel_avatar_base64: row.pixel_avatar_base64,
     profile_version: row.profile_version,
     collection_version: row.collection_version,
-    physical_id: row.physical_id,
-    physical_ids: physicalIds,
     nfc_tag_key: row.nfc_tag_key,
     collection,
   };

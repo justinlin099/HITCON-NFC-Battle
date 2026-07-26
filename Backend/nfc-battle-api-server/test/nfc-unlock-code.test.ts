@@ -18,9 +18,10 @@ describe("multiple NFC UIDs and staff unlock codes", () => {
     await pairTag(server, alice.headers, "uid-alice-two");
 
     const aliceProfile = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
-      data: { physical_ids: string[]; nfc_tag_key: string };
+      data: { nfc_tag_key: string };
     };
-    expect(aliceProfile.data.physical_ids).toEqual(["uid-alice-one", "uid-alice-two"]);
+    expect(aliceProfile.data).not.toHaveProperty("physical_id");
+    expect(aliceProfile.data).not.toHaveProperty("physical_ids");
     expect((await scanTag(server, bob.headers, "alice", "uid-alice-two")).status).toBe(200);
 
     const unlock = await server.request(
