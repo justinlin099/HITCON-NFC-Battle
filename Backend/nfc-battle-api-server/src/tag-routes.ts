@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
 import { errorResponse, successMessage } from "./responses";
-import { getTagOwner, getUserTag, pairTag } from "./tag-store";
+import { getTagOwner, pairTag } from "./tag-store";
 import type { AppEnv } from "./types";
 import { getUserRow } from "./user-store";
 
@@ -25,15 +25,8 @@ tags.post("/pair", async (c) => {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
 
-  const [tagOwner, userTag] = await Promise.all([
-    getTagOwner(c.env.DB, request.physical_id),
-    getUserTag(c.env.DB, authUser.userId),
-  ]);
+  const tagOwner = await getTagOwner(c.env.DB, request.physical_id);
   if (tagOwner) {
-    return errorResponse(c, 409, "TAG_ALREADY_PAIRED", "This NFC tag is already paired.");
-  }
-
-  if (userTag) {
     return errorResponse(c, 409, "TAG_ALREADY_PAIRED", "This NFC tag is already paired.");
   }
 

@@ -21,13 +21,14 @@ import { newFreezeId, nowIso } from "./ids";
 import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
 import { errorResponse, success, successMessage } from "./responses";
 import { requireStaffDangerToken, requireStaffRole } from "./staff";
-import { replaceUserTag } from "./tag-store";
 import type { AppEnv } from "./types";
-import { getUserRow } from "./user-store";
+import { getSelfProfile, getUserRow } from "./user-store";
+import { getTagOwner, replaceUserTag } from "./tag-store";
 
 const staffRoutes = new Hono<AppEnv>();
 const FREEZE_SCOREBOARD_KEYS = new Set(["scoring_cutoff_at"]);
 const REPLACE_USER_TAG_KEYS = new Set(["user_id", "new_physical_id"]);
+const USER_UID_KEYS = new Set(["user_id", "uid"]);
 
 staffRoutes.use("*", requireAuth, requireStaffRole);
 
@@ -53,7 +54,35 @@ staffRoutes.post("/replace_user_tag", async (c) => {
     return errorResponse(c, 409, "TAG_ALREADY_PAIRED", "This NFC tag is already paired.");
   }
 
-  return successMessage(c, "User tag replaced successfully.");
+  return successMessage(c, "User tag paired successfully.");
+});
+
+staffRoutes.post("/nfc-unlock-code", async (c) => {
+  const request = validateUserUidRequest(await readJson(c));
+  if (!request) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
+  const user = await getUserRow(c.env.DB, request.user_id);
+  if (!user) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  const tagOwner = await getTagOwner(c.env.DB, request.uid);
+  if (tagOwner?.user_id !== request.user_id) {
+    return errorResponse(c, 403, "PHYSICAL_ID_MISMATCH", "Physical tag ID does not match user ID.");
+  }
+
+  const profile = await getSelfProfile(c.env.DB, request.user_id);
+  if (!profile?.nfc_tag_key) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  return success(c, {
+    user_id: request.user_id,
+    uid: request.uid,
+    unlock_code: profile.nfc_tag_key,
+  });
 });
 
 staffRoutes.post("/freeze_scoreboard", requireStaffDangerToken, async (c) => {
@@ -159,6 +188,20 @@ function validateReplaceUserTagRequest(value: unknown) {
     user_id: userId,
     new_physical_id: newPhysicalId,
   };
+}
+
+function validateUserUidRequest(value: unknown) {
+  if (!isPlainObject(value) || !hasOnlyKeys(value, USER_UID_KEYS)) {
+    return null;
+  }
+
+  const userId = requiredString(value, "user_id");
+  const uid = requiredString(value, "uid");
+  if (!userId || !uid) {
+    return null;
+  }
+
+  return { user_id: userId, uid };
 }
 
 async function rollbackFailedFreeze(db: D1Database, freezeId: string) {

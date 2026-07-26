@@ -43,17 +43,20 @@ export async function getTagOwner(db: D1Database, physicalId: string) {
     .first<TagOwnerRow>();
 }
 
-export async function getUserTag(db: D1Database, userId: string) {
-  return db
+export async function getUserTags(db: D1Database, userId: string) {
+  const { results } = await db
     .prepare(
       `
       SELECT physical_id
       FROM nfc_tags
       WHERE user_id = ?1
+      ORDER BY paired_at ASC, physical_id ASC
       `,
     )
     .bind(userId)
-    .first<UserTagRow>();
+    .all<UserTagRow>();
+
+  return results.map((row) => row.physical_id);
 }
 
 export async function replaceUserTag(
@@ -82,12 +85,8 @@ export async function replaceUserTag(
     result = await db
       .prepare(
         `
-        INSERT INTO nfc_tags (physical_id, user_id, paired_at, locked_at)
+        INSERT OR IGNORE INTO nfc_tags (physical_id, user_id, paired_at, locked_at)
         VALUES (?1, ?2, ?3, ?3)
-        ON CONFLICT(user_id) DO UPDATE SET
-          physical_id = excluded.physical_id,
-          paired_at = excluded.paired_at,
-          locked_at = excluded.locked_at
         `,
       )
       .bind(newPhysicalId, userId, timestamp)
@@ -104,8 +103,18 @@ export async function replaceUserTag(
     throw error;
   }
 
+  if (result.meta.changes === 0) {
+    const ownerAfterIgnoredWrite = await getTagOwner(db, newPhysicalId);
+    if (ownerAfterIgnoredWrite && ownerAfterIgnoredWrite.user_id !== userId) {
+      return {
+        replaced: false,
+        conflict: true,
+      };
+    }
+  }
+
   return {
-    replaced: result.meta.changes > 0,
+    replaced: true,
     conflict: false,
   };
 }

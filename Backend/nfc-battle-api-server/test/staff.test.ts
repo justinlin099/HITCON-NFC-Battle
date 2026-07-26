@@ -92,7 +92,7 @@ describe("staff scoreboard edge cases", () => {
     });
   });
 
-  it("replaces a user's NFC tag without changing profile or collection versions", async () => {
+  it("pairs an additional NFC UID without changing profile or collection versions", async () => {
     const server = await createTestServer();
     const alice = await initializeUser(server, "alice");
     const bob = await initializeUser(server, "bob");
@@ -102,6 +102,7 @@ describe("staff scoreboard edge cases", () => {
     const before = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
         physical_id: string;
+        physical_ids: string[];
         profile_version: number;
         collection_version: number;
       };
@@ -125,18 +126,15 @@ describe("staff scoreboard edge cases", () => {
       server.db
         .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = 'tag-alice-old'")
         .first<{ user_id: string }>(),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ user_id: "alice" });
     await expect(
       server.db
-        .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'alice'")
-        .first<{ physical_id: string }>(),
-    ).resolves.toEqual({ physical_id: "tag-alice-new" });
+        .prepare("SELECT COUNT(*) AS count FROM nfc_tags WHERE user_id = 'alice'")
+        .first<{ count: number }>(),
+    ).resolves.toEqual({ count: 2 });
 
     const oldTagScan = await scanTag(server, bob.headers, "alice", "tag-alice-old");
-    expect(oldTagScan.status).toBe(403);
-    await expect(readJson(oldTagScan)).resolves.toMatchObject({
-      code: "PHYSICAL_ID_MISMATCH",
-    });
+    expect(oldTagScan.status).toBe(200);
 
     const newTagScan = await scanTag(server, bob.headers, "alice", "tag-alice-new");
     expect(newTagScan.status).toBe(200);
@@ -144,12 +142,14 @@ describe("staff scoreboard edge cases", () => {
     const after = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
         physical_id: string;
+        physical_ids: string[];
         profile_version: number;
         collection_version: number;
       };
     };
     expect(after.data).toMatchObject({
-      physical_id: "tag-alice-new",
+      physical_id: "tag-alice-old",
+      physical_ids: ["tag-alice-old", "tag-alice-new"],
       profile_version: before.data.profile_version,
       collection_version: before.data.collection_version,
     });
@@ -160,11 +160,13 @@ describe("staff scoreboard edge cases", () => {
       data: {
         me: {
           physical_id: string;
+          physical_ids: string[];
           nfc_tag_key: string;
         };
       };
     };
-    expect(bootstrap.data.me.physical_id).toBe("tag-alice-new");
+    expect(bootstrap.data.me.physical_id).toBe("tag-alice-old");
+    expect(bootstrap.data.me.physical_ids).toEqual(["tag-alice-old", "tag-alice-new"]);
     expect(bootstrap.data.me.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
   });
 
@@ -619,7 +621,7 @@ class PairTagDuringReplacementWriteDb {
 
   prepare(query: string) {
     const statement = this.db.prepare(query);
-    if (!query.includes("ON CONFLICT(user_id) DO UPDATE")) {
+    if (!query.includes("INSERT OR IGNORE INTO nfc_tags")) {
       return statement;
     }
 
