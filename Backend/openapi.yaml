@@ -36,10 +36,11 @@ info:
     the user row. `profile_version` changes when profile fields change.
     `collection_version` changes only when that user's own collection changes.
 
-    `GET /users/me` is the only endpoint that lazy-initializes a user profile.
-    The app should call it before pairing tags, scanning, recording phishing
-    events, or using cache/bootstrap APIs that expect the authenticated user row
-    to already exist.
+    `GET /users/me` lazy-initializes a user profile. `POST /print-cards` also
+    lazy-initializes so an attendee can create a print job directly from a
+    valid JWT. The app should call `GET /users/me` before pairing tags,
+    scanning, recording phishing events, or using cache/bootstrap APIs that
+    expect the authenticated user row to already exist.
 
     `nfc_tag_key` is a per-user random 6-byte key encoded as a 12-character
     lowercase hex string. It is returned only in self-profile responses
@@ -57,9 +58,10 @@ info:
     results on every request. Resume invalidates the current freeze snapshot and
     reopens scoring.
 
-    Current provisional scoring formula:
-    `score = 10 * num_of_collection`. This formula may be finalized or changed
-    in the future.
+    Current provisional scoring formula, used for both live and frozen scores:
+    `score = 10 * num_of_collection - 10 * num_of_phishing`. The phishing
+    penalty is applied to the phishing victim. This formula may be finalized or
+    changed in the future.
 
     A scoreboard can stay in `FREEZING` only until the configured
     `freeze_timeout`. After that, the freeze is stale and staff may recover it
@@ -80,14 +82,19 @@ info:
     - `POST /collection/scan`
     - `POST /collection/phishing`
     - `GET /missions/stamp`
+    - `POST /print-cards`
     - `GET /staff/scoreboard_status`
     - `POST /staff/replace_user_tag`
+    - `GET /staff/print-cards/{short_token}`
+    - `POST /staff/nfc-unlock-code`
 
     The following endpoints are available only in `FROZEN`:
     - `GET /users/me/prize`; rejected in `OPEN` and `FREEZING` with
       `SCOREBOARD_NOT_FROZEN`. If the scoreboard state changes during a
       consistent read, it is rejected with `SCOREBOARD_READ_INCONSISTENT` and
       clients should retry.
+    - `POST /staff/prize-claims`; rejected in `OPEN` and `FREEZING` with
+      `SCOREBOARD_NOT_FROZEN`.
 
     The following endpoints are available in `OPEN` and `FROZEN`, but rejected
     in `FREEZING`:
@@ -125,6 +132,7 @@ tags:
   - name: Missions
   - name: Scoreboard
   - name: Staff
+  - name: Print cards
 paths:
   /users/me:
     get:
@@ -400,7 +408,8 @@ paths:
       description: |
         Called at the reception desk after the user picks up a tag and scans it
         with the app. The user must already be initialized with `GET /users/me`
-        before pairing. The app also writes
+        before pairing. A user may pair more than one UID; every paired UID
+        resolves to the same profile and shared NFC unlock code. The app also writes
         `https://game.hitcon2026.online/b?u={user_id}` to the tag, then locks
         the tag so it is read-only and cannot be accidentally overwritten.
 
@@ -548,7 +557,8 @@ paths:
         Returns the global scoreboard using offset/limit pagination.
 
         In `OPEN`, this endpoint returns live scores using the current
-        provisional formula: `score = 10 * num_of_collection`.
+        provisional formula: `score = 10 * num_of_collection - 10 *
+        num_of_phishing`. The phishing penalty is applied to the victim.
 
         In `FREEZING`, this endpoint is rejected because a consistent snapshot
         is being calculated.
@@ -642,20 +652,18 @@ paths:
   /staff/replace_user_tag:
     post:
       tags: [Staff]
-      summary: Replace a user's paired NFC tag
+      summary: Pair an additional NFC tag to a user (legacy endpoint name)
       description: |
-        Staff-only endpoint used when a user's NFC tag is broken or replaced.
-        Requires a conference JWT whose `role` claim is `STAFF`. Replaces the
-        server-side `nfc_tags` mapping so `new_physical_id` belongs to
-        `user_id`. Staff or the app should write
+        Staff-only endpoint used when a user's NFC tag is printed or replaced.
+        Requires a conference JWT whose `role` claim is `STAFF`. Despite its
+        legacy name, this endpoint preserves existing UIDs and pairs
+        `new_physical_id` to `user_id`. Staff or the app should write
         `https://game.hitcon2026.online/b?u={user_id}` to the new tag and lock
         it before giving it to the user.
 
-        The `nfc_tags` table is the source of truth for the user's paired
-        physical tag ID. After this replacement, the old physical tag ID immediately
-        stops passing `POST /collection/scan`. This operation does not change
-        `profile_version` or `collection_version`. `GET /users/me` and
-        `GET /users/me/bootstrap` return the new physical tag ID.
+        The `nfc_tags` table is the source of truth for all paired physical tag
+        IDs. Each UID passes `POST /collection/scan` for that user. This
+        operation does not change `profile_version` or `collection_version`.
       security:
         - bearerAuth: []
       requestBody:
@@ -669,7 +677,7 @@ paths:
                 $ref: '#/components/examples/ReplaceUserTagRequest'
       responses:
         '200':
-          description: User tag replaced.
+          description: User tag paired.
           content:
             application/json:
               schema:
@@ -678,7 +686,7 @@ paths:
                 replaced:
                   value:
                     status: success
-                    message: User tag replaced successfully.
+                    message: User tag paired successfully.
         '400':
           $ref: '#/components/responses/BadRequestError'
         '401':
@@ -715,8 +723,10 @@ paths:
         users.
 
         Current provisional scoring formula:
-        `score = 10 * num_of_collection`. This formula may be finalized or
-        changed in the future.
+        `score = 10 * num_of_collection - 10 * num_of_phishing`. The phishing
+        penalty is applied to the victim and is already reflected in live
+        scores before this snapshot is created. This formula may be finalized
+        or changed in the future.
 
         Prize results are snapshot data and should not be recalculated on every
         `GET /users/me/prize` request.
@@ -800,6 +810,146 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '409':
           $ref: '#/components/responses/ScoreboardNotFrozenError'
+  /print-cards:
+    post:
+      tags: [Print cards]
+      summary: Upload a PNG for staff to print
+      description: |
+        Stores one PNG image for the authenticated user and returns a compact,
+        opaque `short_token`. The app renders that token as a barcode on the
+        print card. The image is only downloadable by STAFF through
+        `GET /staff/print-cards/{short_token}`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              additionalProperties: false
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: PNG image, at most 5 MiB.
+      responses:
+        '200':
+          description: Image stored and barcode token issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePrintCardResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '413':
+          description: PNG image is larger than 5 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /staff/print-cards/{short_token}:
+    get:
+      tags: [Staff, Print cards]
+      summary: Download a print-card PNG after scanning its barcode
+      description: Requires a STAFF JWT. The response body is the original PNG bytes.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: short_token
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{8,32}$'
+          description: Opaque token decoded from the attendee barcode.
+      responses:
+        '200':
+          description: PNG image.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Print-card token was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /staff/prize-claims:
+    post:
+      tags: [Staff]
+      summary: Claim a frozen prize for an attendee
+      description: |
+        Requires a STAFF JWT. The submitted NFC UID must belong to `user_id`.
+        A claim is allowed only when the current frozen snapshot says the user
+        won at least one prize, and each user can be claimed only once per
+        freeze snapshot.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimPrizeRequest'
+      responses:
+        '200':
+          description: Prize claimed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimPrizeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/PhysicalIdMismatchError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
+        '409':
+          description: Scoreboard is not frozen, user is ineligible, or this prize was already claimed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /staff/nfc-unlock-code:
+    post:
+      tags: [Staff]
+      summary: Get a user's NFC unlock code
+      description: |
+        Requires a STAFF JWT. The submitted NFC UID must belong to `user_id`.
+        All NFC tags paired to the same user return the same unlock code.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetNfcUnlockCodeRequest'
+      responses:
+        '200':
+          description: NFC unlock code loaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetNfcUnlockCodeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/PhysicalIdMismatchError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
 
 components:
   securitySchemes:
@@ -948,6 +1098,10 @@ components:
             - SCOREBOARD_FREEZING
             - SCOREBOARD_NOT_FROZEN
             - SCOREBOARD_READ_INCONSISTENT
+            - PRINT_CARD_NOT_FOUND
+            - PAYLOAD_TOO_LARGE
+            - PRIZE_NOT_ELIGIBLE
+            - PRIZE_ALREADY_CLAIMED
         message:
           type: string
 
@@ -1012,14 +1166,21 @@ components:
         - type: object
           required:
             - physical_id
+            - physical_ids
             - nfc_tag_key
             - collection
           properties:
             physical_id:
               type: string
               nullable: true
-              description: Paired NFC tag physical ID. This is null before the user pairs an NFC tag.
+              description: First paired NFC tag physical ID, retained for backwards compatibility. This is null before the user pairs an NFC tag.
               example: '04:1A:2B:3C:4D:5E:6F'
+            physical_ids:
+              type: array
+              description: All NFC tag physical IDs paired to this user. Each UID resolves to the same user profile and unlock code.
+              items:
+                type: string
+              example: ['04:1A:2B:3C:4D:5E:6F', '04:FE:DC:BA:98:76:54']
             nfc_tag_key:
               type: string
               pattern: '^[0-9a-f]{12}$'
@@ -1267,12 +1428,100 @@ components:
       properties:
         user_id:
           type: string
-          description: User ID whose paired NFC tag should be replaced.
+          description: User ID that receives the additional paired NFC tag.
           example: kktix_hash_abc123
         new_physical_id:
           type: string
-          description: Physical ID read from the replacement NFC tag.
+          description: Physical ID read from the additional NFC tag.
           example: '04:FE:DC:BA:98:76:54'
+
+    CreatePrintCardResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: object
+          required: [short_token]
+          properties:
+            short_token:
+              type: string
+              description: Opaque value to encode in the attendee barcode.
+              example: wQ8Yp2-Lz9M
+
+    ClaimPrizeRequest:
+      type: object
+      required: [user_id, uid]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          example: kktix_hash_abc123
+        uid:
+          type: string
+          description: Physical NFC UID read from the attendee's tag.
+          example: '04:1A:2B:3C:4D:5E:6F'
+
+    ClaimPrizeResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: object
+          required: [freeze_id, user_id, stamp_prize, rank_prize, rank, claimed_at]
+          properties:
+            freeze_id:
+              type: string
+            user_id:
+              type: string
+            stamp_prize:
+              type: boolean
+            rank_prize:
+              type: boolean
+            rank:
+              type: integer
+              nullable: true
+            claimed_at:
+              type: string
+              format: date-time
+
+    GetNfcUnlockCodeRequest:
+      type: object
+      required: [user_id, uid]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          example: kktix_hash_abc123
+        uid:
+          type: string
+          description: Physical NFC UID read from one of the user's tags.
+          example: '04:1A:2B:3C:4D:5E:6F'
+
+    GetNfcUnlockCodeResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: object
+          required: [user_id, uid, unlock_code]
+          properties:
+            user_id:
+              type: string
+            uid:
+              type: string
+            unlock_code:
+              type: string
+              pattern: '^[0-9a-f]{12}$'
+              description: Shared 6-byte lock/unlock code for all of the user's NFC tags.
 
     ScanCollectionRequest:
       type: object
@@ -1571,6 +1820,7 @@ components:
           profile_version: 3
           collection_version: 12
           physical_id: '04:1A:2B:3C:4D:5E:6F'
+          physical_ids: ['04:1A:2B:3C:4D:5E:6F']
           nfc_tag_key: a1b2c3d4e5f6
           collection:
             - kktix_hash_def456
@@ -1588,6 +1838,7 @@ components:
           profile_version: 1
           collection_version: 0
           physical_id: null
+          physical_ids: []
           nfc_tag_key: 001122334455
           collection: []
 
@@ -1605,6 +1856,7 @@ components:
             profile_version: 3
             collection_version: 12
             physical_id: '04:1A:2B:3C:4D:5E:6F'
+            physical_ids: ['04:1A:2B:3C:4D:5E:6F']
             nfc_tag_key: a1b2c3d4e5f6
             collection:
               - kktix_hash_def456

@@ -20,6 +20,10 @@ const CONTRACT_PATHS = [
   "/staff/replace_user_tag",
   "/staff/freeze_scoreboard",
   "/staff/resume_scoreboard",
+  "/print-cards",
+  "/staff/print-cards/{short_token}",
+  "/staff/prize-claims",
+  "/staff/nfc-unlock-code",
 ];
 
 const CONTRACT_OPERATIONS = [
@@ -43,6 +47,14 @@ const CONTRACT_OPERATIONS = [
   { method: "POST", openapiPath: "/staff/replace_user_tag", requestPath: "/staff/replace_user_tag" },
   { method: "POST", openapiPath: "/staff/freeze_scoreboard", requestPath: "/staff/freeze_scoreboard" },
   { method: "POST", openapiPath: "/staff/resume_scoreboard", requestPath: "/staff/resume_scoreboard" },
+  { method: "POST", openapiPath: "/print-cards", requestPath: "/print-cards" },
+  {
+    method: "GET",
+    openapiPath: "/staff/print-cards/{short_token}",
+    requestPath: "/staff/print-cards/abcdefgh",
+  },
+  { method: "POST", openapiPath: "/staff/prize-claims", requestPath: "/staff/prize-claims" },
+  { method: "POST", openapiPath: "/staff/nfc-unlock-code", requestPath: "/staff/nfc-unlock-code" },
 ];
 
 describe("OpenAPI contract drift", () => {
