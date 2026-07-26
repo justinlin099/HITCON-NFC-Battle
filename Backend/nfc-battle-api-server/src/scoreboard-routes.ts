@@ -67,7 +67,7 @@ async function getLiveRankings(db: D1Database, offset: number, limit: number) {
     user_id: item.user_id,
     display_name: item.display_name,
     emoji_icon: item.emoji_icon,
-    score: calculateScore(item.num_of_collection),
+    score: calculateScore(item.num_of_collection, item.num_of_phishing),
   }));
 }
 

@@ -1,3 +1,4 @@
+import { PHISHING_PENALTY, SCORE_PER_COLLECTION } from "./game-config";
 import { nowIso } from "./ids";
 
 interface CollectionRow {
@@ -102,31 +103,50 @@ export interface CollectionCountRow {
   display_name: string;
   emoji_icon: string;
   num_of_collection: number;
+  num_of_phishing: number;
 }
 
 export async function getLiveCollectionScoreRows(db: D1Database, offset: number, limit: number) {
   const { results } = await db
     .prepare(
       `
-      WITH scores AS (
+      WITH collection_counts AS (
+        SELECT
+          scanner_user_id AS user_id,
+          COUNT(*) AS num_of_collection
+        FROM collections
+        GROUP BY scanner_user_id
+      ),
+      phishing_counts AS (
+        SELECT
+          victim_user_id AS user_id,
+          COUNT(*) AS num_of_phishing
+        FROM phishing_events
+        GROUP BY victim_user_id
+      ),
+      scores AS (
         SELECT
           users.user_id,
           users.display_name,
           users.emoji_icon,
-          COUNT(collections.collected_user_id) AS num_of_collection
+          COALESCE(collection_counts.num_of_collection, 0) AS num_of_collection,
+          COALESCE(phishing_counts.num_of_phishing, 0) AS num_of_phishing,
+          (COALESCE(collection_counts.num_of_collection, 0) * ?1)
+            - (COALESCE(phishing_counts.num_of_phishing, 0) * ?2) AS score
         FROM users
-        LEFT JOIN collections ON collections.scanner_user_id = users.user_id
-        GROUP BY users.user_id
+        LEFT JOIN collection_counts ON collection_counts.user_id = users.user_id
+        LEFT JOIN phishing_counts ON phishing_counts.user_id = users.user_id
       ),
       ranked AS (
         SELECT
           ROW_NUMBER() OVER (
-            ORDER BY num_of_collection DESC, user_id ASC
+            ORDER BY score DESC, user_id ASC
           ) AS rank,
           user_id,
           display_name,
           emoji_icon,
-          num_of_collection
+          num_of_collection,
+          num_of_phishing
         FROM scores
       )
       SELECT
@@ -134,14 +154,15 @@ export async function getLiveCollectionScoreRows(db: D1Database, offset: number,
         user_id,
         display_name,
         emoji_icon,
-        num_of_collection
+        num_of_collection,
+        num_of_phishing
       FROM ranked
       ORDER BY rank ASC
-      LIMIT ?1
-      OFFSET ?2
+      LIMIT ?3
+      OFFSET ?4
       `,
     )
-    .bind(limit, offset)
+    .bind(SCORE_PER_COLLECTION, PHISHING_PENALTY, limit, offset)
     .all<CollectionCountRow & { rank: number }>();
 
   return results;

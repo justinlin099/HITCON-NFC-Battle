@@ -93,8 +93,9 @@ describe("JWT authentication", () => {
 
 describe("scoring helpers", () => {
   it("uses the current provisional score formula", () => {
-    expect(calculateScore(0)).toBe(0);
-    expect(calculateScore(7)).toBe(70);
+    expect(calculateScore(0, 0)).toBe(0);
+    expect(calculateScore(7, 0)).toBe(70);
+    expect(calculateScore(7, 3)).toBe(40);
   });
 
   it("detects stale FREEZING state after timeout", () => {

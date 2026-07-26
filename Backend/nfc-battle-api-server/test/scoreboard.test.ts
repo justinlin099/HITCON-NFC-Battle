@@ -94,6 +94,35 @@ describe("mission and scoreboard edge cases", () => {
     ]);
   });
 
+  it("applies the phishing penalty to live scores and ranks", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    const bobAuth = await authHeaders("bob");
+    const carolAuth = await authHeaders("carol");
+    await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
+    await server.request("/users/me", { headers: carolAuth });
+    expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
+    expect((await scanTag(server, aliceAuth, "carol", "tag-carol")).status).toBe(200);
+    expect((await scanTag(server, bobAuth, "carol", "tag-carol")).status).toBe(200);
+
+    const phishing = await server.request(
+      "/collection/phishing",
+      await jsonRequest("POST", { victim: "alice", attacker: "bob" }, aliceAuth),
+    );
+    expect(phishing.status).toBe(200);
+
+    const response = await server.request("/scoreboard?limit=2", { headers: aliceAuth });
+    expect(response.status).toBe(200);
+    const body = await readJson(response) as {
+      data: { rankings: Array<{ rank: number; user_id: string; score: number }> };
+    };
+    expect(body.data.rankings).toMatchObject([
+      { rank: 1, user_id: "bob", score: 10 },
+      { rank: 2, user_id: "alice", score: 0 },
+    ]);
+  });
+
   it("uses the freeze cutoff and keeps frozen scoreboard and prize snapshots immutable", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
