@@ -21,6 +21,7 @@ import { newFreezeId, nowIso } from "./ids";
 import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
 import { errorResponse, success, successMessage } from "./responses";
 import { requireStaffDangerToken, requireStaffRole } from "./staff";
+import { getPrintCard } from "./print-card-store";
 import type { AppEnv } from "./types";
 import { getSelfProfile, getUserRow } from "./user-store";
 import { getTagOwner, replaceUserTag } from "./tag-store";
@@ -29,6 +30,7 @@ const staffRoutes = new Hono<AppEnv>();
 const FREEZE_SCOREBOARD_KEYS = new Set(["scoring_cutoff_at"]);
 const REPLACE_USER_TAG_KEYS = new Set(["user_id", "new_physical_id"]);
 const USER_UID_KEYS = new Set(["user_id", "uid"]);
+const SHORT_TOKEN_PATTERN = /^[A-Za-z0-9_-]{8,32}$/;
 
 staffRoutes.use("*", requireAuth, requireStaffRole);
 
@@ -55,6 +57,27 @@ staffRoutes.post("/replace_user_tag", async (c) => {
   }
 
   return successMessage(c, "User tag paired successfully.");
+});
+
+staffRoutes.get("/print-cards/:short_token", async (c) => {
+  const shortToken = c.req.param("short_token");
+  if (!SHORT_TOKEN_PATTERN.test(shortToken)) {
+    return errorResponse(c, 404, "PRINT_CARD_NOT_FOUND", "Print-card token not found.");
+  }
+
+  const card = await getPrintCard(c.env.DB, shortToken);
+  if (!card) {
+    return errorResponse(c, 404, "PRINT_CARD_NOT_FOUND", "Print-card token not found.");
+  }
+
+  return new Response(card.image, {
+    status: 200,
+    headers: {
+      "Content-Type": "image/png",
+      "Content-Disposition": `attachment; filename="${shortToken}.png"`,
+      "Cache-Control": "private, no-store",
+    },
+  });
 });
 
 staffRoutes.post("/nfc-unlock-code", async (c) => {

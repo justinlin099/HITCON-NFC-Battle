@@ -3,6 +3,7 @@ import collectionRoutes from "./collection-routes";
 import { requireAuth } from "./auth";
 import { nowIso } from "./ids";
 import missionRoutes from "./mission-routes";
+import printCardRoutes from "./print-card-routes";
 import { success } from "./responses";
 import scoreboardRoutes from "./scoreboard-routes";
 import { requireStaffRole } from "./staff";
@@ -38,6 +39,7 @@ app.route("/users", userRoutes);
 app.route("/tags", tagRoutes);
 app.route("/collection", collectionRoutes);
 app.route("/missions", missionRoutes);
+app.route("/print-cards", printCardRoutes);
 app.route("/scoreboard", scoreboardRoutes);
 app.route("/staff", staffRoutes);
 
