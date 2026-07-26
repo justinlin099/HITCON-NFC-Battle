@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import {
+  claimPrize,
   deletePrizeSnapshot,
+  getPrizeResult,
   markPhishingEventsApplied,
   unmarkPhishingEventsApplied,
   writePrizeSnapshot,
@@ -77,6 +79,54 @@ staffRoutes.get("/print-cards/:short_token", async (c) => {
       "Content-Disposition": `attachment; filename="${shortToken}.png"`,
       "Cache-Control": "private, no-store",
     },
+  });
+});
+
+staffRoutes.post("/prize-claims", async (c) => {
+  const request = validateUserUidRequest(await readJson(c));
+  if (!request) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
+  const state = await getGameState(c.env.DB);
+  if (state.state !== "FROZEN" || !state.freeze_id) {
+    return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
+  }
+
+  const user = await getUserRow(c.env.DB, request.user_id);
+  if (!user) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  const tagOwner = await getTagOwner(c.env.DB, request.uid);
+  if (tagOwner?.user_id !== request.user_id) {
+    return errorResponse(c, 403, "PHYSICAL_ID_MISMATCH", "Physical tag ID does not match user ID.");
+  }
+
+  const prize = await getPrizeResult(c.env.DB, state.freeze_id, request.user_id);
+  if (!prize || (prize.stamp_prize !== 1 && prize.rank_prize !== 1)) {
+    return errorResponse(c, 409, "PRIZE_NOT_ELIGIBLE", "User is not eligible for a prize.");
+  }
+
+  const claimedAt = nowIso();
+  const claimed = await claimPrize(
+    c.env.DB,
+    state.freeze_id,
+    request.user_id,
+    c.get("authUser").userId,
+    claimedAt,
+  );
+  if (!claimed) {
+    return errorResponse(c, 409, "PRIZE_ALREADY_CLAIMED", "Prize has already been claimed.");
+  }
+
+  return success(c, {
+    freeze_id: state.freeze_id,
+    user_id: request.user_id,
+    stamp_prize: prize.stamp_prize === 1,
+    rank_prize: prize.rank_prize === 1,
+    rank: prize.rank,
+    claimed_at: claimedAt,
   });
 });
 

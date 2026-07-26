@@ -12,6 +12,26 @@ export interface PrizeResultRow {
   rank: number | null;
 }
 
+export async function claimPrize(
+  db: D1Database,
+  freezeId: string,
+  userId: string,
+  claimedByUserId: string,
+  claimedAt: string,
+) {
+  const result = await db
+    .prepare(
+      `
+      INSERT OR IGNORE INTO prize_claims (freeze_id, user_id, claimed_at, claimed_by_user_id)
+      VALUES (?1, ?2, ?3, ?4)
+      `,
+    )
+    .bind(freezeId, userId, claimedAt, claimedByUserId)
+    .run();
+
+  return result.meta.changes > 0;
+}
+
 export interface FrozenScoreboardRow {
   rank: number;
   user_id: string;

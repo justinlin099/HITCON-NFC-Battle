@@ -13,7 +13,9 @@ export type ErrorCode =
   | "SCOREBOARD_NOT_FROZEN"
   | "SCOREBOARD_READ_INCONSISTENT"
   | "PRINT_CARD_NOT_FOUND"
-  | "PAYLOAD_TOO_LARGE";
+  | "PAYLOAD_TOO_LARGE"
+  | "PRIZE_NOT_ELIGIBLE"
+  | "PRIZE_ALREADY_CLAIMED";
 
 export interface AuthenticatedUser {
   userId: string;
