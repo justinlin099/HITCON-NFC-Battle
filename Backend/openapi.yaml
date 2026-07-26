@@ -140,9 +140,8 @@ paths:
       summary: Lazy initialize or get my profile
       description: |
         Creates a default profile when the authenticated JWT subject is new,
-        then returns the authenticated user's complete data. NFC physical IDs
-        are never included in profile responses; they are only submitted when
-        pairing or scanning a card.
+        then returns the authenticated user's complete data. `physical_id` is
+        the first paired NFC card, or `null` before the user pairs a card.
       responses:
         '200':
           description: Profile loaded.
@@ -1165,9 +1164,15 @@ components:
         - $ref: '#/components/schemas/UserProfilePublicFull'
         - type: object
           required:
+            - physical_id
             - nfc_tag_key
             - collection
           properties:
+            physical_id:
+              type: string
+              nullable: true
+              description: First paired NFC card physical ID, ordered by pairing time and then UID. This is null before the user pairs an NFC card.
+              example: '04:1A:2B:3C:4D:5E:6F'
             nfc_tag_key:
               type: string
               pattern: '^[0-9a-f]{12}$'
@@ -1806,6 +1811,7 @@ components:
           pixel_avatar_base64: iVBORw0KGgoAAAANSU...
           profile_version: 3
           collection_version: 12
+          physical_id: '04:1A:2B:3C:4D:5E:6F'
           nfc_tag_key: a1b2c3d4e5f6
           collection:
             - kktix_hash_def456
@@ -1822,6 +1828,7 @@ components:
           pixel_avatar_base64: ''
           profile_version: 1
           collection_version: 0
+          physical_id: null
           nfc_tag_key: 001122334455
           collection: []
 
@@ -1838,6 +1845,7 @@ components:
             pixel_avatar_base64: iVBORw0KGgoAAAANSU...
             profile_version: 3
             collection_version: 12
+            physical_id: '04:1A:2B:3C:4D:5E:6F'
             nfc_tag_key: a1b2c3d4e5f6
             collection:
               - kktix_hash_def456

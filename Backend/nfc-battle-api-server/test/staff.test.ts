@@ -101,10 +101,12 @@ describe("staff scoreboard edge cases", () => {
 
     const before = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
+        physical_id: string;
         profile_version: number;
         collection_version: number;
       };
     };
+    expect(before.data.physical_id).toBe("tag-alice-old");
 
     const update = await server.request(
       "/staff/pair_user_tag",
@@ -138,28 +140,28 @@ describe("staff scoreboard edge cases", () => {
 
     const after = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
+        physical_id: string;
         profile_version: number;
         collection_version: number;
       };
     };
     expect(after.data).toMatchObject({
+      physical_id: "tag-alice-old",
       profile_version: before.data.profile_version,
       collection_version: before.data.collection_version,
     });
-    expect(after.data).not.toHaveProperty("physical_id");
-    expect(after.data).not.toHaveProperty("physical_ids");
 
     const bootstrap = await readJson(
       await server.request("/users/me/bootstrap", { headers: alice.headers }),
     ) as {
       data: {
         me: {
+          physical_id: string;
           nfc_tag_key: string;
         };
       };
     };
-    expect(bootstrap.data.me).not.toHaveProperty("physical_id");
-    expect(bootstrap.data.me).not.toHaveProperty("physical_ids");
+    expect(bootstrap.data.me.physical_id).toBe("tag-alice-old");
     expect(bootstrap.data.me.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
   });
 
