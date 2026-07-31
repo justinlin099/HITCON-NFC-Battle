@@ -3,10 +3,10 @@
     "apps": [],
     "details": [
       {
-        "appID": "REPLACE_WITH_APPLE_TEAM_ID.org.hitcon.nfcbattle",
+        "appID": "LL6L3HH3MX.org.hitcon.nfcbattle",
         "paths": [
           "/b",
-          "/b/*"
+          "/b/"
         ]
       }
     ]

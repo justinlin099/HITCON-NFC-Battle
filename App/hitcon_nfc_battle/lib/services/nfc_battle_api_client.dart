@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import '../config/app_config.dart';
@@ -28,8 +29,9 @@ class NfcBattleApiClient {
     String path, {
     required String token,
     Map<String, String>? query,
+    Map<String, String>? headers,
   }) {
-    return _request('GET', path, token: token, query: query);
+    return _request('GET', path, token: token, query: query, headers: headers);
   }
 
   Future<Map<String, dynamic>> post(
@@ -37,16 +39,109 @@ class NfcBattleApiClient {
     required String token,
     Map<String, dynamic>? body,
     Map<String, String>? query,
+    Map<String, String>? headers,
   }) {
-    return _request('POST', path, token: token, body: body, query: query);
+    return _request(
+      'POST',
+      path,
+      token: token,
+      body: body,
+      query: query,
+      headers: headers,
+    );
   }
 
   Future<Map<String, dynamic>> patch(
     String path, {
     required String token,
     Map<String, dynamic>? body,
+    Map<String, String>? headers,
   }) {
-    return _request('PATCH', path, token: token, body: body);
+    return _request('PATCH', path, token: token, body: body, headers: headers);
+  }
+
+  Future<Uint8List> getBytes(
+    String path, {
+    required String token,
+    Map<String, String>? headers,
+    int maxBytes = 10 * 1024 * 1024,
+  }) async {
+    final Uri uri = _buildUri(path);
+    final HttpClient client = HttpClient();
+    client.connectionTimeout = _requestTimeout;
+
+    try {
+      final HttpClientRequest request = await client
+          .getUrl(uri)
+          .timeout(_requestTimeout);
+      request.headers.set(HttpHeaders.acceptHeader, 'image/png');
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      _setHeaders(request, headers);
+      final HttpClientResponse response = await request.close().timeout(
+        _requestTimeout,
+      );
+      final Uint8List bytes = await _readResponseBytes(
+        response,
+        maxBytes: maxBytes,
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final String text = utf8.decode(bytes, allowMalformed: true);
+        final Map<String, dynamic> decoded = _decodeObject(text);
+        throw ApiException(
+          response.statusCode,
+          decoded['message'] as String? ?? text,
+          code: decoded['code'] as String?,
+        );
+      }
+      return bytes;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<Map<String, dynamic>> postMultipartFile(
+    String path, {
+    required String token,
+    required String fieldName,
+    required String fileName,
+    required String contentType,
+    required Uint8List bytes,
+  }) async {
+    final Uri uri = _buildUri(path);
+    final HttpClient client = HttpClient();
+    client.connectionTimeout = _requestTimeout;
+    final String boundary =
+        '----hitcon-nfc-${Random.secure().nextInt(1 << 32).toRadixString(16)}';
+    final List<int> prefix = utf8.encode(
+      '--$boundary\r\n'
+      'Content-Disposition: form-data; name="${_escapeHeader(fieldName)}"; '
+      'filename="${_escapeHeader(fileName)}"\r\n'
+      'Content-Type: $contentType\r\n\r\n',
+    );
+    final List<int> suffix = utf8.encode('\r\n--$boundary--\r\n');
+
+    try {
+      final HttpClientRequest request = await client
+          .postUrl(uri)
+          .timeout(_requestTimeout);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      request.headers.set(
+        HttpHeaders.contentTypeHeader,
+        'multipart/form-data; boundary=$boundary',
+      );
+      request.contentLength = prefix.length + bytes.length + suffix.length;
+      request.add(prefix);
+      request.add(bytes);
+      request.add(suffix);
+
+      final HttpClientResponse response = await request.close().timeout(
+        _requestTimeout,
+      );
+      return _decodeJsonResponse(response);
+    } finally {
+      client.close(force: true);
+    }
   }
 
   Future<Map<String, dynamic>> _request(
@@ -55,7 +150,34 @@ class NfcBattleApiClient {
     required String token,
     Map<String, dynamic>? body,
     Map<String, String>? query,
+    Map<String, String>? headers,
   }) async {
+    final Uri uri = _buildUri(path, query: query);
+    final HttpClient client = HttpClient();
+    client.connectionTimeout = _requestTimeout;
+
+    try {
+      final HttpClientRequest request = await client
+          .openUrl(method, uri)
+          .timeout(_requestTimeout);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      _setHeaders(request, headers);
+      if (body != null) {
+        request.headers.contentType = ContentType.json;
+        request.write(jsonEncode(body));
+      }
+
+      final HttpClientResponse response = await request.close().timeout(
+        _requestTimeout,
+      );
+      return _decodeJsonResponse(response);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Uri _buildUri(String path, {Map<String, String>? query}) {
     final Uri base = Uri.parse(AppConfig.apiBaseUrl);
     if (base.scheme != 'https' ||
         base.host.isEmpty ||
@@ -66,44 +188,52 @@ class NfcBattleApiClient {
     }
     final String normalizedPath =
         '${base.path.replaceFirst(RegExp(r'/$'), '')}/${path.replaceFirst(RegExp(r'^/'), '')}';
-    final Uri uri = base.replace(path: normalizedPath, queryParameters: query);
-    final HttpClient client = HttpClient();
-    client.connectionTimeout = _requestTimeout;
+    return base.replace(path: normalizedPath, queryParameters: query);
+  }
 
-    try {
-      final HttpClientRequest request = await client
-          .openUrl(method, uri)
-          .timeout(_requestTimeout);
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-      if (body != null) {
-        request.headers.contentType = ContentType.json;
-        request.write(jsonEncode(body));
-      }
-
-      final HttpClientResponse response = await request.close().timeout(
-        _requestTimeout,
+  Future<Map<String, dynamic>> _decodeJsonResponse(
+    HttpClientResponse response,
+  ) async {
+    final Uint8List responseBytes = await _readResponseBytes(
+      response,
+      maxBytes: _maxResponseBytes,
+    );
+    final String text = utf8.decode(responseBytes);
+    final Map<String, dynamic> decoded = _decodeObject(text);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(
+        response.statusCode,
+        decoded['message'] as String? ?? text,
+        code: decoded['code'] as String?,
       );
-      final BytesBuilder responseBytes = BytesBuilder(copy: false);
-      await for (final List<int> chunk in response.timeout(_requestTimeout)) {
-        if (responseBytes.length + chunk.length > _maxResponseBytes) {
-          throw const FormatException('API response exceeds the size limit.');
-        }
-        responseBytes.add(chunk);
-      }
-      final String text = utf8.decode(responseBytes.takeBytes());
-      final Map<String, dynamic> decoded = _decodeObject(text);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw ApiException(
-          response.statusCode,
-          decoded['message'] as String? ?? text,
-          code: decoded['code'] as String?,
-        );
-      }
-      return decoded;
-    } finally {
-      client.close(force: true);
     }
+    return decoded;
+  }
+
+  Future<Uint8List> _readResponseBytes(
+    HttpClientResponse response, {
+    required int maxBytes,
+  }) async {
+    final BytesBuilder responseBytes = BytesBuilder(copy: false);
+    await for (final List<int> chunk in response.timeout(_requestTimeout)) {
+      if (responseBytes.length + chunk.length > maxBytes) {
+        throw const FormatException('API response exceeds the size limit.');
+      }
+      responseBytes.add(chunk);
+    }
+    return responseBytes.takeBytes();
+  }
+
+  void _setHeaders(HttpClientRequest request, Map<String, String>? headers) {
+    headers?.forEach((String name, String value) {
+      if (name.trim().isNotEmpty && value.trim().isNotEmpty) {
+        request.headers.set(name, value);
+      }
+    });
+  }
+
+  String _escapeHeader(String value) {
+    return value.replaceAll(RegExp(r'[\r\n"]'), '_');
   }
 
   Map<String, dynamic> _decodeObject(String text) {

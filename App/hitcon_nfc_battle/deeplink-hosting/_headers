@@ -1,0 +1,3 @@
+/.well-known/nfc-battle-app-config.json
+  Cache-Control: no-store, max-age=0
+  Content-Type: application/json; charset=utf-8

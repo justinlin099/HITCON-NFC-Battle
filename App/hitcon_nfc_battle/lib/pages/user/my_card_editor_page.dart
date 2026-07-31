@@ -1,14 +1,19 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+import 'package:barcode_widget/barcode_widget.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
-import 'dart:convert';
 
+import '../../config/app_config.dart';
 import '../../l10n/app_localizations.dart';
 import '../../widgets/pixel_loading_overlay.dart';
+import '../../widgets/system_emoji_text_style.dart';
 import 'pixel_theme.dart';
 import 'pixel_card_face.dart';
 import 'pixel_link_dialog.dart';
@@ -217,10 +222,16 @@ enum _EditorTool {
 }
 
 class MyCardEditorPage extends StatefulWidget {
-  const MyCardEditorPage({super.key, this.scheme, this.onBackupRestored});
+  const MyCardEditorPage({
+    super.key,
+    this.scheme,
+    this.onBackupRestored,
+    this.pairingRequest = 0,
+  });
 
   final PixelScheme? scheme;
   final Future<void> Function()? onBackupRestored;
+  final int pairingRequest;
 
   @override
   State<MyCardEditorPage> createState() => _MyCardEditorPageState();
@@ -240,11 +251,31 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   PixelGrid _pixels = _createEmptyGrid(_canvasSize);
   String? _pairedUid;
   bool _isLoadingProfile = true;
+  int _handledPairingRequest = 0;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
+    _scheduleRequestedPairing();
+  }
+
+  @override
+  void didUpdateWidget(covariant MyCardEditorPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _scheduleRequestedPairing();
+  }
+
+  void _scheduleRequestedPairing() {
+    if (widget.pairingRequest <= _handledPairingRequest) {
+      return;
+    }
+    _handledPairingRequest = widget.pairingRequest;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(_openNtagScanPage());
+      }
+    });
   }
 
   @override
@@ -433,17 +464,28 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
                   opacity: 1,
                 ),
                 const SizedBox(height: 12),
-                _EditorActionButton(
-                  label: context.l10n.tr('unlockNtag'),
-                  subtitle: context.l10n.tr(
-                    _pairedUid == null ? 'pairFirst' : 'removeWriteProtection',
-                  ),
-                  onTap: _openNtagUnlockPage,
-                  color: _pairedUid == null
-                      ? PixelTheme.textGray
-                      : PixelTheme.warning,
-                  icon: Icons.lock_open_rounded,
-                  opacity: _pairedUid == null ? 0.55 : 1,
+                ValueListenableBuilder<bool>(
+                  valueListenable: AppConfig.allowUserTagUnlockListenable,
+                  builder: (BuildContext context, bool allowed, Widget? child) {
+                    final bool visuallyDisabled =
+                        !allowed || _pairedUid == null;
+                    return _EditorActionButton(
+                      label: context.l10n.tr('unlockNtag'),
+                      subtitle: context.l10n.tr(
+                        !allowed
+                            ? 'tagUnlockDisabled'
+                            : _pairedUid == null
+                            ? 'pairFirst'
+                            : 'removeWriteProtection',
+                      ),
+                      onTap: allowed ? _openNtagUnlockPage : null,
+                      color: visuallyDisabled
+                          ? PixelTheme.textGray
+                          : PixelTheme.warning,
+                      icon: Icons.lock_open_rounded,
+                      opacity: visuallyDisabled ? 0.55 : 1,
+                    );
+                  },
                 ),
                 const SizedBox(height: 12),
                 _EditorActionButton(
@@ -809,16 +851,10 @@ class _PokemonStyleCard extends StatelessWidget {
                       ..._emojiPreviewRows(emoji).map(
                         (String rowEmoji) => Text(
                           rowEmoji,
-                          style: TextStyle(
+                          style: systemEmojiTextStyle(
                             fontSize: s(32),
                             height: 1.0,
                             color: PixelTheme.textWhite,
-                            fontFamily: 'Roboto',
-                            fontFamilyFallback: const <String>[
-                              'Segoe UI Emoji',
-                              'Apple Color Emoji',
-                              'Noto Color Emoji',
-                            ],
                           ),
                         ),
                       ),
@@ -990,7 +1026,7 @@ class _EditorActionButton extends StatelessWidget {
   });
 
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Color color;
   final IconData? icon;
   final Widget? leading;
@@ -1831,16 +1867,7 @@ class _CardArtworkPreview extends StatelessWidget {
             .map(
               (String value) => Text(
                 value,
-                style: TextStyle(
-                  fontSize: fontSize,
-                  height: 1,
-                  fontFamily: 'Roboto',
-                  fontFamilyFallback: const <String>[
-                    'Segoe UI Emoji',
-                    'Apple Color Emoji',
-                    'Noto Color Emoji',
-                  ],
-                ),
+                style: systemEmojiTextStyle(fontSize: fontSize, height: 1),
               ),
             )
             .toList(),
@@ -1972,8 +1999,13 @@ class _BarcodeCard extends StatelessWidget {
           SizedBox(
             height: 92,
             width: double.infinity,
-            child: CustomPaint(
-              painter: _PixelBarcodePainter(order.barcodeValue),
+            child: BarcodeWidget(
+              barcode: Barcode.code128(),
+              data: order.barcodeValue,
+              drawText: false,
+              color: Colors.black,
+              backgroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
             ),
           ),
           Text(
@@ -2044,55 +2076,6 @@ class _BarcodeSaveScreen extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _PixelBarcodePainter extends CustomPainter {
-  const _PixelBarcodePainter(this.value);
-
-  final String value;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint paint = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.fill;
-    final List<int> modules = _modulesForValue(value);
-    final double moduleWidth = size.width / modules.length;
-
-    for (int i = 0; i < modules.length; i += 1) {
-      if (modules[i] == 0) {
-        continue;
-      }
-      canvas.drawRect(
-        Rect.fromLTWH(i * moduleWidth, 0, moduleWidth, size.height),
-        paint,
-      );
-    }
-  }
-
-  List<int> _modulesForValue(String value) {
-    int hash = 0x13579BDF;
-    for (final int unit in value.codeUnits) {
-      hash = ((hash << 5) - hash + unit) & 0x7fffffff;
-    }
-
-    final List<int> modules = <int>[1, 0, 1, 0, 1, 0, 1];
-    for (int i = 0; i < 72; i += 1) {
-      hash = (hash * 1103515245 + 12345) & 0x7fffffff;
-      final int width = 1 + (hash % 3);
-      final int bit = (hash & 0x08) == 0 ? 0 : 1;
-      for (int j = 0; j < width; j += 1) {
-        modules.add(bit);
-      }
-    }
-    modules.addAll(<int>[1, 0, 1, 0, 1, 0, 1]);
-    return modules;
-  }
-
-  @override
-  bool shouldRepaint(_PixelBarcodePainter oldDelegate) {
-    return oldDelegate.value != value;
   }
 }
 
@@ -2475,17 +2458,11 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
                   ),
                   child: Text(
                     option.emoji,
-                    style: TextStyle(
+                    style: systemEmojiTextStyle(
                       fontSize: 20,
                       color: selected
                           ? PixelTheme.bgDark
                           : PixelTheme.textWhite,
-                      fontFamily: 'Roboto',
-                      fontFamilyFallback: const <String>[
-                        'Segoe UI Emoji',
-                        'Apple Color Emoji',
-                        'Noto Color Emoji',
-                      ],
                     ),
                   ),
                 ),
@@ -2592,18 +2569,7 @@ class _TextEditorScreenState extends State<_TextEditorScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        emoji,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontFamily: 'Roboto',
-                          fontFamilyFallback: <String>[
-                            'Segoe UI Emoji',
-                            'Apple Color Emoji',
-                            'Noto Color Emoji',
-                          ],
-                        ),
-                      ),
+                      Text(emoji, style: systemEmojiTextStyle(fontSize: 20)),
                       const SizedBox(width: 6),
                       Text(
                         _emojiName(emoji),

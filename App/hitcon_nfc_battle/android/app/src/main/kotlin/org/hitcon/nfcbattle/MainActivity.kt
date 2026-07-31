@@ -1,9 +1,13 @@
 package org.hitcon.nfcbattle
 
-import android.content.Intent
+import android.app.PendingIntent
 import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.IntentFilter
 import android.nfc.NfcAdapter
 import android.nfc.Tag
+import android.os.Build
+import android.os.PatternMatcher
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -12,6 +16,19 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var pendingNfcUid: String? = null
     private var pendingWasNfcIntent = false
+    private val nfcAdapter: NfcAdapter? by lazy {
+        NfcAdapter.getDefaultAdapter(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        enableNfcForegroundDispatch()
+    }
+
+    override fun onPause() {
+        disableNfcForegroundDispatch()
+        super.onPause()
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -81,6 +98,56 @@ class MainActivity : FlutterActivity() {
             NfcAdapter.ACTION_TAG_DISCOVERED,
             NfcAdapter.ACTION_TECH_DISCOVERED -> true
             else -> false
+        }
+    }
+
+    private fun enableNfcForegroundDispatch() {
+        val adapter = nfcAdapter ?: return
+        if (!adapter.isEnabled) {
+            return
+        }
+
+        val pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_MUTABLE
+            } else {
+                0
+            }
+        val dispatchIntent = Intent(this, javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            dispatchIntent,
+            pendingIntentFlags,
+        )
+        val filters = arrayOf(
+            buildNfcUrlFilter(NfcAdapter.ACTION_NDEF_DISCOVERED),
+            buildNfcUrlFilter(Intent.ACTION_VIEW),
+        )
+
+        try {
+            adapter.enableForegroundDispatch(this, pendingIntent, filters, null)
+        } catch (error: IllegalStateException) {
+            Log.w("HitconNfcIntent", "Unable to enable foreground dispatch", error)
+        }
+    }
+
+    private fun disableNfcForegroundDispatch() {
+        val adapter = nfcAdapter ?: return
+        try {
+            adapter.disableForegroundDispatch(this)
+        } catch (error: IllegalStateException) {
+            Log.w("HitconNfcIntent", "Unable to disable foreground dispatch", error)
+        }
+    }
+
+    private fun buildNfcUrlFilter(action: String): IntentFilter {
+        return IntentFilter(action).apply {
+            addCategory(Intent.CATEGORY_DEFAULT)
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            addDataScheme("https")
+            addDataAuthority("game.hitcon2026.online", null)
+            addDataPath("/b", PatternMatcher.PATTERN_PREFIX)
         }
     }
 

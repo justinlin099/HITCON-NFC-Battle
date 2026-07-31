@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../widgets/system_emoji_text_style.dart';
 import 'pixel_theme.dart';
 
 class PixelCardFace extends StatelessWidget {
@@ -161,15 +162,9 @@ class PixelCardFace extends StatelessWidget {
                                     if (_showSeparateAttributeEmoji) ...[
                                       Text(
                                         attributeEmoji,
-                                        style: TextStyle(
+                                        style: systemEmojiTextStyle(
                                           color: attributeTextColor,
                                           fontSize: emojiFontSize,
-                                          fontFamily: 'Roboto',
-                                          fontFamilyFallback: const <String>[
-                                            'Segoe UI Emoji',
-                                            'Apple Color Emoji',
-                                            'Noto Color Emoji',
-                                          ],
                                         ),
                                       ),
                                       const SizedBox(width: 4),
@@ -258,15 +253,9 @@ class PixelCardFace extends StatelessWidget {
       fontFamily: 'Unifont',
       letterSpacing: 0.6,
     );
-    final TextStyle emojiStyle = TextStyle(
+    final TextStyle emojiStyle = systemEmojiTextStyle(
       color: attributeTextColor,
       fontSize: emojiFontSize,
-      fontFamily: 'Roboto',
-      fontFamilyFallback: const <String>[
-        'Segoe UI Emoji',
-        'Apple Color Emoji',
-        'Noto Color Emoji',
-      ],
     );
 
     return displayLabel.characters

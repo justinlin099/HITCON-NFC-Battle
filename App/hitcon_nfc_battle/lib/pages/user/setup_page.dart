@@ -8,6 +8,8 @@ import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/local_profile_store.dart';
 import '../../services/setup_service.dart';
+import '../../widgets/system_emoji_text_style.dart';
+import 'default_avatar_catalog.dart';
 import 'emoji_catalog.dart';
 import 'https_link_input.dart';
 import 'my_card_editor_page.dart';
@@ -58,6 +60,7 @@ class _SetupPageState extends State<SetupPage> {
   Color _cardColor = const Color(0xFFFFD700);
   Uint8List? _avatarBytes;
   String? _avatarBase64;
+  String? _selectedDefaultAvatarAsset;
 
   @override
   void initState() {
@@ -127,6 +130,7 @@ class _SetupPageState extends State<SetupPage> {
     setState(() {
       _avatarBytes = bytes;
       _avatarBase64 = base64Encode(bytes);
+      _selectedDefaultAvatarAsset = null;
       _status = context.l10n.tr('imageUpdated');
     });
   }
@@ -142,7 +146,27 @@ class _SetupPageState extends State<SetupPage> {
     setState(() {
       _avatarBytes = bytes;
       _avatarBase64 = base64Encode(bytes);
+      _selectedDefaultAvatarAsset = null;
       _status = context.l10n.tr('imageImported');
+    });
+  }
+
+  Future<void> _selectDefaultAvatar(DefaultAvatarOption option) async {
+    final ByteData data = await rootBundle.load(option.assetPath);
+    if (!mounted) {
+      return;
+    }
+    final Uint8List bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
+    setState(() {
+      _avatarBytes = bytes;
+      _avatarBase64 = base64Encode(bytes);
+      _selectedDefaultAvatarAsset = option.assetPath;
+      _status = context.l10n.tr('defaultAvatarSelected', <String, Object?>{
+        'name': context.l10n.tr(option.labelKey),
+      });
     });
   }
 
@@ -452,6 +476,48 @@ class _SetupPageState extends State<SetupPage> {
                 label: context.l10n.tr('image'),
                 title: context.l10n.tr('setupImage'),
               ),
+              const SizedBox(height: 16),
+              Text(
+                context.l10n.tr('defaultAvatars'),
+                style: TextStyle(
+                  color: PixelTheme.accentBlue,
+                  fontFamily: 'Unifont',
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                context.l10n.tr('defaultAvatarHint'),
+                style: TextStyle(
+                  color: PixelTheme.textGray,
+                  fontFamily: 'Unifont',
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 10),
+              LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  final double tileWidth = (constraints.maxWidth - 16) / 3;
+                  return Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: defaultAvatarCatalog
+                        .map(
+                          (DefaultAvatarOption option) => _DefaultAvatarTile(
+                            option: option,
+                            width: tileWidth,
+                            selected:
+                                _selectedDefaultAvatarAsset == option.assetPath,
+                            onTap: () =>
+                                unawaited(_selectDefaultAvatar(option)),
+                          ),
+                        )
+                        .toList(growable: false),
+                  );
+                },
+              ),
               if (_avatarBytes != null) ...[
                 const SizedBox(height: 16),
                 Center(
@@ -468,6 +534,16 @@ class _SetupPageState extends State<SetupPage> {
                 ),
               ],
               const SizedBox(height: 16),
+              Text(
+                context.l10n.tr('createOwnAvatar'),
+                style: TextStyle(
+                  color: PixelTheme.accentBlue,
+                  fontFamily: 'Unifont',
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
@@ -515,6 +591,16 @@ class _SetupPageState extends State<SetupPage> {
               _StepIntro(
                 label: context.l10n.tr('link'),
                 title: context.l10n.tr('setupLink'),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                context.l10n.tr('setupLinkGuidance'),
+                style: TextStyle(
+                  color: PixelTheme.textGray,
+                  fontFamily: 'Unifont',
+                  fontSize: 12,
+                  height: 1.5,
+                ),
               ),
               const SizedBox(height: 16),
               _PixelTextField(
@@ -1020,15 +1106,7 @@ class _SelectedEmojiBar extends StatelessWidget {
                           children: [
                             Text(
                               option.emoji,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontFamily: 'Roboto',
-                                fontFamilyFallback: <String>[
-                                  'Segoe UI Emoji',
-                                  'Apple Color Emoji',
-                                  'Noto Color Emoji',
-                                ],
-                              ),
+                              style: systemEmojiTextStyle(fontSize: 18),
                             ),
                             const SizedBox(width: 6),
                             Text(
@@ -1086,14 +1164,87 @@ class _EmojiChoice extends StatelessWidget {
         padding: const EdgeInsets.all(6),
         child: Text(
           option.emoji,
-          style: const TextStyle(
-            fontSize: 26,
-            height: 1,
-            fontFamily: 'Roboto',
-            fontFamilyFallback: <String>[
-              'Segoe UI Emoji',
-              'Apple Color Emoji',
-              'Noto Color Emoji',
+          style: systemEmojiTextStyle(fontSize: 26, height: 1),
+        ),
+      ),
+    );
+  }
+}
+
+class _DefaultAvatarTile extends StatelessWidget {
+  const _DefaultAvatarTile({
+    required this.option,
+    required this.width,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final DefaultAvatarOption option;
+  final double width;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final String label = context.l10n.tr(option.labelKey);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: width,
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: PixelTheme.bgDark,
+            border: Border.all(
+              color: selected ? PixelTheme.textWhite : PixelTheme.border,
+              width: selected ? 3 : 2,
+            ),
+            boxShadow: selected
+                ? const [
+                    BoxShadow(
+                      color: Colors.black,
+                      blurRadius: 0,
+                      offset: Offset(3, 3),
+                    ),
+                  ]
+                : const [],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AspectRatio(
+                aspectRatio: 1,
+                child: Image.asset(
+                  option.assetPath,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.none,
+                  gaplessPlayback: true,
+                ),
+              ),
+              const SizedBox(height: 5),
+              SizedBox(
+                height: 26,
+                child: Center(
+                  child: Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: selected
+                          ? PixelTheme.accent
+                          : PixelTheme.textWhite,
+                      fontFamily: 'Unifont',
+                      fontSize: 10,
+                      height: 1.15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1164,16 +1315,7 @@ class _SetupCardAvatar extends StatelessWidget {
                   .map(
                     (String item) => Text(
                       item,
-                      style: const TextStyle(
-                        fontSize: 32,
-                        height: 1.05,
-                        fontFamily: 'Roboto',
-                        fontFamilyFallback: <String>[
-                          'Segoe UI Emoji',
-                          'Apple Color Emoji',
-                          'Noto Color Emoji',
-                        ],
-                      ),
+                      style: systemEmojiTextStyle(fontSize: 32, height: 1.05),
                     ),
                   )
                   .toList(growable: false),

@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
 import 'card_bio_codec.dart';
+import 'local_collection_store.dart';
+import 'local_profile_store.dart';
 import 'nfc_battle_api_client.dart';
 import 'ntag_security_service.dart';
 
@@ -27,6 +29,8 @@ class AuthService {
 
   final NfcBattleApiClient _api = const NfcBattleApiClient();
   final CardBioCodec _cardBioCodec = const CardBioCodec();
+  final LocalCollectionStore _localCollectionStore = LocalCollectionStore();
+  final LocalProfileStore _localProfileStore = LocalProfileStore();
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   String? _currentUserId;
@@ -34,6 +38,7 @@ class AuthService {
   String? _jwtToken;
   Map<String, dynamic>? _userProfile;
   String? _lastAuthError;
+  String? _lastApiErrorCode;
   int? _lastAuthStatusCode;
 
   Future<bool> loginWithToken(String token) async {
@@ -60,6 +65,10 @@ class AuthService {
         return false;
       }
 
+      // A token can replace an already authenticated account without first
+      // calling logout. Never let the previous account's profile survive that
+      // transition, especially its paired tag and NFC credential.
+      _userProfile = null;
       _jwtToken = normalizedToken;
       _currentUserId = userId;
       _currentRole = UserRole.unknown;
@@ -68,6 +77,7 @@ class AuthService {
       if (profile == null) {
         _jwtToken = null;
         _currentUserId = null;
+        _userProfile = null;
         _currentRole = UserRole.unknown;
         return false;
       }
@@ -87,6 +97,7 @@ class AuthService {
       _log('Token login error: $e');
       _jwtToken = null;
       _currentUserId = null;
+      _userProfile = null;
       _currentRole = UserRole.unknown;
       return false;
     }
@@ -193,6 +204,7 @@ class AuthService {
       _userProfile = _normalizeProfile(result['data']);
       _currentUserId = _userProfile?['user_id'] as String? ?? _currentUserId;
       _setRoleFromApiRole(_userProfile?['role'] as String?);
+      await _cachePairingState(_userProfile!);
       return _userProfile;
     } catch (e) {
       _lastAuthError = e.toString();
@@ -220,6 +232,7 @@ class AuthService {
         body: body,
       );
       _userProfile = _normalizeProfile(result['data']);
+      await _cachePairingState(_userProfile!);
       return true;
     } catch (e) {
       _log('Error updating user profile: $e');
@@ -266,6 +279,7 @@ class AuthService {
   Future<NtagLockSecret?> requestNtagLockSecret({
     required String uid,
     required String purpose,
+    String? userId,
   }) async {
     if (!_ensureSession()) {
       _log('No user logged in');
@@ -273,6 +287,18 @@ class AuthService {
     }
 
     try {
+      final String targetUserId = (userId ?? '').trim();
+      if (purpose == 'unlock' &&
+          targetUserId.isNotEmpty &&
+          (isAdmin || isEventStaff)) {
+        final Map<String, dynamic> result = await _api.post(
+          '/staff/nfc-unlock-code',
+          token: _jwtToken!,
+          body: <String, dynamic>{'user_id': targetUserId, 'uid': uid},
+        );
+        return _secretFromNfcTagKey(_jsonMap(result['data'])['unlock_code']);
+      }
+
       final Map<String, dynamic>? profile =
           _userProfile ?? await fetchUserProfile();
       if (purpose == 'unlock') {
@@ -304,6 +330,41 @@ class AuthService {
     }
 
     try {
+      final Map<String, dynamic>? profile = await fetchUserProfile();
+      final List<String>? collectionIds = _stringList(profile?['collection']);
+      if (profile != null && collectionIds != null) {
+        if (collectionIds.isEmpty) {
+          return _collectionFromUsers(owner: profile, users: const <dynamic>[]);
+        }
+
+        final List<Map<String, dynamic>> cachedCards =
+            await _localCollectionStore.loadCards(_currentUserId!);
+        final List<Map<String, dynamic>>? refreshed =
+            await _batchRefreshCollectedUsers(
+              collectionIds: collectionIds,
+              cachedCards: cachedCards,
+            );
+        if (refreshed != null) {
+          return <String, dynamic>{
+            'owner_display_name':
+                profile['display_name'] ?? profile['user_id'] ?? '',
+            'total_collected': refreshed.length,
+            'collection': refreshed,
+            'collection_version': profile['collection_version'] ?? 0,
+          };
+        }
+      }
+
+      return _fetchCollectionBootstrap();
+    } catch (e) {
+      _log('Error fetching collection records: $e');
+    }
+
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _fetchCollectionBootstrap() async {
+    try {
       final Map<String, dynamic> result = await _api.get(
         '/users/me/bootstrap',
         token: _jwtToken!,
@@ -311,15 +372,92 @@ class AuthService {
       final Map<String, dynamic> data = _jsonMap(result['data']);
       final Map<String, dynamic> me = _normalizeProfile(data['me']);
       _userProfile = me;
+      await _cachePairingState(me);
       return _collectionFromUsers(
         owner: me,
         users: (data['collected_users'] as List<dynamic>? ?? <dynamic>[]),
       );
     } catch (e) {
-      _log('Error fetching collection records: $e');
+      _log('Error bootstrapping collection records: $e');
     }
 
     return null;
+  }
+
+  Future<List<Map<String, dynamic>>?> _batchRefreshCollectedUsers({
+    required List<String> collectionIds,
+    required List<Map<String, dynamic>> cachedCards,
+  }) async {
+    final Map<String, Map<String, dynamic>> cachedByUserId =
+        <String, Map<String, dynamic>>{
+          for (final Map<String, dynamic> card in cachedCards)
+            if (_profileUserId(card).isNotEmpty) _profileUserId(card): card,
+        };
+    final Map<String, Map<String, dynamic>> refreshedByUserId =
+        <String, Map<String, dynamic>>{};
+
+    for (int offset = 0; offset < collectionIds.length; offset += 100) {
+      final List<String> chunk = collectionIds
+          .skip(offset)
+          .take(100)
+          .toList(growable: false);
+      final List<Map<String, dynamic>> requests = chunk
+          .map((String userId) {
+            final Map<String, dynamic> cached =
+                cachedByUserId[userId] ?? <String, dynamic>{};
+            return <String, dynamic>{
+              'user_id': userId,
+              if (cached['profile_version'] is num)
+                'profile_version': (cached['profile_version'] as num).toInt(),
+              if (cached['collection_version'] is num)
+                'collection_version': (cached['collection_version'] as num)
+                    .toInt(),
+            };
+          })
+          .toList(growable: false);
+
+      final Map<String, dynamic> response = await _api.post(
+        '/users/batch',
+        token: _jwtToken!,
+        body: <String, dynamic>{'users': requests},
+      );
+      final List<dynamic> results =
+          _jsonMap(response['data'])['results'] as List<dynamic>? ??
+          <dynamic>[];
+      for (final Object? rawResult in results) {
+        final Map<String, dynamic> result = _jsonMap(rawResult);
+        final String userId = (result['user_id'] as String? ?? '').trim();
+        if (userId.isEmpty) {
+          continue;
+        }
+        final Map<String, dynamic>? cached = cachedByUserId[userId];
+        if (result['unchanged'] == true && cached != null) {
+          refreshedByUserId[userId] = cached;
+          continue;
+        }
+
+        final Map<String, dynamic> profile = _normalizeVisibleProfile(
+          _jsonMap(result['data']),
+        );
+        if (_profileUserId(profile).isEmpty) {
+          continue;
+        }
+        refreshedByUserId[userId] = _mergeRefreshedCard(
+          cached,
+          _cardFromProfile(profile),
+        );
+      }
+    }
+
+    final List<Map<String, dynamic>> refreshed = <Map<String, dynamic>>[];
+    for (final String userId in collectionIds) {
+      final Map<String, dynamic>? card =
+          refreshedByUserId[userId] ?? cachedByUserId[userId];
+      if (card != null) {
+        refreshed.add(card);
+      }
+    }
+    return refreshed.length == collectionIds.length ? refreshed : null;
   }
 
   Future<Map<String, dynamic>?> fetchStampMission() async {
@@ -336,6 +474,25 @@ class AuthService {
       return _jsonMap(result['data']);
     } catch (e) {
       _log('Error fetching stamp mission: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchMyPrize() async {
+    if (!_ensureSession()) {
+      return null;
+    }
+
+    _lastApiErrorCode = null;
+    try {
+      final Map<String, dynamic> result = await _api.get(
+        '/users/me/prize',
+        token: _jwtToken!,
+      );
+      return _jsonMap(result['data']);
+    } catch (e) {
+      _lastApiErrorCode = e is ApiException ? e.code : null;
+      _log('Error fetching prize result: $e');
       return null;
     }
   }
@@ -483,8 +640,31 @@ class AuthService {
       return null;
     }
 
-    _log('Card print order endpoint is not present in openapi.yaml.');
-    return null;
+    try {
+      final Map<String, dynamic> result = await _api.postMultipartFile(
+        '/print-cards',
+        token: _jwtToken!,
+        fieldName: 'image',
+        fileName: 'hitcon-nfc-card.png',
+        contentType: 'image/png',
+        bytes: artworkPng,
+      );
+      final String shortToken =
+          (_jsonMap(result['data'])['short_token'] as String? ?? '').trim();
+      if (shortToken.isEmpty) {
+        return null;
+      }
+      return <String, dynamic>{
+        'order_id': shortToken,
+        'barcode_value': shortToken,
+        'file_name': 'hitcon-nfc-card-$shortToken.png',
+        'format':
+            metadata['format'] as String? ?? 'EVOLIS_PRIMACY_CR80_300DPI_PNG',
+      };
+    } catch (e) {
+      _log('Error submitting card print order: $e');
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>?> confirmPrizeClaim({
@@ -495,8 +675,206 @@ class AuthService {
       return null;
     }
 
-    _log('Prize claim endpoint is not present in openapi.yaml.');
-    return null;
+    final String normalizedUid = tagUid.trim();
+    final String normalizedUserId = userId.trim();
+    if (normalizedUid.isEmpty || normalizedUserId.isEmpty) {
+      return null;
+    }
+
+    try {
+      final Map<String, dynamic> result = await _api.post(
+        '/staff/prize-claims',
+        token: _jwtToken!,
+        body: <String, dynamic>{
+          'user_id': normalizedUserId,
+          'uid': normalizedUid,
+        },
+      );
+      return <String, dynamic>{
+        ..._jsonMap(result['data']),
+        'already_claimed': false,
+        'claim_code': _jsonMap(result['data'])['freeze_id'] as String? ?? '',
+      };
+    } catch (e) {
+      if (e is ApiException && e.code == 'PRIZE_ALREADY_CLAIMED') {
+        return <String, dynamic>{'already_claimed': true, 'claim_code': ''};
+      }
+      _log('Error claiming prize: $e');
+      return null;
+    }
+  }
+
+  Future<Uint8List?> downloadStaffPrintCard(String shortToken) async {
+    if (!_ensureSession()) {
+      return null;
+    }
+    final String token = shortToken.trim();
+    if (!RegExp(r'^[A-Za-z0-9_-]{8,32}$').hasMatch(token)) {
+      _lastAuthError = 'Invalid print-card token.';
+      return null;
+    }
+
+    try {
+      final Uint8List bytes = await _api.getBytes(
+        '/staff/print-cards/${Uri.encodeComponent(token)}',
+        token: _jwtToken!,
+      );
+      const List<int> pngSignature = <int>[
+        0x89,
+        0x50,
+        0x4E,
+        0x47,
+        0x0D,
+        0x0A,
+        0x1A,
+        0x0A,
+      ];
+      if (bytes.length < pngSignature.length) {
+        throw const FormatException('Downloaded print card is not a PNG.');
+      }
+      for (int index = 0; index < pngSignature.length; index += 1) {
+        if (bytes[index] != pngSignature[index]) {
+          throw const FormatException('Downloaded print card is not a PNG.');
+        }
+      }
+      return bytes;
+    } catch (e) {
+      _lastAuthError = e.toString();
+      _log('Error downloading staff print card: $e');
+      return null;
+    }
+  }
+
+  Future<bool> pairStaffUserTag({
+    required String userId,
+    required String uid,
+  }) async {
+    if (!_ensureSession()) {
+      return false;
+    }
+    final String normalizedUserId = userId.trim();
+    final String normalizedUid = uid.trim();
+    if (normalizedUserId.isEmpty || normalizedUid.isEmpty) {
+      return false;
+    }
+
+    try {
+      await _api.post(
+        '/staff/pair_user_tag',
+        token: _jwtToken!,
+        body: <String, dynamic>{
+          'user_id': normalizedUserId,
+          'physical_id': normalizedUid,
+        },
+      );
+      return true;
+    } catch (e) {
+      _lastAuthError = e.toString();
+      _log('Error pairing a staff-assigned user tag: $e');
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchStaffScoreboardStatus(
+    String dangerToken,
+  ) async {
+    if (!_ensureSession() || dangerToken.trim().isEmpty) {
+      return null;
+    }
+    try {
+      final Map<String, dynamic> result = await _api.get(
+        '/staff/scoreboard_status',
+        token: _jwtToken!,
+        headers: _staffDangerHeaders(dangerToken),
+      );
+      return _jsonMap(result['data']);
+    } catch (e) {
+      _lastAuthError = e.toString();
+      _log('Error fetching staff scoreboard status: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> freezeStaffScoreboard(
+    String dangerToken,
+  ) async {
+    if (!_ensureSession() || dangerToken.trim().isEmpty) {
+      return null;
+    }
+    try {
+      final Map<String, dynamic> result = await _api.post(
+        '/staff/freeze_scoreboard',
+        token: _jwtToken!,
+        headers: _staffDangerHeaders(dangerToken),
+      );
+      return _jsonMap(result['data']);
+    } catch (e) {
+      _lastAuthError = e.toString();
+      _log('Error freezing scoreboard: $e');
+      return null;
+    }
+  }
+
+  Future<bool> resumeStaffScoreboard(String dangerToken) async {
+    if (!_ensureSession() || dangerToken.trim().isEmpty) {
+      return false;
+    }
+    try {
+      await _api.post(
+        '/staff/resume_scoreboard',
+        token: _jwtToken!,
+        headers: _staffDangerHeaders(dangerToken),
+      );
+      return true;
+    } catch (e) {
+      _lastAuthError = e.toString();
+      _log('Error resuming scoreboard: $e');
+      return false;
+    }
+  }
+
+  Map<String, String> _staffDangerHeaders(String dangerToken) {
+    return <String, String>{'STAFF_DANGER_TOKEN': dangerToken.trim()};
+  }
+
+  Map<String, dynamic> _mergeRefreshedCard(
+    Map<String, dynamic>? cached,
+    Map<String, dynamic> refreshed,
+  ) {
+    if (cached == null) {
+      return refreshed;
+    }
+    final String oldPhysicalUid = (cached['physical_uid'] as String? ?? '')
+        .trim();
+    final String refreshedPhysicalUid =
+        (refreshed['physical_uid'] as String? ?? '').trim();
+    final String userId = _profileUserId(refreshed);
+    return <String, dynamic>{
+      ...cached,
+      ...refreshed,
+      if (oldPhysicalUid.isNotEmpty &&
+          (refreshedPhysicalUid.isEmpty || refreshedPhysicalUid == userId))
+        'physical_uid': oldPhysicalUid,
+      if (cached['collected_at'] != null)
+        'collected_at': cached['collected_at'],
+    };
+  }
+
+  String _profileUserId(Map<String, dynamic> profile) {
+    return (profile['user_id'] as String? ?? profile['owner'] as String? ?? '')
+        .trim();
+  }
+
+  List<String>? _stringList(Object? raw) {
+    if (raw is! List) {
+      return null;
+    }
+    return raw
+        .whereType<String>()
+        .map((String value) => value.trim())
+        .where((String value) => value.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
   }
 
   Map<String, dynamic> _profileUpdateForApi(Map<String, dynamic> updates) {
@@ -669,6 +1047,29 @@ class AuthService {
     return normalizedLeft.isNotEmpty && normalizedLeft == normalizedRight;
   }
 
+  Future<void> _cachePairingState(Map<String, dynamic> profile) async {
+    final String userId = (profile['user_id'] as String? ?? '').trim();
+    final bool hasPairingState =
+        profile.containsKey('physical_id') ||
+        profile.containsKey('paired_ntag_uid');
+    if (userId.isEmpty || !hasPairingState || userId != _currentUserId) {
+      return;
+    }
+
+    final Object? rawUid = profile.containsKey('physical_id')
+        ? profile['physical_id']
+        : profile['paired_ntag_uid'];
+    final String pairedUid = rawUid is String ? rawUid.trim() : '';
+    try {
+      await _localProfileStore.save(userId, <String, dynamic>{
+        'physical_id': pairedUid.isEmpty ? null : pairedUid,
+        'paired_ntag_uid': pairedUid.isEmpty ? null : pairedUid,
+      });
+    } catch (error) {
+      _log('Could not cache NFC pairing state for $userId: $error');
+    }
+  }
+
   Map<String, dynamic> _decodeJwtClaims(String token) {
     final List<String> parts = token.split('.');
     if (parts.length != 3) {
@@ -733,6 +1134,7 @@ class AuthService {
   String? get jwtToken => _jwtToken;
   Map<String, dynamic>? get userProfile => _userProfile;
   String? get lastAuthError => _lastAuthError;
+  String? get lastApiErrorCode => _lastApiErrorCode;
   bool get isLoggedIn => _jwtToken != null && _currentUserId != null;
   bool get isAdmin => _currentRole == UserRole.admin;
   bool get isEventStaff => _currentRole == UserRole.eventStaff;

@@ -33,6 +33,8 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/test-tokens*.json
+/test-tokens*.txt
 
 # Symbolication related
 app.*.symbols

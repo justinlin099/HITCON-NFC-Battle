@@ -13,10 +13,14 @@ import 'pages/user/setup_page.dart';
 import 'pages/debug/test_login_page.dart';
 import 'services/auth_service.dart';
 import 'services/nfc_deep_link_service.dart';
+import 'services/nfc_tag_payload.dart';
 import 'services/ntag_security_service.dart';
+import 'services/remote_app_config_service.dart';
 import 'services/setup_service.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await RemoteAppConfigService.instance.refresh(force: true);
   runApp(const MyApp());
 }
 
@@ -81,13 +85,14 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late final _AutoNtagScanner _autoScanner;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(NfcDeepLinkService.instance.initialize());
     _autoScanner = _AutoNtagScanner(deepLinks: NfcDeepLinkService.instance);
     NfcDeepLinkService.instance.registerInAppScanStarter(_autoScanner.start);
@@ -95,8 +100,16 @@ class _MyAppState extends State<MyApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoScanner.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(RemoteAppConfigService.instance.refresh());
+    }
   }
 
   @override
@@ -393,14 +406,17 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
     final String secretKey = _secretKeyController.text.trim();
 
     // 建立多個 NDEF 記錄：URI + Secret（如果存在）
-    final List<NdefRecord> records = <NdefRecord>[_buildUriRecord(uri)];
+    final List<NdefRecord> additionalRecords = <NdefRecord>[];
 
     // 如果有 secret，額外寫入文本記錄
     if (secretKey.isNotEmpty) {
-      records.add(_buildTextRecord('secret_key', secretKey));
+      additionalRecords.add(_buildTextRecord('secret_key', secretKey));
     }
 
-    final NdefMessage message = NdefMessage(records);
+    final NdefMessage message = NfcTagPayload.buildUriMessage(
+      Uri.parse(uri),
+      additionalRecords: additionalRecords,
+    );
     final Ndef? ndef = Ndef.from(tag);
 
     if (ndef == null || !ndef.isWritable) {
@@ -409,35 +425,6 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
     await ndef.write(message);
     return true;
-  }
-
-  NdefRecord _buildUriRecord(String uri) {
-    const List<String> prefixes = <String>[
-      '',
-      'http://www.',
-      'https://www.',
-      'http://',
-      'https://',
-    ];
-
-    int prefixIndex = 0;
-    String body = uri;
-    for (int i = prefixes.length - 1; i >= 0; i--) {
-      if (prefixes[i].isNotEmpty && uri.startsWith(prefixes[i])) {
-        prefixIndex = i;
-        body = uri.substring(prefixes[i].length);
-        break;
-      }
-    }
-
-    final List<int> payload = <int>[prefixIndex, ...utf8.encode(body)];
-
-    return NdefRecord(
-      typeNameFormat: NdefTypeNameFormat.nfcWellknown,
-      type: Uint8List.fromList(<int>[0x55]),
-      identifier: Uint8List(0),
-      payload: Uint8List.fromList(payload),
-    );
   }
 
   NdefRecord _buildTextRecord(String identifier, String text) {

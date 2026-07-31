@@ -40,6 +40,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   PixelScheme _selectedScheme = PixelTheme.defaultScheme;
   bool _appliedInitialTab = false;
   bool _showAdminModeSwitch = false;
+  int _myCardPairingRequest = 0;
 
   bool _isLoading = true;
   bool _isHandlingNfcRequest = false;
@@ -214,9 +215,25 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       return;
     }
 
-    final Map<String, dynamic> profile = await _localProfileStore.load(userId);
-    final String pairedUid = (profile['paired_ntag_uid'] as String? ?? '')
-        .trim();
+    Map<String, dynamic> profile =
+        _authService.userProfile ?? <String, dynamic>{};
+    final bool hasServerPairingState =
+        profile['user_id'] == userId &&
+        (profile.containsKey('physical_id') ||
+            profile.containsKey('paired_ntag_uid'));
+    if (!hasServerPairingState) {
+      final Map<String, dynamic>? refreshed = await _authService
+          .fetchUserProfile();
+      if (!mounted || _authService.currentUserId != userId) {
+        return;
+      }
+      profile = refreshed ?? await _localProfileStore.load(userId);
+    }
+
+    final Object? rawPairedUid = profile.containsKey('physical_id')
+        ? profile['physical_id']
+        : profile['paired_ntag_uid'];
+    final String pairedUid = rawPairedUid is String ? rawPairedUid.trim() : '';
     if (pairedUid.isNotEmpty || !mounted) {
       return;
     }
@@ -227,6 +244,11 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     );
     if (goPair == true && mounted) {
       await _selectTab(1);
+      if (mounted) {
+        setState(() {
+          _myCardPairingRequest += 1;
+        });
+      }
     }
   }
 
@@ -436,22 +458,53 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                   ),
                 ],
               ),
-              body: PageView(
-                controller: _pageController,
-                onPageChanged: (int index) {
-                  _selectedTab.value = index;
-                },
+              body: Stack(
+                fit: StackFit.expand,
                 children: [
-                  _KeepAlivePage(child: _buildCollectionBody()),
-                  _KeepAlivePage(
-                    child: MyCardEditorPage(
-                      scheme: _selectedScheme,
-                      onBackupRestored: _loadData,
+                  PageView(
+                    controller: _pageController,
+                    onPageChanged: (int index) {
+                      _selectedTab.value = index;
+                    },
+                    children: [
+                      _KeepAlivePage(child: _buildCollectionBody()),
+                      _KeepAlivePage(
+                        child: MyCardEditorPage(
+                          scheme: _selectedScheme,
+                          onBackupRestored: _loadData,
+                          pairingRequest: _myCardPairingRequest,
+                        ),
+                      ),
+                      _KeepAlivePage(
+                        child: ScoreBoardPage(scheme: _selectedScheme),
+                      ),
+                    ],
+                  ),
+                  if (defaultTargetPlatform == TargetPlatform.iOS)
+                    ValueListenableBuilder<int>(
+                      valueListenable: _selectedTab,
+                      builder: (BuildContext context, int tab, Widget? child) {
+                        if (tab != 0) {
+                          return const SizedBox.shrink();
+                        }
+                        return Positioned(
+                          right: 16,
+                          bottom: 16,
+                          child: _PixelIconButton(
+                            key: const ValueKey<String>(
+                              'ios-collection-scan-button',
+                            ),
+                            onPressed: () {
+                              unawaited(
+                                _deepLinks.requestManualCollectionScan(),
+                              );
+                            },
+                            icon: Icons.nfc_rounded,
+                            tooltip: context.l10n.tr('startScan'),
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                  _KeepAlivePage(
-                    child: ScoreBoardPage(scheme: _selectedScheme),
-                  ),
                 ],
               ),
               bottomNavigationBar: NavigationBarTheme(
@@ -591,7 +644,12 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                   ),
                 ),
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(8, 12, 8, 24),
+                  padding: EdgeInsets.fromLTRB(
+                    8,
+                    12,
+                    8,
+                    defaultTargetPlatform == TargetPlatform.iOS ? 88 : 24,
+                  ),
                   sliver: SliverGrid(
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
@@ -658,8 +716,37 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     );
   }
 
-  void _handleRedeem() {
-    _showNfcMessage(context.l10n.tr('prizeReady'));
+  Future<void> _handleRedeem() async {
+    _showNfcMessage(context.l10n.tr('checkingPrizeResult'));
+    final Map<String, dynamic>? result = await _authService.fetchMyPrize();
+    if (!mounted) {
+      return;
+    }
+    if (result == null) {
+      _showNfcMessage(
+        context.l10n.tr(
+          _authService.lastApiErrorCode == 'SCOREBOARD_NOT_FROZEN'
+              ? 'prizeResultNotReady'
+              : 'prizeResultFailed',
+        ),
+      );
+      return;
+    }
+
+    final bool stampPrize = result['stamp_prize'] == true;
+    final bool rankPrize = result['rank_prize'] == true;
+    if (!stampPrize && !rankPrize) {
+      _showNfcMessage(context.l10n.tr('noPrizeResult'));
+      return;
+    }
+    final int? rank = (result['rank'] as num?)?.toInt();
+    _showNfcMessage(
+      context.l10n.tr('prizeResultSummary', <String, Object?>{
+        'stamp': stampPrize ? context.l10n.tr('yes') : context.l10n.tr('no'),
+        'rankPrize': rankPrize ? context.l10n.tr('yes') : context.l10n.tr('no'),
+        'rank': rank?.toString() ?? '-',
+      }),
+    );
   }
 
   void _handleRefreshStatusChange(RefreshIndicatorStatus? status) {
@@ -1940,6 +2027,78 @@ class _PixelCardState extends State<_PixelCard> {
 
 /// 獎品面板
 /// 像素風按鈕
+class _PixelIconButton extends StatefulWidget {
+  const _PixelIconButton({
+    super.key,
+    required this.onPressed,
+    required this.icon,
+    required this.tooltip,
+  });
+
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final String tooltip;
+
+  @override
+  State<_PixelIconButton> createState() => _PixelIconButtonState();
+}
+
+class _PixelIconButtonState extends State<_PixelIconButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool enabled = widget.onPressed != null;
+    final Color color = enabled ? PixelTheme.accent : PixelTheme.textGray;
+    final Color bgColor = enabled
+        ? PixelTheme.bgDark
+        : PixelTheme.bgMid.withValues(alpha: 0.5);
+
+    return GestureDetector(
+      onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+      onTapUp: enabled
+          ? (_) {
+              setState(() => _pressed = false);
+              widget.onPressed?.call();
+            }
+          : null,
+      onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        label: widget.tooltip,
+        child: Tooltip(
+          message: widget.tooltip,
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: bgColor,
+              border: Border.all(color: color, width: 2),
+              boxShadow: [
+                if (_pressed && enabled)
+                  const BoxShadow(
+                    color: Colors.black,
+                    blurRadius: 0,
+                    offset: Offset(1, 1),
+                  )
+                else if (enabled)
+                  const BoxShadow(
+                    color: Colors.black,
+                    blurRadius: 0,
+                    offset: Offset(3, 3),
+                  ),
+              ],
+            ),
+            alignment: Alignment.center,
+            child: Icon(widget.icon, color: color, size: 24),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PixelButton extends StatefulWidget {
   const _PixelButton({
     required this.onPressed,

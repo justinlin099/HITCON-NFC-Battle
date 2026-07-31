@@ -1,17 +1,18 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 
+import '../../config/app_config.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
+import '../../services/nfc_deep_link_service.dart';
 import '../../services/nfc_session_controller.dart';
+import '../../services/nfc_tag_payload.dart';
 import '../../services/ntag_security_service.dart';
 import 'pixel_theme.dart';
 
-const Duration _tagDisposalGracePeriod = Duration(milliseconds: 120);
+const Duration _tagDisposalGracePeriod = Duration(milliseconds: 400);
 
 Future<void> _stopNfcSessionQuietly() async {
   try {
@@ -28,9 +29,20 @@ Future<String?> openNtagPairingScanPage(BuildContext context) {
 }
 
 Future<bool?> openNtagUnlockPage(BuildContext context) {
+  if (!AppConfig.allowUserTagUnlock) {
+    return Future<bool?>.value(false);
+  }
   return Navigator.of(
     context,
   ).push<bool>(MaterialPageRoute<bool>(builder: (_) => const NtagUnlockPage()));
+}
+
+void _popCurrentRoute<T>(BuildContext context, T result) {
+  final ModalRoute<dynamic>? route = ModalRoute.of(context);
+  final NavigatorState navigator = Navigator.of(context);
+  if (route?.isCurrent == true && navigator.canPop()) {
+    navigator.pop<T>(result);
+  }
 }
 
 class NtagPairingPage extends StatefulWidget {
@@ -51,11 +63,14 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
   bool _isReading = false;
   bool _isHandlingTag = false;
   bool _isDisposed = false;
+  bool _isSuppressingDeepLinks = false;
   NfcSessionLease? _nfcLease;
 
   @override
   void initState() {
     super.initState();
+    NfcDeepLinkService.instance.beginTagMaintenance();
+    _isSuppressingDeepLinks = true;
     _userId = AuthService().currentUserId ?? '';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startSession();
@@ -236,7 +251,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
       return;
     }
     if (pairSuccess) {
-      Navigator.of(context).pop(parsedTagId);
+      _popCurrentRoute(context, parsedTagId);
     } else {
       setState(() {});
     }
@@ -274,43 +289,17 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
       _targetPath,
       <String, String>{'u': userId},
     ).toString();
-    final List<NdefRecord> records = <NdefRecord>[_buildUriRecord(targetUri)];
-
-    await ndef.write(NdefMessage(records));
+    await ndef.write(NfcTagPayload.buildUriMessage(Uri.parse(targetUri)));
     return true;
-  }
-
-  NdefRecord _buildUriRecord(String uri) {
-    const List<String> prefixes = <String>[
-      '',
-      'http://www.',
-      'https://www.',
-      'http://',
-      'https://',
-    ];
-
-    int prefixIndex = 0;
-    String body = uri;
-    for (int i = prefixes.length - 1; i >= 0; i -= 1) {
-      if (prefixes[i].isNotEmpty && uri.startsWith(prefixes[i])) {
-        prefixIndex = i;
-        body = uri.substring(prefixes[i].length);
-        break;
-      }
-    }
-
-    final List<int> payload = <int>[prefixIndex, ...utf8.encode(body)];
-    return NdefRecord(
-      typeNameFormat: NdefTypeNameFormat.nfcWellknown,
-      type: Uint8List.fromList(<int>[0x55]),
-      identifier: Uint8List(0),
-      payload: Uint8List.fromList(payload),
-    );
   }
 
   @override
   void dispose() {
     _isDisposed = true;
+    if (_isSuppressingDeepLinks) {
+      _isSuppressingDeepLinks = false;
+      NfcDeepLinkService.instance.endTagMaintenance();
+    }
     final NfcSessionLease? lease = _nfcLease;
     _nfcLease = null;
     if (lease != null && lease.isActive && !_isHandlingTag) {
@@ -408,11 +397,14 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
   bool _isReading = false;
   bool _isHandlingTag = false;
   bool _isDisposed = false;
+  bool _isSuppressingDeepLinks = false;
   NfcSessionLease? _nfcLease;
 
   @override
   void initState() {
     super.initState();
+    NfcDeepLinkService.instance.beginTagMaintenance();
+    _isSuppressingDeepLinks = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startSession();
     });
@@ -578,7 +570,7 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
     if (unlockSucceeded) {
       await Future<void>.delayed(const Duration(milliseconds: 380));
       if (mounted && !_isDisposed) {
-        Navigator.of(context).pop(true);
+        _popCurrentRoute(context, true);
       }
     }
   }
@@ -607,6 +599,10 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
   @override
   void dispose() {
     _isDisposed = true;
+    if (_isSuppressingDeepLinks) {
+      _isSuppressingDeepLinks = false;
+      NfcDeepLinkService.instance.endTagMaintenance();
+    }
     final NfcSessionLease? lease = _nfcLease;
     _nfcLease = null;
     if (lease != null && lease.isActive && !_isHandlingTag) {

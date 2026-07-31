@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 enum NfcLaunchEvidence { physicalTag, directLink, unknown }
@@ -42,6 +43,8 @@ class NfcDeepLinkService {
   DateTime _lastRequestAt = DateTime.fromMillisecondsSinceEpoch(0);
   String _lastAcceptedUri = '';
   DateTime _lastAcceptedUriAt = DateTime.fromMillisecondsSinceEpoch(0);
+  int _tagMaintenanceDepth = 0;
+  DateTime _suppressTagRequestsUntil = DateTime.fromMillisecondsSinceEpoch(0);
   bool _initialized = false;
 
   Stream<NfcScanRequest> get requests => _requests.stream;
@@ -49,6 +52,11 @@ class NfcDeepLinkService {
 
   void registerInAppScanStarter(Future<void> Function() startScan) {
     _startInAppScan = startScan;
+  }
+
+  Future<void> requestManualCollectionScan() async {
+    _expectedRescanUserId = null;
+    await _startInAppScan?.call();
   }
 
   Future<void> requestPhysicalRescan(String expectedUserId) async {
@@ -62,6 +70,22 @@ class NfcDeepLinkService {
 
   void cancelPhysicalRescan() {
     _expectedRescanUserId = null;
+  }
+
+  void beginTagMaintenance() {
+    _tagMaintenanceDepth += 1;
+  }
+
+  void endTagMaintenance({Duration cooldown = const Duration(seconds: 3)}) {
+    if (_tagMaintenanceDepth > 0) {
+      _tagMaintenanceDepth -= 1;
+    }
+    if (_tagMaintenanceDepth == 0) {
+      final DateTime until = DateTime.now().add(cooldown);
+      if (until.isAfter(_suppressTagRequestsUntil)) {
+        _suppressTagRequestsUntil = until;
+      }
+    }
   }
 
   Future<void> initialize() async {
@@ -120,6 +144,9 @@ class NfcDeepLinkService {
   }
 
   void publish(NfcScanRequest request) {
+    if (_isTagMaintenanceSuppressed) {
+      return;
+    }
     final String userId = request.userId.trim();
     if (userId.isEmpty) {
       return;
@@ -165,6 +192,20 @@ class NfcDeepLinkService {
     final NfcScanRequest? request = _pending;
     _pending = null;
     return request;
+  }
+
+  bool get _isTagMaintenanceSuppressed =>
+      _tagMaintenanceDepth > 0 ||
+      DateTime.now().isBefore(_suppressTagRequestsUntil);
+
+  @visibleForTesting
+  void resetTagMaintenanceForTest() {
+    _tagMaintenanceDepth = 0;
+    _suppressTagRequestsUntil = DateTime.fromMillisecondsSinceEpoch(0);
+    _pending = null;
+    _lastPublishedRequest = null;
+    _lastRequestKey = '';
+    _lastRequestAt = DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   Future<_NfcLaunchData> _takeNativeLaunchData() async {
