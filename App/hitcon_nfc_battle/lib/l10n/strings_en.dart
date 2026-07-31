@@ -254,6 +254,12 @@ const Map<String, String> appStringsEn = <String, String>{
   'ntagWriteLocked':
       'The user ID was written and the NTAG was password protected.',
   'nfcReadFailed': 'NFC read failed: {error}',
+  'nfcScanCanceled': 'Scan canceled.',
+  'nfcScanTimedOut': 'No card was detected before the scan timed out.',
+  'nfcSystemBusy': 'NFC is being used by another operation. Try again.',
+  'nfcUnknownError': 'An unexpected NFC error occurred. Try again.',
+  'nfcTagUpdateFailed':
+      'Could not write the card. It may be protected or no longer in range.',
   'nfcSessionBusy': 'Another NFC operation is still finishing. Try again.',
   'ntagPairingPageTitle': 'Pair NTAG Badge',
   'holdBadgeNearPhone': 'Hold your Badge near the phone',

@@ -7,6 +7,7 @@ import 'package:nfc_manager/nfc_manager.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/nfc_deep_link_service.dart';
+import '../../services/nfc_error_messages.dart';
 import '../../services/nfc_session_controller.dart';
 import '../../services/nfc_tag_payload.dart';
 import '../../services/ntag_security_service.dart';
@@ -259,20 +260,18 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
             setState(() {
               _isWriting = false;
               _lastUid = uid.isEmpty ? '-' : uid;
-              _status = l10n.tr('writeFailed', <String, Object?>{
-                'error': error,
-              });
+              _status = nfcWriteErrorMessage(l10n, error);
             });
           }
         },
-        onError: (dynamic error) async {
+        onError: (NfcError error) async {
           await _nfcSession.stop(activeSession);
           if (!mounted) {
             return;
           }
           setState(() {
             _isWriting = false;
-            _status = l10n.tr('nfcError', <String, Object?>{'error': error});
+            _status = nfcSessionErrorMessage(l10n, error);
           });
         },
       );
@@ -283,7 +282,7 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
       if (mounted) {
         setState(() {
           _isWriting = false;
-          _status = l10n.tr('nfcError', <String, Object?>{'error': error});
+          _status = nfcSessionErrorMessage(l10n, error);
         });
       }
     }
@@ -451,14 +450,14 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
             _claimCode = result['claim_code'] as String? ?? '-';
           });
         },
-        onError: (dynamic error) async {
+        onError: (NfcError error) async {
           await _nfcSession.stop(activeSession);
           if (!mounted) {
             return;
           }
           setState(() {
             _isScanning = false;
-            _status = l10n.tr('nfcError', <String, Object?>{'error': error});
+            _status = nfcSessionErrorMessage(l10n, error);
           });
         },
       );
@@ -469,7 +468,7 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
       if (mounted) {
         setState(() {
           _isScanning = false;
-          _status = l10n.tr('nfcError', <String, Object?>{'error': error});
+          _status = nfcSessionErrorMessage(l10n, error);
         });
       }
     }
@@ -665,12 +664,10 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
           }
           unawaited(_finishUnlockHandling(activeSession));
         },
-        onError: (dynamic error) async {
+        onError: (NfcError error) async {
           await _finishUnlockHandling(
             activeSession,
-            errorMessage: l10n.tr('nfcError', <String, Object?>{
-              'error': error,
-            }),
+            errorMessage: nfcSessionErrorMessage(l10n, error),
           );
         },
       );
@@ -678,14 +675,14 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
       if (sessionGeneration != null) {
         await _finishUnlockHandling(
           sessionGeneration,
-          errorMessage: l10n.tr('nfcError', <String, Object?>{'error': error}),
+          errorMessage: nfcSessionErrorMessage(l10n, error),
         );
       } else {
         _endDeepLinkSuppression();
         if (mounted) {
           setState(() {
             _isUnlocking = false;
-            _status = l10n.tr('nfcError', <String, Object?>{'error': error});
+            _status = nfcSessionErrorMessage(l10n, error);
           });
         }
       }

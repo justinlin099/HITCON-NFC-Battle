@@ -13,6 +13,7 @@ import 'pages/user/setup_page.dart';
 import 'pages/debug/test_login_page.dart';
 import 'services/auth_service.dart';
 import 'services/nfc_deep_link_service.dart';
+import 'services/nfc_error_messages.dart';
 import 'services/nfc_session_controller.dart';
 import 'services/nfc_tag_payload.dart';
 import 'services/ntag_security_service.dart';
@@ -654,9 +655,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
                     ? l10n.tr('uriWritten')
                     : l10n.tr('tagNotWritableShort');
               } catch (e) {
-                writeMessage = l10n.tr('writeFailed', <String, Object?>{
-                  'error': e,
-                });
+                writeMessage = nfcWriteErrorMessage(l10n, e);
               }
             }
           }
@@ -672,16 +671,14 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
             });
           }
         },
-        onError: (dynamic error) async {
+        onError: (NfcError error) async {
           if (!acquiredLease.isActive || _isDisposed) {
             return;
           }
           await _stopOwnedReaderSession(acquiredLease);
           if (mounted) {
             setState(() {
-              _status = l10n.tr('nfcReadFailed', <String, Object?>{
-                'error': error,
-              });
+              _status = nfcSessionErrorMessage(l10n, error);
               _isReading = false;
             });
           }
@@ -693,7 +690,7 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
       }
       if (mounted) {
         setState(() {
-          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
+          _status = nfcSessionErrorMessage(l10n, error);
           _isReading = false;
         });
       }
