@@ -7,6 +7,7 @@ import 'package:nfc_manager/nfc_manager.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/nfc_deep_link_service.dart';
+import '../../services/nfc_session_controller.dart';
 import '../../services/nfc_tag_payload.dart';
 import '../../services/ntag_security_service.dart';
 import '../../widgets/admin_mode_switch_button.dart';
@@ -14,6 +15,81 @@ import '../user/pixel_theme.dart';
 import 'admin_pair_user_tag_page.dart';
 import 'admin_print_cards_page.dart';
 import 'admin_scoreboard_control_page.dart';
+
+Future<void> _stopNfcSessionQuietly() async {
+  try {
+    await NfcManager.instance.stopSession();
+  } catch (_) {
+    // The platform session may already be closed.
+  }
+}
+
+class _AdminNfcSession {
+  NfcSessionLease? _lease;
+  int _generation = 0;
+  int? _activeGeneration;
+
+  bool isActive(int generation) =>
+      _activeGeneration == generation && _lease?.isActive == true;
+
+  Future<int?> acquire({required NfcSessionCleanup onPreempt}) async {
+    final int generation = ++_generation;
+    final NfcSessionLease? lease = await NfcSessionController.instance.acquire(
+      NfcSessionOwner.ntagReader,
+      preemptExisting: true,
+      onPreempt: () async {
+        if (_activeGeneration == generation) {
+          _lease = null;
+          _activeGeneration = null;
+        }
+        await _stopNfcSessionQuietly();
+        await Future<void>.sync(onPreempt);
+      },
+    );
+    if (lease == null) {
+      return null;
+    }
+    if (!lease.isActive) {
+      return null;
+    }
+
+    _lease = lease;
+    _activeGeneration = generation;
+    await _stopNfcSessionQuietly();
+    if (!lease.isActive) {
+      lease.release();
+      if (_activeGeneration == generation) {
+        _activeGeneration = null;
+      }
+      return null;
+    }
+    return generation;
+  }
+
+  Future<void> stop([int? generation]) async {
+    if (generation != null && _activeGeneration != generation) {
+      return;
+    }
+
+    final NfcSessionLease? lease = _lease;
+    _lease = null;
+    _activeGeneration = null;
+    if (lease == null || !lease.isActive) {
+      lease?.release();
+      return;
+    }
+
+    try {
+      await _stopNfcSessionQuietly();
+    } finally {
+      lease.release();
+    }
+  }
+
+  void dispose() {
+    unawaited(stop());
+  }
+}
 
 class AdminHomePage extends StatefulWidget {
   const AdminHomePage({super.key});
@@ -27,7 +103,6 @@ class _AdminHomePageState extends State<AdminHomePage> {
   void initState() {
     super.initState();
     PixelTheme.active = PixelTheme.getPalette(PixelTheme.defaultScheme);
-    NfcManager.instance.stopSession();
   }
 
   @override
@@ -90,6 +165,7 @@ class AdminTagWriterPage extends StatefulWidget {
 class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
   static const String _blankAppUri = 'https://game.hitcon2026.online/b';
 
+  final _AdminNfcSession _nfcSession = _AdminNfcSession();
   String _status = '';
   String _lastUid = '-';
   bool _isWriting = false;
@@ -104,7 +180,7 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
 
   @override
   void dispose() {
-    NfcManager.instance.stopSession();
+    _nfcSession.dispose();
     super.dispose();
   }
 
@@ -114,72 +190,113 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
     }
 
     final AppLocalizations l10n = context.l10n;
-    final bool isAvailable = await NfcManager.instance.isAvailable();
-    if (!isAvailable) {
-      setState(() {
-        _status = l10n.tr('nfcUnavailable');
-      });
-      return;
-    }
-
     setState(() {
       _isWriting = true;
       _status = l10n.tr('holdTagToWrite');
       _lastUid = '-';
     });
 
-    await NfcManager.instance.stopSession();
-    await NfcManager.instance.startSession(
-      onDiscovered: (NfcTag tag) async {
-        final String uid = _readTagId(tag);
-        final Ndef? ndef = Ndef.from(tag);
-        if (ndef == null || !ndef.isWritable) {
-          await NfcManager.instance.stopSession();
-          if (!mounted) {
-            return;
-          }
+    int? sessionGeneration;
+    try {
+      final bool isAvailable = await NfcManager.instance.isAvailable();
+      if (!isAvailable) {
+        if (mounted) {
           setState(() {
             _isWriting = false;
-            _lastUid = uid.isEmpty ? '-' : uid;
-            _status = l10n.tr('tagNotWritable');
+            _status = l10n.tr('nfcUnavailable');
           });
-          return;
         }
+        return;
+      }
 
-        try {
-          await ndef.write(_buildTagMessage());
-          await NfcManager.instance.stopSession();
+      sessionGeneration = await _nfcSession.acquire(
+        onPreempt: _handlePreempted,
+      );
+      if (sessionGeneration == null) {
+        if (mounted) {
+          setState(() {
+            _isWriting = false;
+            _status = l10n.tr('nfcSessionBusy');
+          });
+        }
+        return;
+      }
+      final int activeSession = sessionGeneration;
+
+      await NfcManager.instance.startSession(
+        onDiscovered: (NfcTag tag) async {
+          final String uid = _readTagId(tag);
+          final Ndef? ndef = Ndef.from(tag);
+          if (ndef == null || !ndef.isWritable) {
+            await _nfcSession.stop(activeSession);
+            if (!mounted) {
+              return;
+            }
+            setState(() {
+              _isWriting = false;
+              _lastUid = uid.isEmpty ? '-' : uid;
+              _status = l10n.tr('tagNotWritable');
+            });
+            return;
+          }
+
+          try {
+            await ndef.write(_buildTagMessage());
+            await _nfcSession.stop(activeSession);
+            if (!mounted) {
+              return;
+            }
+            setState(() {
+              _isWriting = false;
+              _lastUid = uid.isEmpty ? '-' : uid;
+              _status = l10n.tr('writeComplete');
+            });
+          } catch (error) {
+            await _nfcSession.stop(activeSession);
+            if (!mounted) {
+              return;
+            }
+            setState(() {
+              _isWriting = false;
+              _lastUid = uid.isEmpty ? '-' : uid;
+              _status = l10n.tr('writeFailed', <String, Object?>{
+                'error': error,
+              });
+            });
+          }
+        },
+        onError: (dynamic error) async {
+          await _nfcSession.stop(activeSession);
           if (!mounted) {
             return;
           }
           setState(() {
             _isWriting = false;
-            _lastUid = uid.isEmpty ? '-' : uid;
-            _status = l10n.tr('writeComplete');
+            _status = l10n.tr('nfcError', <String, Object?>{'error': error});
           });
-        } catch (error) {
-          await NfcManager.instance.stopSession();
-          if (!mounted) {
-            return;
-          }
-          setState(() {
-            _isWriting = false;
-            _lastUid = uid.isEmpty ? '-' : uid;
-            _status = l10n.tr('writeFailed', <String, Object?>{'error': error});
-          });
-        }
-      },
-      onError: (dynamic error) async {
-        await NfcManager.instance.stopSession();
-        if (!mounted) {
-          return;
-        }
+        },
+      );
+    } catch (error) {
+      if (sessionGeneration != null) {
+        await _nfcSession.stop(sessionGeneration);
+      }
+      if (mounted) {
         setState(() {
           _isWriting = false;
           _status = l10n.tr('nfcError', <String, Object?>{'error': error});
         });
-      },
-    );
+      }
+    }
+  }
+
+  Future<void> _handlePreempted() async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isWriting = false;
+      _status = context.l10n.tr('nfcSessionBusy');
+    });
   }
 
   NdefMessage _buildTagMessage() {
@@ -243,6 +360,7 @@ class AdminPrizeClaimPage extends StatefulWidget {
 
 class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
   final AuthService _authService = AuthService();
+  final _AdminNfcSession _nfcSession = _AdminNfcSession();
   String _status = '';
   String _lastUid = '-';
   String _lastUserId = '-';
@@ -259,7 +377,7 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
 
   @override
   void dispose() {
-    NfcManager.instance.stopSession();
+    _nfcSession.dispose();
     super.dispose();
   }
 
@@ -269,14 +387,6 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
     }
 
     final AppLocalizations l10n = context.l10n;
-    final bool isAvailable = await NfcManager.instance.isAvailable();
-    if (!isAvailable) {
-      setState(() {
-        _status = l10n.tr('nfcUnavailable');
-      });
-      return;
-    }
-
     setState(() {
       _isScanning = true;
       _status = l10n.tr('scanAttendeeTag');
@@ -285,57 +395,104 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
       _claimCode = '-';
     });
 
-    await NfcManager.instance.stopSession();
-    await NfcManager.instance.startSession(
-      onDiscovered: (NfcTag tag) async {
-        final String uid = _readTagId(tag);
-        final Map<String, String> records = await _readTextRecords(tag);
-        final String userId = records['user_id'] ?? records['owner'] ?? '';
-        final Map<String, dynamic>? result = await _authService
-            .confirmPrizeClaim(tagUid: uid, userId: userId);
-
-        await NfcManager.instance.stopSession();
-        if (!mounted) {
-          return;
+    int? sessionGeneration;
+    try {
+      final bool isAvailable = await NfcManager.instance.isAvailable();
+      if (!isAvailable) {
+        if (mounted) {
+          setState(() {
+            _isScanning = false;
+            _status = l10n.tr('nfcUnavailable');
+          });
         }
+        return;
+      }
 
-        setState(() {
-          _isScanning = false;
-          _lastUid = uid.isEmpty ? '-' : uid;
-          _lastUserId = userId.isEmpty ? l10n.tr('tagHasNoUserId') : userId;
-          if (result == null) {
-            _status = l10n.tr('claimFailed');
-            _claimCode = '-';
+      sessionGeneration = await _nfcSession.acquire(
+        onPreempt: _handlePreempted,
+      );
+      if (sessionGeneration == null) {
+        if (mounted) {
+          setState(() {
+            _isScanning = false;
+            _status = l10n.tr('nfcSessionBusy');
+          });
+        }
+        return;
+      }
+      final int activeSession = sessionGeneration;
+
+      await NfcManager.instance.startSession(
+        onDiscovered: (NfcTag tag) async {
+          final String uid = _readTagId(tag);
+          final Map<String, String> records = await _readTextRecords(tag);
+          final String userId = records['user_id'] ?? records['owner'] ?? '';
+          final Map<String, dynamic>? result = await _authService
+              .confirmPrizeClaim(tagUid: uid, userId: userId);
+
+          await _nfcSession.stop(activeSession);
+          if (!mounted) {
             return;
           }
-          final bool alreadyClaimed = result['already_claimed'] == true;
-          _status = l10n.tr(
-            alreadyClaimed ? 'alreadyClaimed' : 'claimComplete',
-          );
-          _claimCode = result['claim_code'] as String? ?? '-';
-        });
-      },
-      onError: (dynamic error) async {
-        await NfcManager.instance.stopSession();
-        if (!mounted) {
-          return;
-        }
+
+          setState(() {
+            _isScanning = false;
+            _lastUid = uid.isEmpty ? '-' : uid;
+            _lastUserId = userId.isEmpty ? l10n.tr('tagHasNoUserId') : userId;
+            if (result == null) {
+              _status = l10n.tr('claimFailed');
+              _claimCode = '-';
+              return;
+            }
+            final bool alreadyClaimed = result['already_claimed'] == true;
+            _status = l10n.tr(
+              alreadyClaimed ? 'alreadyClaimed' : 'claimComplete',
+            );
+            _claimCode = result['claim_code'] as String? ?? '-';
+          });
+        },
+        onError: (dynamic error) async {
+          await _nfcSession.stop(activeSession);
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _isScanning = false;
+            _status = l10n.tr('nfcError', <String, Object?>{'error': error});
+          });
+        },
+      );
+    } catch (error) {
+      if (sessionGeneration != null) {
+        await _nfcSession.stop(sessionGeneration);
+      }
+      if (mounted) {
         setState(() {
           _isScanning = false;
           _status = l10n.tr('nfcError', <String, Object?>{'error': error});
         });
-      },
-    );
+      }
+    }
   }
 
   Future<void> _stopScan() async {
-    await NfcManager.instance.stopSession();
+    await _nfcSession.stop();
     if (!mounted) {
       return;
     }
     setState(() {
       _isScanning = false;
       _status = context.l10n.tr('scanStopped');
+    });
+  }
+
+  Future<void> _handlePreempted() async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isScanning = false;
+      _status = context.l10n.tr('nfcSessionBusy');
     });
   }
 
@@ -381,6 +538,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
   static const NtagSecurityService _security = NtagSecurityService();
   static const Duration _tagDisposalGracePeriod = Duration(milliseconds: 400);
 
+  final _AdminNfcSession _nfcSession = _AdminNfcSession();
   String _status = '';
   String _lastUid = '-';
   String _lastUserId = '-';
@@ -403,7 +561,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
     _isDisposed = true;
     _endDeepLinkSuppression();
     if (!_isHandlingTag) {
-      unawaited(_stopNfcSessionQuietly());
+      _nfcSession.dispose();
     }
     super.dispose();
   }
@@ -442,12 +600,29 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
       _lastUserId = '-';
     });
 
-    await _stopNfcSessionQuietly();
+    int? sessionGeneration;
     try {
+      sessionGeneration = await _nfcSession.acquire(
+        onPreempt: _handlePreempted,
+      );
+      if (sessionGeneration == null) {
+        _endDeepLinkSuppression();
+        if (mounted) {
+          setState(() {
+            _isUnlocking = false;
+            _status = l10n.tr('nfcSessionBusy');
+          });
+        }
+        return;
+      }
+      final int activeSession = sessionGeneration;
+
       await NfcManager.instance.startSession(
         pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
         onDiscovered: (NfcTag tag) async {
-          if (_isHandlingTag || _isDisposed) {
+          if (!_nfcSession.isActive(activeSession) ||
+              _isHandlingTag ||
+              _isDisposed) {
             return;
           }
           _isHandlingTag = true;
@@ -479,7 +654,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
             );
           }
 
-          if (mounted) {
+          if (mounted && _nfcSession.isActive(activeSession)) {
             setState(() {
               _lastUid = uid.isEmpty ? '-' : uid;
               _lastUserId = records['user_id']?.trim().isNotEmpty == true
@@ -488,10 +663,11 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
               _status = l10n.tr(result.messageKey, result.values);
             });
           }
-          unawaited(_finishUnlockHandling());
+          unawaited(_finishUnlockHandling(activeSession));
         },
         onError: (dynamic error) async {
           await _finishUnlockHandling(
+            activeSession,
             errorMessage: l10n.tr('nfcError', <String, Object?>{
               'error': error,
             }),
@@ -499,9 +675,20 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
         },
       );
     } catch (error) {
-      await _finishUnlockHandling(
-        errorMessage: l10n.tr('nfcError', <String, Object?>{'error': error}),
-      );
+      if (sessionGeneration != null) {
+        await _finishUnlockHandling(
+          sessionGeneration,
+          errorMessage: l10n.tr('nfcError', <String, Object?>{'error': error}),
+        );
+      } else {
+        _endDeepLinkSuppression();
+        if (mounted) {
+          setState(() {
+            _isUnlocking = false;
+            _status = l10n.tr('nfcError', <String, Object?>{'error': error});
+          });
+        }
+      }
     }
   }
 
@@ -509,7 +696,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
     if (_isHandlingTag) {
       return;
     }
-    await _stopNfcSessionQuietly();
+    await _nfcSession.stop();
     _endDeepLinkSuppression();
     if (!mounted) {
       return;
@@ -520,13 +707,20 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
     });
   }
 
-  Future<void> _finishUnlockHandling({String? errorMessage}) async {
-    if (_isFinishingUnlock) {
+  Future<void> _finishUnlockHandling(
+    int sessionGeneration, {
+    String? errorMessage,
+  }) async {
+    if (_isFinishingUnlock || !_nfcSession.isActive(sessionGeneration)) {
       return;
     }
     _isFinishingUnlock = true;
     await Future<void>.delayed(_tagDisposalGracePeriod);
-    await _stopNfcSessionQuietly();
+    if (!_nfcSession.isActive(sessionGeneration)) {
+      _isFinishingUnlock = false;
+      return;
+    }
+    await _nfcSession.stop(sessionGeneration);
     _isHandlingTag = false;
     _endDeepLinkSuppression();
     if (!mounted || _isDisposed) {
@@ -541,12 +735,17 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
     });
   }
 
-  Future<void> _stopNfcSessionQuietly() async {
-    try {
-      await NfcManager.instance.stopSession();
-    } catch (_) {
-      // The Android tag can already be disposed after a completed callback.
+  Future<void> _handlePreempted() async {
+    _isHandlingTag = false;
+    _isFinishingUnlock = false;
+    _endDeepLinkSuppression();
+    if (!mounted || _isDisposed) {
+      return;
     }
+    setState(() {
+      _isUnlocking = false;
+      _status = context.l10n.tr('nfcSessionBusy');
+    });
   }
 
   void _beginDeepLinkSuppression() {

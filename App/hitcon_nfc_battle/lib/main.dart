@@ -13,6 +13,7 @@ import 'pages/user/setup_page.dart';
 import 'pages/debug/test_login_page.dart';
 import 'services/auth_service.dart';
 import 'services/nfc_deep_link_service.dart';
+import 'services/nfc_session_controller.dart';
 import 'services/nfc_tag_payload.dart';
 import 'services/ntag_security_service.dart';
 import 'services/remote_app_config_service.dart';
@@ -184,56 +185,86 @@ class _AutoNtagScanner {
   final NfcDeepLinkService deepLinks;
   static const NtagSecurityService _ntagSecurity = NtagSecurityService();
   bool _isScanning = false;
+  bool _isStarting = false;
   bool _isHandling = false;
+  bool _isDisposed = false;
+  NfcSessionLease? _nfcLease;
   String _lastTagId = '';
   DateTime _lastReadTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   Future<void> start() async {
-    if (_isScanning) {
+    if (_isStarting || _isScanning || _isDisposed) {
       return;
     }
 
-    final bool isAvailable = await NfcManager.instance.isAvailable();
-    if (!isAvailable) {
-      return;
+    _isStarting = true;
+    NfcSessionLease? lease;
+    try {
+      final bool isAvailable = await NfcManager.instance.isAvailable();
+      if (!isAvailable || _isDisposed) {
+        return;
+      }
+
+      lease = await NfcSessionController.instance.acquire(
+        NfcSessionOwner.collectionScanner,
+        onPreempt: _stopForPreempt,
+      );
+      if (lease == null || _isDisposed) {
+        lease?.release();
+        return;
+      }
+
+      final NfcSessionLease acquiredLease = lease;
+      if (!acquiredLease.isActive) {
+        return;
+      }
+      _nfcLease = acquiredLease;
+      _isScanning = true;
+      await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
+        alertMessage: '請將卡片靠近 iPhone 頂部',
+        onDiscovered: (NfcTag tag) async {
+          if (!acquiredLease.isActive || _isHandling || _isDisposed) {
+            return;
+          }
+
+          final String uid = _ntagSecurity.readTagId(tag);
+          final DateTime now = DateTime.now();
+          final bool isDuplicate =
+              uid.isNotEmpty &&
+              uid == _lastTagId &&
+              now.difference(_lastReadTime).inMilliseconds < 1200;
+          if (isDuplicate) {
+            return;
+          }
+
+          _lastTagId = uid;
+          _lastReadTime = now;
+          _isHandling = true;
+
+          try {
+            await _stopOwnedSession(acquiredLease);
+            final String targetUserId = _readTargetUserId(tag);
+            await _handleScan(uid, targetUserId);
+          } finally {
+            _isHandling = false;
+          }
+        },
+        onError: (_) async {
+          if (!acquiredLease.isActive || _isDisposed) {
+            return;
+          }
+          await _stopOwnedSession(acquiredLease);
+          _isHandling = false;
+        },
+      );
+    } catch (_) {
+      if (lease != null) {
+        await _stopOwnedSession(lease);
+      }
+    } finally {
+      _isStarting = false;
     }
-
-    _isScanning = true;
-    await NfcManager.instance.startSession(
-      pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
-      alertMessage: '請將卡片靠近 iPhone 頂部',
-      onDiscovered: (NfcTag tag) async {
-        if (_isHandling) {
-          return;
-        }
-
-        final String uid = _ntagSecurity.readTagId(tag);
-        final DateTime now = DateTime.now();
-        final bool isDuplicate =
-            uid.isNotEmpty &&
-            uid == _lastTagId &&
-            now.difference(_lastReadTime).inMilliseconds < 1200;
-        if (isDuplicate) {
-          return;
-        }
-
-        _lastTagId = uid;
-        _lastReadTime = now;
-        _isHandling = true;
-
-        await NfcManager.instance.stopSession();
-        _isScanning = false;
-
-        final String targetUserId = _readTargetUserId(tag);
-        await _handleScan(uid, targetUserId);
-        _isHandling = false;
-      },
-      onError: (_) async {
-        await NfcManager.instance.stopSession();
-        _isScanning = false;
-        _isHandling = false;
-      },
-    );
   }
 
   Future<void> _handleScan(String uid, String targetUserId) async {
@@ -299,8 +330,52 @@ class _AutoNtagScanner {
     return '$prefix$uriBody';
   }
 
+  Future<void> _stopOwnedSession(NfcSessionLease lease) async {
+    if (!lease.isActive) {
+      if (identical(_nfcLease, lease)) {
+        _nfcLease = null;
+      }
+      _isScanning = false;
+      return;
+    }
+
+    try {
+      await NfcManager.instance.stopSession();
+    } catch (_) {
+      // The session may already have been stopped by iOS.
+    } finally {
+      if (identical(_nfcLease, lease)) {
+        _nfcLease = null;
+      }
+      _isScanning = false;
+      lease.release();
+    }
+  }
+
+  Future<void> _stopForPreempt() async {
+    _nfcLease = null;
+    _isScanning = false;
+    _isHandling = false;
+    try {
+      await NfcManager.instance.stopSession();
+    } catch (_) {
+      // The new owner can continue even if the old iOS sheet already closed.
+    }
+  }
+
   void dispose() {
-    NfcManager.instance.stopSession();
+    _isDisposed = true;
+    final NfcSessionLease? lease = _nfcLease;
+    _nfcLease = null;
+    _isScanning = false;
+    if (lease != null && lease.isActive) {
+      unawaited(
+        NfcManager.instance
+            .stopSession()
+            .catchError((_) {})
+            .whenComplete(lease.release),
+      );
+    }
   }
 }
 
@@ -326,7 +401,10 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   List<String> _records = <String>[];
   String _lastIncomingUri = '-';
   bool _isReading = false;
+  bool _isStartingRead = false;
+  bool _isDisposed = false;
   bool _autoWriteEnabled = true;
+  NfcSessionLease? _nfcLease;
   String _lastTagId = '';
   DateTime _lastReadTime = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -460,109 +538,202 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
   }
 
   Future<void> _startAutoRead() async {
+    if (_isReading || _isStartingRead || _isDisposed) {
+      return;
+    }
+
+    _isStartingRead = true;
     final AppLocalizations l10n = context.l10n;
-    final bool isAvailable = await NfcManager.instance.isAvailable();
-    if (!isAvailable) {
-      setState(() {
-        _status = l10n.tr('nfcUnavailable');
-        _isReading = false;
-      });
-      return;
-    }
-
-    if (_isReading) {
-      return;
-    }
-
-    setState(() {
-      _isReading = true;
-      _status = l10n.tr('autoReadingNtag');
-      _tagId = '-';
-      _records = <String>[];
-    });
-
-    await NfcManager.instance.startSession(
-      onDiscovered: (NfcTag tag) async {
-        final Map<String, dynamic> data = tag.data;
-        final dynamic idBytes =
-            data['nfca']?['identifier'] ??
-            data['mifareclassic']?['identifier'] ??
-            data['mifareultralight']?['identifier'];
-
-        final String parsedTagId = _toHexString(idBytes);
-        final DateTime now = DateTime.now();
-        final bool isDuplicateRead =
-            parsedTagId.isNotEmpty &&
-            parsedTagId == _lastTagId &&
-            now.difference(_lastReadTime).inMilliseconds < 1200;
-
-        if (isDuplicateRead) {
-          return;
+    NfcSessionLease? lease;
+    try {
+      final bool isAvailable = await NfcManager.instance.isAvailable();
+      if (!isAvailable || _isDisposed) {
+        if (mounted) {
+          setState(() {
+            _status = l10n.tr('nfcUnavailable');
+            _isReading = false;
+          });
         }
+        return;
+      }
 
-        _lastTagId = parsedTagId;
-        _lastReadTime = now;
+      lease = await NfcSessionController.instance.acquire(
+        NfcSessionOwner.ntagReader,
+        preemptExisting: true,
+        onPreempt: _handleReaderPreempted,
+      );
+      if (lease == null || _isDisposed) {
+        lease?.release();
+        if (mounted) {
+          setState(() {
+            _status = l10n.tr('nfcSessionBusy');
+            _isReading = false;
+          });
+        }
+        return;
+      }
 
-        final Ndef? ndef = Ndef.from(tag);
-        final List<String> parsedRecords = <String>[];
-        final List<String> existingSecrets = <String>[];
+      final NfcSessionLease acquiredLease = lease;
+      _nfcLease = acquiredLease;
+      await _stopNfcSessionQuietly();
+      if (!acquiredLease.isActive || _isDisposed) {
+        acquiredLease.release();
+        return;
+      }
 
-        if (ndef != null) {
-          final NdefMessage? message = ndef.cachedMessage;
-          if (message != null) {
-            for (final NdefRecord record in message.records) {
-              parsedRecords.add(_parseRecord(record));
-              final String? secret = _extractSecretKeyFromRecord(record);
-              if (secret != null) {
-                existingSecrets.add(secret);
+      if (mounted) {
+        setState(() {
+          _isReading = true;
+          _status = l10n.tr('autoReadingNtag');
+          _tagId = '-';
+          _records = <String>[];
+        });
+      }
+
+      await NfcManager.instance.startSession(
+        onDiscovered: (NfcTag tag) async {
+          if (!acquiredLease.isActive || _isDisposed) {
+            return;
+          }
+
+          final Map<String, dynamic> data = tag.data;
+          final dynamic idBytes =
+              data['nfca']?['identifier'] ??
+              data['mifareclassic']?['identifier'] ??
+              data['mifareultralight']?['identifier'];
+
+          final String parsedTagId = _toHexString(idBytes);
+          final DateTime now = DateTime.now();
+          final bool isDuplicateRead =
+              parsedTagId.isNotEmpty &&
+              parsedTagId == _lastTagId &&
+              now.difference(_lastReadTime).inMilliseconds < 1200;
+
+          if (isDuplicateRead) {
+            return;
+          }
+
+          _lastTagId = parsedTagId;
+          _lastReadTime = now;
+
+          final Ndef? ndef = Ndef.from(tag);
+          final List<String> parsedRecords = <String>[];
+          final List<String> existingSecrets = <String>[];
+
+          if (ndef != null) {
+            final NdefMessage? message = ndef.cachedMessage;
+            if (message != null) {
+              for (final NdefRecord record in message.records) {
+                parsedRecords.add(_parseRecord(record));
+                final String? secret = _extractSecretKeyFromRecord(record);
+                if (secret != null) {
+                  existingSecrets.add(secret);
+                }
               }
             }
           }
-        }
 
-        String writeMessage = '';
-        if (_autoWriteEnabled) {
-          final String targetUri = _buildTargetUri();
-          final String targetSecret = _secretKeyController.text.trim();
-          final bool uriMatches = parsedRecords.contains(targetUri);
-          final bool secretMatches = targetSecret.isEmpty
-              ? existingSecrets.isEmpty
-              : existingSecrets.length == 1 &&
-                    existingSecrets.first == targetSecret;
+          String writeMessage = '';
+          if (_autoWriteEnabled) {
+            final String targetUri = _buildTargetUri();
+            final String targetSecret = _secretKeyController.text.trim();
+            final bool uriMatches = parsedRecords.contains(targetUri);
+            final bool secretMatches = targetSecret.isEmpty
+                ? existingSecrets.isEmpty
+                : existingSecrets.length == 1 &&
+                      existingSecrets.first == targetSecret;
 
-          if (uriMatches && secretMatches) {
-            writeMessage = targetSecret.isEmpty
-                ? l10n.tr('tagAlreadyTarget')
-                : l10n.tr('tagAlreadyTargetSecret');
-          } else {
-            try {
-              final bool writeSuccess = await _writeUriToTag(tag, targetUri);
-              writeMessage = writeSuccess
-                  ? l10n.tr('uriWritten')
-                  : l10n.tr('tagNotWritableShort');
-            } catch (e) {
-              writeMessage = l10n.tr('writeFailed', <String, Object?>{
-                'error': e,
-              });
+            if (uriMatches && secretMatches) {
+              writeMessage = targetSecret.isEmpty
+                  ? l10n.tr('tagAlreadyTarget')
+                  : l10n.tr('tagAlreadyTargetSecret');
+            } else {
+              try {
+                final bool writeSuccess = await _writeUriToTag(tag, targetUri);
+                writeMessage = writeSuccess
+                    ? l10n.tr('uriWritten')
+                    : l10n.tr('tagNotWritableShort');
+              } catch (e) {
+                writeMessage = l10n.tr('writeFailed', <String, Object?>{
+                  'error': e,
+                });
+              }
             }
           }
-        }
 
-        setState(() {
-          _tagId = parsedTagId.isEmpty ? l10n.tr('tagIdMissing') : parsedTagId;
-          _records = parsedRecords;
-          _status =
-              '${l10n.tr(parsedRecords.isEmpty ? 'tagReadNoNdef' : 'tagReadWaiting')} $writeMessage';
-        });
-      },
-      onError: (dynamic error) async {
+          if (mounted) {
+            setState(() {
+              _tagId = parsedTagId.isEmpty
+                  ? l10n.tr('tagIdMissing')
+                  : parsedTagId;
+              _records = parsedRecords;
+              _status =
+                  '${l10n.tr(parsedRecords.isEmpty ? 'tagReadNoNdef' : 'tagReadWaiting')} $writeMessage';
+            });
+          }
+        },
+        onError: (dynamic error) async {
+          if (!acquiredLease.isActive || _isDisposed) {
+            return;
+          }
+          await _stopOwnedReaderSession(acquiredLease);
+          if (mounted) {
+            setState(() {
+              _status = l10n.tr('nfcReadFailed', <String, Object?>{
+                'error': error,
+              });
+              _isReading = false;
+            });
+          }
+        },
+      );
+    } catch (error) {
+      if (lease != null) {
+        await _stopOwnedReaderSession(lease);
+      }
+      if (mounted) {
         setState(() {
           _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
           _isReading = false;
         });
-        await NfcManager.instance.stopSession();
-      },
-    );
+      }
+    } finally {
+      _isStartingRead = false;
+    }
+  }
+
+  Future<void> _stopNfcSessionQuietly() async {
+    try {
+      await NfcManager.instance.stopSession();
+    } catch (_) {
+      // The platform session may already be closed.
+    }
+  }
+
+  Future<void> _stopOwnedReaderSession(NfcSessionLease lease) async {
+    if (!lease.isActive) {
+      return;
+    }
+    try {
+      await _stopNfcSessionQuietly();
+    } finally {
+      if (identical(_nfcLease, lease)) {
+        _nfcLease = null;
+      }
+      lease.release();
+      _isReading = false;
+    }
+  }
+
+  Future<void> _handleReaderPreempted() async {
+    _nfcLease = null;
+    _isReading = false;
+    await _stopNfcSessionQuietly();
+    if (mounted && !_isDisposed) {
+      setState(() {
+        _status = context.l10n.tr('nfcSessionBusy');
+      });
+    }
   }
 
   String _toHexString(dynamic bytes) {
@@ -635,10 +806,15 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
 
   @override
   void dispose() {
+    _isDisposed = true;
     _linkSubscription?.cancel();
     _userIdController.dispose();
     _secretKeyController.dispose();
-    NfcManager.instance.stopSession();
+    final NfcSessionLease? lease = _nfcLease;
+    _nfcLease = null;
+    if (lease != null && lease.isActive) {
+      unawaited(_stopNfcSessionQuietly().whenComplete(lease.release));
+    }
     super.dispose();
   }
 
