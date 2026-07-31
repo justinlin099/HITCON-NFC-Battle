@@ -200,6 +200,8 @@ class _AutoNtagScanner {
 
     _isScanning = true;
     await NfcManager.instance.startSession(
+      pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
+      alertMessage: '請將卡片靠近 iPhone 頂部',
       onDiscovered: (NfcTag tag) async {
         if (_isHandling) {
           return;
