@@ -25,7 +25,7 @@ import { errorResponse, success, successMessage } from "./responses";
 import { requireStaffDangerToken, requireStaffRole } from "./staff";
 import { getPrintCard } from "./print-card-store";
 import type { AppEnv } from "./types";
-import { getSelfProfile, getUserRow } from "./user-store";
+import { getUserNfcTagKey, getUserRow } from "./user-store";
 import { getUserTags, pairUserTag, unpairUserTag } from "./tag-store";
 
 const staffRoutes = new Hono<AppEnv>();
@@ -166,15 +166,15 @@ staffRoutes.post("/nfc-unlock-code", async (c) => {
   //   return errorResponse(c, 403, "PHYSICAL_ID_MISMATCH", "Physical tag ID does not match user ID.");
   // }
 
-  const profile = await getSelfProfile(c.env.DB, request.user_id);
-  if (!profile?.nfc_tag_key) {
+  const nfcTagKey = await getUserNfcTagKey(c.env.DB, request.user_id);
+  if (!nfcTagKey) {
     return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
   }
 
   return success(c, {
     user_id: request.user_id,
     uid: request.uid,
-    unlock_code: profile.nfc_tag_key,
+    unlock_code: nfcTagKey,
   });
 });
 

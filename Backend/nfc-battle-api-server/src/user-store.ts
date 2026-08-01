@@ -63,16 +63,34 @@ export async function getSelfProfile(db: D1Database, userId: string) {
   }
 
   if (row.nfc_tag_key === null) {
-    row = await repairMissingNfcTagKey(db, row);
-    if (!row) {
+    const nfcTagKey = await repairMissingNfcTagKey(db, row.user_id);
+    if (!nfcTagKey) {
       return null;
     }
+
+    row = {
+      ...row,
+      nfc_tag_key: nfcTagKey,
+    };
   }
 
   return profileFromRow(db, row);
 }
 
-async function repairMissingNfcTagKey(db: D1Database, row: UserRow) {
+export async function getUserNfcTagKey(db: D1Database, userId: string) {
+  const row = await db
+    .prepare("SELECT nfc_tag_key FROM users WHERE user_id = ?1")
+    .bind(userId)
+    .first<Pick<UserRow, "nfc_tag_key">>();
+
+  if (!row) {
+    return null;
+  }
+
+  return row.nfc_tag_key ?? repairMissingNfcTagKey(db, userId);
+}
+
+async function repairMissingNfcTagKey(db: D1Database, userId: string) {
   const nfcTagKey = newNfcTagKey();
   const result = await db
     .prepare(
@@ -82,17 +100,18 @@ async function repairMissingNfcTagKey(db: D1Database, row: UserRow) {
       WHERE user_id = ?1 AND nfc_tag_key IS NULL
       `,
     )
-    .bind(row.user_id, nfcTagKey)
+    .bind(userId, nfcTagKey)
     .run();
 
   if (result.meta.changes > 0) {
-    return {
-      ...row,
-      nfc_tag_key: nfcTagKey,
-    };
+    return nfcTagKey;
   }
 
-  return getUserRow(db, row.user_id);
+  const row = await db
+    .prepare("SELECT nfc_tag_key FROM users WHERE user_id = ?1")
+    .bind(userId)
+    .first<Pick<UserRow, "nfc_tag_key">>();
+  return row?.nfc_tag_key ?? null;
 }
 
 export async function getUserRow(db: D1Database, userId: string) {

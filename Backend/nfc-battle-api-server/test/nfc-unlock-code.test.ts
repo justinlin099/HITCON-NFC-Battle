@@ -23,6 +23,9 @@ describe("multiple NFC UIDs and staff unlock codes", () => {
     expect(aliceProfile.data.physical_id).toBe("uid-alice-one");
     expect((await scanTag(server, bob.headers, "alice", "uid-alice-two")).status).toBe(200);
 
+    const recordingDb = new QueryRecordingDb(server.db);
+    server.env.DB = recordingDb as unknown as D1Database;
+
     const unlock = await server.request(
       "/staff/nfc-unlock-code",
       await jsonRequest(
@@ -35,5 +38,48 @@ describe("multiple NFC UIDs and staff unlock codes", () => {
     await expect(readJson(unlock)).resolves.toMatchObject({
       data: { user_id: "alice", uid: "uid-alice-two", unlock_code: aliceProfile.data.nfc_tag_key },
     });
+    expect(recordingDb.queries).toHaveLength(1);
+    expect(recordingDb.queries[0]).toContain("SELECT nfc_tag_key FROM users");
+    expect(recordingDb.queries[0]).not.toContain("nfc_tags");
+    expect(recordingDb.queries[0]).not.toContain("collections");
+  });
+
+  it("repairs a missing unlock code without loading profile-related data", async () => {
+    const server = await createTestServer();
+    await initializeUser(server, "alice");
+    await server.db.prepare("UPDATE users SET nfc_tag_key = NULL WHERE user_id = 'alice'").run();
+
+    const unlock = await server.request(
+      "/staff/nfc-unlock-code",
+      await jsonRequest(
+        "POST",
+        { user_id: "alice", uid: "changed-uid" },
+        await authHeaders("staff", "STAFF"),
+      ),
+    );
+
+    expect(unlock.status).toBe(200);
+    const body = (await readJson(unlock)) as { data: { unlock_code: string } };
+    expect(body.data.unlock_code).toMatch(/^[0-9a-f]{12}$/);
+    await expect(
+      server.db
+        .prepare("SELECT nfc_tag_key FROM users WHERE user_id = 'alice'")
+        .first<{ nfc_tag_key: string }>(),
+    ).resolves.toEqual({ nfc_tag_key: body.data.unlock_code });
   });
 });
+
+class QueryRecordingDb {
+  readonly queries: string[] = [];
+
+  constructor(private readonly db: D1Database) {}
+
+  prepare(query: string) {
+    this.queries.push(query);
+    return this.db.prepare(query);
+  }
+
+  exec(query: string) {
+    return this.db.exec(query);
+  }
+}
