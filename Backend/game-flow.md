@@ -13,8 +13,8 @@ A user's data contains:
 * emoji icon
 * bio
 * pixel_avatar_base64: a base64-encoded 48x48 pixel avatar image
-* NFC tag's physical ID
-* nfc_tag_key: a 6-byte key, encoded as a 12-character lowercase hex string, used by the app to lock or unlock the user's NFC tag
+* first paired NFC tag physical ID, used as a backwards-compatible signal that the user has at least one paired tag
+* nfc_tag_key: a 6-byte key, encoded as a 12-character lowercase hex string, shared by all of the user's NFC tags and used to lock or unlock them
 * profile version
 * collection version
 
@@ -28,7 +28,7 @@ The `rank_threshold` should be a configurable variable or a constant. The top ra
 
 The `phishing_penalty` should be a configurable variable or a constant, indicating the penalty of clicking a phishing link.
 
-The current score calculation formula is `score = 10 * num_of_collection`. This formula may be finalized or changed in the future.
+The current score calculation formula is `score = 10 * num_of_collection - 10 * num_of_phishing`. The phishing penalty is applied to the victim in both live scores and frozen score snapshots. This formula may be finalized or changed in the future.
 
 The `freeze_timeout` should be a configurable variable or a constant, indicating how long a scoreboard can stay in `FREEZING` before it is considered stale. The default should be 30 seconds.
 
@@ -40,21 +40,35 @@ The user will receive an email, containing a link like `https://game.hitcon2026.
 
 After downloading the app, the user will somehow setup the app, and somehow the app will obtain their JWT token.
 
-The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. `GET /users/me` is the only endpoint that lazy-initializes a user profile, so the app should call it before pairing tags, scanning, recording phishing events, or using cache/bootstrap APIs that expect the authenticated user row to already exist. The response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts.
+The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. The app should call it before pairing tags, scanning, recording phishing events, or using cache/bootstrap APIs that expect the authenticated user row to already exist. `POST /print-cards` can also lazy-initialize a user so the app can submit a print job directly with a valid JWT. The self-profile response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts.
 
 ## When Conference Starts, at Reception Desk
 
-The user will pick up a NFC tag, open the app, and scan the tag using the app. The app will use `POST /tags/pair` to link their profile to the NFC tag's physical ID.
+The user will pick up a NFC tag, open the app, and scan the tag using the app. The app will use `POST /tags/pair` to link their profile to the NFC tag's physical ID. A user may have multiple paired physical IDs; each one resolves to the same user profile.
 
 Also, the app will write a URL `https://game.hitcon2026.online/b?u={user_id}` to the tag. Again, this is hosted elsewhere. The URL will redirect the mobile device to open the app.
 
-After the app writes the URL to the tag, it will use `nfc_tag_key` to lock the tag, so it is only readable. This will make sure the tag won't be accidentally overwritten. The app should keep the key so it can offer an unlock button after the conference.
+After the app writes the URL to the tag, it will use the user's shared `nfc_tag_key` to lock the tag, so it is only readable. This will make sure the tag won't be accidentally overwritten. The app should keep the key so it can offer an unlock button after the conference. Every tag paired to the same user uses the same key and contains the same user URL.
 
 ## During the Conference
 
 The user can still use `PATCH /users/me` to update their profile at any time.
 
-If a user's NFC tag is broken or replaced, staff can give the user a new tag and call `POST /staff/replace_user_tag` with a JWT whose `role` is `STAFF` to replace the server-side tag mapping. Staff or the app should write the same URL format, `https://game.hitcon2026.online/b?u={user_id}`, to the new tag and lock it. The `nfc_tags` table is the source of truth for which physical tag ID belongs to a user, so the old physical tag ID stops passing `POST /collection/scan` immediately after the replacement. This operation does not change `profile_version` or `collection_version`. `GET /users/me` and `GET /users/me/bootstrap` return the new physical tag ID.
+### Printing and Pairing NFC Cards
+
+The app can call `POST /print-cards` with the user's JWT and one PNG image. The API stores the PNG in protected object storage, stores its opaque object metadata in D1, and returns a short token. The app renders that token as a barcode for the printing workflow. This endpoint may lazy-initialize the user when their JWT is valid.
+
+After scanning the barcode, staff can call `GET /staff/print-cards/{short_token}` with a JWT whose `role` is `STAFF` to download the original PNG for printing.
+
+When a card is printed or an additional tag is issued, staff can call `POST /staff/pair_user_tag` with `user_id` and `physical_id`. This adds the physical ID to the user's existing tags instead of removing older IDs. Staff or the app should write `https://game.hitcon2026.online/b?u={user_id}` to the new tag and lock it with the user's shared `nfc_tag_key` before giving it to the user.
+
+If a user's NFC tag is broken or needs to be replaced, staff should issue a new tag through the same `POST /staff/pair_user_tag` workflow. The replacement is additive: the new physical ID becomes another valid tag for the user, and the old physical ID remains paired in the server. The current API does not provide an unpair or revoke operation, so a lost tag that must stop passing `POST /collection/scan` requires a future revocation mechanism rather than this pairing endpoint.
+
+The `nfc_tags` table is the source of truth for all physical tag IDs paired to each user. Every paired ID passes `POST /collection/scan` for that user. Pairing an additional tag does not change `profile_version` or `collection_version`. For backwards compatibility, `GET /users/me` and `GET /users/me/bootstrap` expose only the first paired physical ID, ordered by pairing time and then physical ID; they do not expose the complete list of paired IDs.
+
+### Staff NFC Unlock Code
+
+Staff can call `POST /staff/nfc-unlock-code` with `user_id` and the UID read during the support workflow to retrieve that user's shared NFC unlock code. This endpoint requires a JWT whose `role` is `STAFF`. Because a physical tag's UID may have changed, the current workflow uses `user_id` as the lookup identity and does not require the submitted UID to match an existing `nfc_tags` row.
 
 ### Scanning Other's NFC Tag
 
@@ -116,7 +130,7 @@ The user can use `GET /scoreboard` with `offset` and `limit` to query the global
 If the user somehow resets their app or needs a fresh installation, the app can use `GET /users/me/bootstrap` to restore the local cache in 1 request:
 
 * the full user profile of themselves
-* the user's current NFC tag physical ID
+* the user's first paired NFC tag physical ID, or `null` when no tag has been paired
 * the user's `nfc_tag_key`
 * the user's `profile_version` and `collection_version`
 * the full profile of every previously collected user, without each collected user's collection list
@@ -136,13 +150,15 @@ To avoid race conditions and support resume, the scoreboard should use a state m
 
 If the scoreboard stays in `FREEZING` longer than `freeze_timeout`, the freeze is considered stale. Partial results for that `freeze_id` should not be visible to users, because `GET /users/me/prize` only reads a stored snapshot when the scoreboard state is `FROZEN`.
 
-The app should keep working after the scoreboard is frozen. `PATCH /users/me`, `POST /tags/pair`, `POST /staff/replace_user_tag`, `POST /collection/scan`, `POST /collection/phishing`, profile lookup, collection lookup, bootstrap, batch refresh, and mission progress continue to use and update live app data after the conference ends. These later live updates must not change the stored score and prize snapshot unless staff explicitly resumes scoring and freezes again.
+The app should keep working after the scoreboard is frozen. `PATCH /users/me`, `POST /tags/pair`, `POST /staff/pair_user_tag`, `POST /collection/scan`, `POST /collection/phishing`, `POST /print-cards`, profile lookup, collection lookup, bootstrap, batch refresh, mission progress, print-card download, and NFC unlock-code lookup continue to use and update live app data after the conference ends. These later live updates must not change the stored score and prize snapshot unless staff explicitly resumes scoring and freezes again.
 
 The API server should provide `GET /staff/scoreboard_status` with a JWT whose `role` is `STAFF` plus `STAFF_DANGER_TOKEN` so staff can inspect the current scoreboard state, current `freeze_id`, and freeze timestamps.
 
 Also, the API server has an endpoint `POST /staff/resume_scoreboard` to resume the accidentally frozen scoreboard. It also requires a JWT whose `role` is `STAFF` plus `STAFF_DANGER_TOKEN`. Resume should change `FROZEN` back to `OPEN` and invalidate the stored result snapshot for the current `freeze_id`; the next freeze will calculate a new snapshot. Resume can also recover a stale `FREEZING` state by changing it back to `OPEN` and invalidating partial results for the stale `freeze_id`.
 
 The user can lookup their prize after the scoreboard is frozen via `GET /users/me/prize`.
+
+Staff can call `POST /staff/prize-claims` with the attendee's `user_id` and a UID read from one of that attendee's paired NFC tags. The submitted UID must belong to the submitted user. A claim succeeds only when the stored snapshot for the current `freeze_id` says the attendee won a stamp prize or rank prize. Each attendee can claim only once per freeze snapshot; an ineligible attendee or a repeated claim returns an error.
 
 ## After the Conference
 
