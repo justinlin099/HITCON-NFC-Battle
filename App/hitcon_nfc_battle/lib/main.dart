@@ -592,18 +592,13 @@ class _NTagReaderPageState extends State<NTagReaderPage> {
       }
 
       await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
         onDiscovered: (NfcTag tag) async {
           if (!acquiredLease.isActive || _isDisposed) {
             return;
           }
 
-          final Map<String, dynamic> data = tag.data;
-          final dynamic idBytes =
-              data['nfca']?['identifier'] ??
-              data['mifareclassic']?['identifier'] ??
-              data['mifareultralight']?['identifier'];
-
-          final String parsedTagId = _toHexString(idBytes);
+          final String parsedTagId = const NtagSecurityService().readTagId(tag);
           final DateTime now = DateTime.now();
           final bool isDuplicateRead =
               parsedTagId.isNotEmpty &&

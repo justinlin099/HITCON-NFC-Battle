@@ -13,84 +13,10 @@ import '../../services/nfc_tag_payload.dart';
 import '../../services/ntag_security_service.dart';
 import '../../widgets/admin_mode_switch_button.dart';
 import '../user/pixel_theme.dart';
+import 'admin_nfc_session.dart';
 import 'admin_pair_user_tag_page.dart';
 import 'admin_print_cards_page.dart';
 import 'admin_scoreboard_control_page.dart';
-
-Future<void> _stopNfcSessionQuietly() async {
-  try {
-    await NfcManager.instance.stopSession();
-  } catch (_) {
-    // The platform session may already be closed.
-  }
-}
-
-class _AdminNfcSession {
-  NfcSessionLease? _lease;
-  int _generation = 0;
-  int? _activeGeneration;
-
-  bool isActive(int generation) =>
-      _activeGeneration == generation && _lease?.isActive == true;
-
-  Future<int?> acquire({required NfcSessionCleanup onPreempt}) async {
-    final int generation = ++_generation;
-    final NfcSessionLease? lease = await NfcSessionController.instance.acquire(
-      NfcSessionOwner.ntagReader,
-      preemptExisting: true,
-      onPreempt: () async {
-        if (_activeGeneration == generation) {
-          _lease = null;
-          _activeGeneration = null;
-        }
-        await _stopNfcSessionQuietly();
-        await Future<void>.sync(onPreempt);
-      },
-    );
-    if (lease == null) {
-      return null;
-    }
-    if (!lease.isActive) {
-      return null;
-    }
-
-    _lease = lease;
-    _activeGeneration = generation;
-    await _stopNfcSessionQuietly();
-    if (!lease.isActive) {
-      lease.release();
-      if (_activeGeneration == generation) {
-        _activeGeneration = null;
-      }
-      return null;
-    }
-    return generation;
-  }
-
-  Future<void> stop([int? generation]) async {
-    if (generation != null && _activeGeneration != generation) {
-      return;
-    }
-
-    final NfcSessionLease? lease = _lease;
-    _lease = null;
-    _activeGeneration = null;
-    if (lease == null || !lease.isActive) {
-      lease?.release();
-      return;
-    }
-
-    try {
-      await _stopNfcSessionQuietly();
-    } finally {
-      lease.release();
-    }
-  }
-
-  void dispose() {
-    unawaited(stop());
-  }
-}
 
 class AdminHomePage extends StatefulWidget {
   const AdminHomePage({super.key});
@@ -166,7 +92,7 @@ class AdminTagWriterPage extends StatefulWidget {
 class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
   static const String _blankAppUri = 'https://game.hitcon2026.online/b';
 
-  final _AdminNfcSession _nfcSession = _AdminNfcSession();
+  final AdminNfcSession _nfcSession = AdminNfcSession();
   String _status = '';
   String _lastUid = '-';
   bool _isWriting = false;
@@ -197,7 +123,7 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
       _lastUid = '-';
     });
 
-    int? sessionGeneration;
+    NfcSessionLease? sessionLease;
     try {
       final bool isAvailable = await NfcManager.instance.isAvailable();
       if (!isAvailable) {
@@ -210,10 +136,8 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
         return;
       }
 
-      sessionGeneration = await _nfcSession.acquire(
-        onPreempt: _handlePreempted,
-      );
-      if (sessionGeneration == null) {
+      sessionLease = await _nfcSession.acquire(onPreempt: _handlePreempted);
+      if (sessionLease == null) {
         if (mounted) {
           setState(() {
             _isWriting = false;
@@ -222,14 +146,15 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
         }
         return;
       }
-      final int activeSession = sessionGeneration;
+      final NfcSessionLease activeLease = sessionLease;
 
       await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
         onDiscovered: (NfcTag tag) async {
-          final String uid = _readTagId(tag);
+          final String uid = const NtagSecurityService().readTagId(tag);
           final Ndef? ndef = Ndef.from(tag);
           if (ndef == null || !ndef.isWritable) {
-            await _nfcSession.stop(activeSession);
+            await _nfcSession.stop(activeLease);
             if (!mounted) {
               return;
             }
@@ -243,7 +168,7 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
 
           try {
             await ndef.write(_buildTagMessage());
-            await _nfcSession.stop(activeSession);
+            await _nfcSession.stop(activeLease);
             if (!mounted) {
               return;
             }
@@ -253,7 +178,7 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
               _status = l10n.tr('writeComplete');
             });
           } catch (error) {
-            await _nfcSession.stop(activeSession);
+            await _nfcSession.stop(activeLease);
             if (!mounted) {
               return;
             }
@@ -265,7 +190,7 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
           }
         },
         onError: (NfcError error) async {
-          await _nfcSession.stop(activeSession);
+          await _nfcSession.stop(activeLease);
           if (!mounted) {
             return;
           }
@@ -276,8 +201,8 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
         },
       );
     } catch (error) {
-      if (sessionGeneration != null) {
-        await _nfcSession.stop(sessionGeneration);
+      if (sessionLease != null) {
+        await _nfcSession.stop(sessionLease);
       }
       if (mounted) {
         setState(() {
@@ -359,7 +284,7 @@ class AdminPrizeClaimPage extends StatefulWidget {
 
 class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
   final AuthService _authService = AuthService();
-  final _AdminNfcSession _nfcSession = _AdminNfcSession();
+  final AdminNfcSession _nfcSession = AdminNfcSession();
   String _status = '';
   String _lastUid = '-';
   String _lastUserId = '-';
@@ -394,7 +319,7 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
       _claimCode = '-';
     });
 
-    int? sessionGeneration;
+    NfcSessionLease? sessionLease;
     try {
       final bool isAvailable = await NfcManager.instance.isAvailable();
       if (!isAvailable) {
@@ -407,10 +332,8 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
         return;
       }
 
-      sessionGeneration = await _nfcSession.acquire(
-        onPreempt: _handlePreempted,
-      );
-      if (sessionGeneration == null) {
+      sessionLease = await _nfcSession.acquire(onPreempt: _handlePreempted);
+      if (sessionLease == null) {
         if (mounted) {
           setState(() {
             _isScanning = false;
@@ -419,17 +342,18 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
         }
         return;
       }
-      final int activeSession = sessionGeneration;
+      final NfcSessionLease activeLease = sessionLease;
 
       await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
         onDiscovered: (NfcTag tag) async {
-          final String uid = _readTagId(tag);
+          final String uid = const NtagSecurityService().readTagId(tag);
           final Map<String, String> records = await _readTextRecords(tag);
           final String userId = records['user_id'] ?? records['owner'] ?? '';
           final Map<String, dynamic>? result = await _authService
               .confirmPrizeClaim(tagUid: uid, userId: userId);
 
-          await _nfcSession.stop(activeSession);
+          await _nfcSession.stop(activeLease);
           if (!mounted) {
             return;
           }
@@ -451,7 +375,7 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
           });
         },
         onError: (NfcError error) async {
-          await _nfcSession.stop(activeSession);
+          await _nfcSession.stop(activeLease);
           if (!mounted) {
             return;
           }
@@ -462,8 +386,8 @@ class _AdminPrizeClaimPageState extends State<AdminPrizeClaimPage> {
         },
       );
     } catch (error) {
-      if (sessionGeneration != null) {
-        await _nfcSession.stop(sessionGeneration);
+      if (sessionLease != null) {
+        await _nfcSession.stop(sessionLease);
       }
       if (mounted) {
         setState(() {
@@ -537,7 +461,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
   static const NtagSecurityService _security = NtagSecurityService();
   static const Duration _tagDisposalGracePeriod = Duration(milliseconds: 400);
 
-  final _AdminNfcSession _nfcSession = _AdminNfcSession();
+  final AdminNfcSession _nfcSession = AdminNfcSession();
   String _status = '';
   String _lastUid = '-';
   String _lastUserId = '-';
@@ -599,12 +523,10 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
       _lastUserId = '-';
     });
 
-    int? sessionGeneration;
+    NfcSessionLease? sessionLease;
     try {
-      sessionGeneration = await _nfcSession.acquire(
-        onPreempt: _handlePreempted,
-      );
-      if (sessionGeneration == null) {
+      sessionLease = await _nfcSession.acquire(onPreempt: _handlePreempted);
+      if (sessionLease == null) {
         _endDeepLinkSuppression();
         if (mounted) {
           setState(() {
@@ -614,14 +536,12 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
         }
         return;
       }
-      final int activeSession = sessionGeneration;
+      final NfcSessionLease activeLease = sessionLease;
 
       await NfcManager.instance.startSession(
         pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
         onDiscovered: (NfcTag tag) async {
-          if (!_nfcSession.isActive(activeSession) ||
-              _isHandlingTag ||
-              _isDisposed) {
+          if (!activeLease.isActive || _isHandlingTag || _isDisposed) {
             return;
           }
           _isHandlingTag = true;
@@ -653,7 +573,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
             );
           }
 
-          if (mounted && _nfcSession.isActive(activeSession)) {
+          if (mounted && activeLease.isActive) {
             setState(() {
               _lastUid = uid.isEmpty ? '-' : uid;
               _lastUserId = records['user_id']?.trim().isNotEmpty == true
@@ -662,19 +582,19 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
               _status = l10n.tr(result.messageKey, result.values);
             });
           }
-          unawaited(_finishUnlockHandling(activeSession));
+          unawaited(_finishUnlockHandling(activeLease));
         },
         onError: (NfcError error) async {
           await _finishUnlockHandling(
-            activeSession,
+            activeLease,
             errorMessage: nfcSessionErrorMessage(l10n, error),
           );
         },
       );
     } catch (error) {
-      if (sessionGeneration != null) {
+      if (sessionLease != null) {
         await _finishUnlockHandling(
-          sessionGeneration,
+          sessionLease,
           errorMessage: nfcSessionErrorMessage(l10n, error),
         );
       } else {
@@ -705,19 +625,19 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
   }
 
   Future<void> _finishUnlockHandling(
-    int sessionGeneration, {
+    NfcSessionLease sessionLease, {
     String? errorMessage,
   }) async {
-    if (_isFinishingUnlock || !_nfcSession.isActive(sessionGeneration)) {
+    if (_isFinishingUnlock || !sessionLease.isActive) {
       return;
     }
     _isFinishingUnlock = true;
     await Future<void>.delayed(_tagDisposalGracePeriod);
-    if (!_nfcSession.isActive(sessionGeneration)) {
+    if (!sessionLease.isActive) {
       _isFinishingUnlock = false;
       return;
     }
-    await _nfcSession.stop(sessionGeneration);
+    await _nfcSession.stop(sessionLease);
     _isHandlingTag = false;
     _endDeepLinkSuppression();
     if (!mounted || _isDisposed) {
@@ -902,23 +822,6 @@ class _PixelButton extends StatelessWidget {
       ),
     );
   }
-}
-
-String _readTagId(NfcTag tag) {
-  final Map<String, dynamic> data = tag.data;
-  final dynamic idBytes =
-      data['nfca']?['identifier'] ??
-      data['mifareclassic']?['identifier'] ??
-      data['mifareultralight']?['identifier'];
-
-  if (idBytes is! List) {
-    return '';
-  }
-  return idBytes
-      .whereType<int>()
-      .map((int b) => b.toRadixString(16).padLeft(2, '0'))
-      .join(':')
-      .toUpperCase();
 }
 
 Future<Map<String, String>> _readTextRecords(NfcTag tag) async {
