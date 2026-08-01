@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show DeviceOrientation, SystemChrome;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 import 'l10n/app_localizations.dart';
@@ -18,8 +19,11 @@ import 'services/ntag_security_service.dart';
 import 'services/remote_app_config_service.dart';
 import 'services/setup_service.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
+    DeviceOrientation.portraitUp,
+  ]);
   runApp(const MyApp());
 }
 
