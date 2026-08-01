@@ -35,6 +35,7 @@
 | POST | `/staff/prize-claims` | STAFF 掃會眾 Tag 後核銷凍結獎項 |
 | POST | `/staff/nfc-unlock-code` | STAFF 以 Tag URL user ID 加 physical UID 取得解鎖碼 |
 | POST | `/staff/pair_user_tag` | STAFF 指定使用者、寫入 NDEF、伺服器配對並鎖定 NTAG |
+| POST | `/staff/unpair_user_tag` | STAFF 掃描實體 Tag，依 user ID 與 physical UID 解除伺服器配對 |
 | GET | `/staff/scoreboard_status` | 管理頁查詢凍結狀態與 cutoff 資訊 |
 | POST | `/staff/freeze_scoreboard` | 管理頁二次確認後凍結排行榜 |
 | POST | `/staff/resume_scoreboard` | 管理頁二次確認後恢復排行榜 |

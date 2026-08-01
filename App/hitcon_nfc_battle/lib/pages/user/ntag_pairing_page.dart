@@ -64,12 +64,13 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
   bool _isHandlingTag = false;
   bool _isDisposed = false;
   bool _isSuppressingDeepLinks = false;
+  late final Future<void> _tagMaintenanceReady;
   NfcSessionLease? _nfcLease;
 
   @override
   void initState() {
     super.initState();
-    NfcDeepLinkService.instance.beginTagMaintenance();
+    _tagMaintenanceReady = NfcDeepLinkService.instance.beginTagMaintenance();
     _isSuppressingDeepLinks = true;
     _userId = AuthService().currentUserId ?? '';
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -79,6 +80,10 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
 
   Future<void> _startSession() async {
     if (_isReading || _isDisposed) {
+      return;
+    }
+    await _tagMaintenanceReady;
+    if (!mounted || _isDisposed) {
       return;
     }
 
@@ -298,7 +303,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
     _isDisposed = true;
     if (_isSuppressingDeepLinks) {
       _isSuppressingDeepLinks = false;
-      NfcDeepLinkService.instance.endTagMaintenance();
+      unawaited(NfcDeepLinkService.instance.endTagMaintenance());
     }
     final NfcSessionLease? lease = _nfcLease;
     _nfcLease = null;
@@ -398,12 +403,13 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
   bool _isHandlingTag = false;
   bool _isDisposed = false;
   bool _isSuppressingDeepLinks = false;
+  late final Future<void> _tagMaintenanceReady;
   NfcSessionLease? _nfcLease;
 
   @override
   void initState() {
     super.initState();
-    NfcDeepLinkService.instance.beginTagMaintenance();
+    _tagMaintenanceReady = NfcDeepLinkService.instance.beginTagMaintenance();
     _isSuppressingDeepLinks = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startSession();
@@ -412,6 +418,10 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
 
   Future<void> _startSession() async {
     if (_isReading || _isDisposed) {
+      return;
+    }
+    await _tagMaintenanceReady;
+    if (!mounted || _isDisposed) {
       return;
     }
 
@@ -601,7 +611,7 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
     _isDisposed = true;
     if (_isSuppressingDeepLinks) {
       _isSuppressingDeepLinks = false;
-      NfcDeepLinkService.instance.endTagMaintenance();
+      unawaited(NfcDeepLinkService.instance.endTagMaintenance());
     }
     final NfcSessionLease? lease = _nfcLease;
     _nfcLease = null;

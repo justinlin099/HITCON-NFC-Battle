@@ -117,7 +117,9 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
 
     final Object? args = ModalRoute.of(context)?.settings.arguments;
     _showAdminModeSwitch =
-        _authService.isAdmin || (args is Map && args['fromAdminMode'] == true);
+        _authService.isAdmin ||
+        _authService.isEventStaff ||
+        (args is Map && args['fromAdminMode'] == true);
     if (args is Map && args['tab'] is int) {
       final int tab = args['tab'] as int;
       if (tab >= 0 && tab <= 2) {
@@ -809,7 +811,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     }
 
     final String? currentUserId = _authService.currentUserId;
-    if (currentUserId == null || !_authService.isRegularUser) {
+    if (currentUserId == null || !_authService.canCollectCards) {
       _hideNfcScanTransition(generation);
       return;
     }

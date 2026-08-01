@@ -289,6 +289,7 @@ const Map<String, String> appStringsEn = <String, String>{
   'adminTools': 'Administrator Tools',
   'writeTag': 'Write Tag',
   'staffPairUserTagShort': 'Pair Tag',
+  'staffUnpairUserTagShort': 'Unpair Tag',
   'confirmPrize': 'Confirm Prize',
   'staffPrintShort': 'Print',
   'unlockTag': 'Unlock Tag',
@@ -305,6 +306,19 @@ const Map<String, String> appStringsEn = <String, String>{
   'staffPairComplete': 'Tag URL, server pairing, and protection completed.',
   'staffPairFailed': 'Pairing did not complete: {error}',
   'staffPairStart': 'Start Tag pairing',
+  'staffUnpairUserTag': 'UNPAIR USER TAG',
+  'staffUnpairUserPrompt':
+      'Enter the paired User ID, then scan the physical Tag.',
+  'staffUnpairUserDescription':
+      'This removes only the server pairing. It does not erase or unlock the Tag. Unlock the Tag first if it must be rewritten.',
+  'staffUnpairUserIdRequired': 'Enter the User ID to unpair.',
+  'staffUnpairConfirmTitle': 'UNPAIR THIS TAG?',
+  'staffUnpairConfirmBody':
+      'The next scanned Tag will be unpaired from {userId} on the server.',
+  'staffUnpairStart': 'Scan Tag to unpair',
+  'staffUnpairHoldTag': 'Hold the paired NTAG near the phone.',
+  'staffUnpairComplete': 'The server pairing has been removed.',
+  'staffUnpairApiFailed': 'The server rejected the unpair request: {error}',
   'staffPrintCards': 'PRINT CARDS',
   'staffPrintScanPrompt': 'Scan the attendee barcode or enter its short token.',
   'staffPrintDescription':
@@ -361,6 +375,12 @@ const Map<String, String> appStringsEn = <String, String>{
   'tagNotWritable': 'This Tag does not support writable NDEF.',
   'writeComplete': 'Write complete.',
   'writeFailed': 'Write failed: {error}',
+  'writeCompleteContinue':
+      'Write complete. Remove this Tag and present the next one.',
+  'writeFailedContinue':
+      'This Tag failed to write: {error}. Remove it and continue with the next Tag.',
+  'tagNotWritableContinue':
+      'This Tag is not writable. Remove it and continue with the next Tag.',
   'nfcError': 'NFC error: {error}',
   'fixedAppUrl': 'Fixed App URL',
   'purpose': 'Purpose',
@@ -384,6 +404,8 @@ const Map<String, String> appStringsEn = <String, String>{
   'holdTagToUnlock': 'Hold the NTAG to unlock near the phone.',
   'adminUnlockSecretFailed':
       'Could not get the NTAG unlock key from the server. Check the connection and sign-in status.',
+  'adminUnlockSecretFailedWithReason':
+      'Could not get the NTAG unlock key. Reason: {reason}',
   'unlockStopped': 'Unlock scan stopped.',
   'unlockTagDescription':
       'Reads the Tag URL and UID, gets the unlock key through the STAFF API, removes AUTH0 protection, and resets PWD/PACK.',
