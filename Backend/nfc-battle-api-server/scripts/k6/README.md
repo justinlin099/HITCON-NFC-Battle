@@ -108,7 +108,7 @@ npm run load:k6:lazy-init
 
 ## Pair Tags
 
-`pair-tags.js` tests first-time `POST /tags/pair`. It generates a fresh JWT subject and a fresh physical tag ID for every iteration, so repeated runs behave like new users pairing new tags.
+`pair-tags.js` tests first-time `POST /tags/pair`. It generates a fresh JWT subject and a fresh physical tag ID for every iteration, initializes that user with `GET /users/me`, then pairs the generated tag. Repeated runs behave like new users pairing new tags.
 
 Run it from `Backend/nfc-battle-api-server`:
 
@@ -120,7 +120,7 @@ The default pair-tags scenario is:
 
 - 10 users pair with a tag per second
 - 30 seconds
-- about 300 tag-pairing requests total
+- about 300 user-initialization requests and 300 tag-pairing requests total
 
 Equivalent Docker command:
 
