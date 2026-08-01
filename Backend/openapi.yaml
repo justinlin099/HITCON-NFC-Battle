@@ -972,8 +972,11 @@ paths:
       tags: [Staff]
       summary: Get a user's NFC unlock code
       description: |
-        Requires a STAFF JWT. The submitted NFC UID must belong to `user_id`.
-        All NFC tags paired to the same user return the same unlock code.
+        Requires a STAFF JWT. The server uses `user_id` to retrieve the user's
+        shared unlock code. The submitted `uid` identifies the physical tag in
+        the current support workflow and is echoed in the response, but it is
+        not required to match an existing `nfc_tags` row because the physical
+        tag's UID may have changed.
       security:
         - bearerAuth: []
       requestBody:
@@ -993,8 +996,6 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/PhysicalIdMismatchError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
 
@@ -1554,7 +1555,7 @@ components:
           example: kktix_hash_abc123
         uid:
           type: string
-          description: Physical NFC UID read from one of the user's tags.
+          description: Physical NFC UID observed during the support workflow. It is contextual and is not ownership-validated against `nfc_tags`.
           example: '04:1A:2B:3C:4D:5E:6F'
 
     GetNfcUnlockCodeResponse:
@@ -1572,6 +1573,7 @@ components:
               type: string
             uid:
               type: string
+              description: Echo of the contextual UID submitted in the request.
             unlock_code:
               type: string
               pattern: '^[0-9a-f]{12}$'
