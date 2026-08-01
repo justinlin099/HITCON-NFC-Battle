@@ -85,6 +85,7 @@ info:
     - `POST /print-cards`
     - `GET /staff/scoreboard_status`
     - `POST /staff/pair_user_tag`
+    - `POST /staff/unpair_user_tag`
     - `GET /staff/print-cards/{short_token}`
     - `POST /staff/nfc-unlock-code`
 
@@ -696,6 +697,53 @@ paths:
           $ref: '#/components/responses/UserNotFoundError'
         '409':
           $ref: '#/components/responses/TagAlreadyPairedError'
+  /staff/unpair_user_tag:
+    post:
+      tags: [Staff]
+      summary: Unpair an NFC tag from a user
+      description: |
+        Staff-only endpoint used when a paired NFC tag is lost, broken, or
+        replaced. Requires a conference JWT whose `role` claim is `STAFF`.
+        Removes only the submitted `physical_id` mapping from `user_id`; the
+        user's other paired tags remain valid.
+
+        The operation is idempotent when the submitted physical ID is already
+        unpaired. If the physical ID is currently paired to another user, the
+        endpoint returns `PHYSICAL_ID_MISMATCH`. Unpairing does not change
+        `profile_version`, `collection_version`, or `nfc_tag_key`. Once
+        removed, that physical ID no longer passes `POST /collection/scan` for
+        the user.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnpairUserTagRequest'
+            examples:
+              unpair:
+                $ref: '#/components/examples/UnpairUserTagRequest'
+      responses:
+        '200':
+          description: User tag is unpaired or was already unpaired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              examples:
+                unpaired:
+                  value:
+                    status: success
+                    message: User tag unpaired successfully.
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/PhysicalIdMismatchError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
   /staff/freeze_scoreboard:
     post:
       tags: [Staff]
@@ -1427,6 +1475,20 @@ components:
           description: Physical ID read from the additional NFC tag.
           example: '04:FE:DC:BA:98:76:54'
 
+    UnpairUserTagRequest:
+      type: object
+      required: [user_id, physical_id]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          description: User ID whose NFC tag mapping should be removed.
+          example: kktix_hash_abc123
+        physical_id:
+          type: string
+          description: Physical ID of the NFC tag to unpair.
+          example: '04:1A:2B:3C:4D:5E:6F'
+
     CreatePrintCardResponse:
       type: object
       required: [status, data]
@@ -1944,6 +2006,11 @@ components:
       value:
         user_id: kktix_hash_abc123
         physical_id: '04:FE:DC:BA:98:76:54'
+
+    UnpairUserTagRequest:
+      value:
+        user_id: kktix_hash_abc123
+        physical_id: '04:1A:2B:3C:4D:5E:6F'
 
     ScanCollectionRequest:
       value:

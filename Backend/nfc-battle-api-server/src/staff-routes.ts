@@ -26,11 +26,11 @@ import { requireStaffDangerToken, requireStaffRole } from "./staff";
 import { getPrintCard } from "./print-card-store";
 import type { AppEnv } from "./types";
 import { getSelfProfile, getUserRow } from "./user-store";
-import { getUserTags, pairUserTag } from "./tag-store";
+import { getUserTags, pairUserTag, unpairUserTag } from "./tag-store";
 
 const staffRoutes = new Hono<AppEnv>();
 const FREEZE_SCOREBOARD_KEYS = new Set(["scoring_cutoff_at"]);
-const PAIR_USER_TAG_KEYS = new Set(["user_id", "physical_id"]);
+const USER_TAG_KEYS = new Set(["user_id", "physical_id"]);
 const USER_UID_KEYS = new Set(["user_id", "uid"]);
 const SHORT_TOKEN_PATTERN = /^[A-Za-z0-9_-]{8,32}$/;
 
@@ -43,7 +43,7 @@ staffRoutes.get("/scoreboard_status", requireStaffDangerToken, async (c) => {
 });
 
 staffRoutes.post("/pair_user_tag", async (c) => {
-  const request = validatePairUserTagRequest(await readJson(c));
+  const request = validateUserTagRequest(await readJson(c));
   if (!request) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
@@ -59,6 +59,25 @@ staffRoutes.post("/pair_user_tag", async (c) => {
   }
 
   return successMessage(c, "User tag paired successfully.");
+});
+
+staffRoutes.post("/unpair_user_tag", async (c) => {
+  const request = validateUserTagRequest(await readJson(c));
+  if (!request) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
+  const user = await getUserRow(c.env.DB, request.user_id);
+  if (!user) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  const result = await unpairUserTag(c.env.DB, request.user_id, request.physical_id);
+  if (result.mismatch) {
+    return errorResponse(c, 403, "PHYSICAL_ID_MISMATCH", "Physical tag ID does not match user ID.");
+  }
+
+  return successMessage(c, "User tag unpaired successfully.");
 });
 
 staffRoutes.get("/print-cards/:short_token", async (c) => {
@@ -247,8 +266,8 @@ function scoreboardStatusData(state: GameStateRow) {
   };
 }
 
-function validatePairUserTagRequest(value: unknown) {
-  if (!isPlainObject(value) || !hasOnlyKeys(value, PAIR_USER_TAG_KEYS)) {
+function validateUserTagRequest(value: unknown) {
+  if (!isPlainObject(value) || !hasOnlyKeys(value, USER_TAG_KEYS)) {
     return null;
   }
 

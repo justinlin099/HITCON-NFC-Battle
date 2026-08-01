@@ -13,6 +13,11 @@ export interface PairUserTagResult {
   conflict: boolean;
 }
 
+export interface UnpairUserTagResult {
+  unpaired: boolean;
+  mismatch: boolean;
+}
+
 export async function pairTag(db: D1Database, physicalId: string, userId: string) {
   const timestamp = nowIso();
   const result = await db
@@ -118,5 +123,34 @@ export async function pairUserTag(
   return {
     paired: true,
     conflict: false,
+  };
+}
+
+export async function unpairUserTag(
+  db: D1Database,
+  userId: string,
+  physicalId: string,
+): Promise<UnpairUserTagResult> {
+  const result = await db
+    .prepare(
+      `
+      DELETE FROM nfc_tags
+      WHERE physical_id = ?1 AND user_id = ?2
+      `,
+    )
+    .bind(physicalId, userId)
+    .run();
+
+  if (result.meta.changes > 0) {
+    return {
+      unpaired: true,
+      mismatch: false,
+    };
+  }
+
+  const owner = await getTagOwner(db, physicalId);
+  return {
+    unpaired: false,
+    mismatch: owner !== null && owner.user_id !== userId,
   };
 }

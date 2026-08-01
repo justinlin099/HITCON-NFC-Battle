@@ -17,6 +17,7 @@ describe("staff scoreboard edge cases", () => {
     for (const [path, method] of [
       ["/staff/scoreboard_status", "GET"],
       ["/staff/pair_user_tag", "POST"],
+      ["/staff/unpair_user_tag", "POST"],
       ["/staff/freeze_scoreboard", "POST"],
       ["/staff/resume_scoreboard", "POST"],
     ] as const) {
@@ -36,6 +37,7 @@ describe("staff scoreboard edge cases", () => {
     for (const [path, method] of [
       ["/staff/scoreboard_status", "GET"],
       ["/staff/pair_user_tag", "POST"],
+      ["/staff/unpair_user_tag", "POST"],
       ["/staff/freeze_scoreboard", "POST"],
       ["/staff/resume_scoreboard", "POST"],
     ] as const) {
@@ -290,6 +292,200 @@ describe("staff scoreboard edge cases", () => {
 
     const unknownUser = await server.request(
       "/staff/pair_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: "missing",
+          physical_id: "tag-missing",
+        },
+        staffJwt,
+      ),
+    );
+    expect(unknownUser.status).toBe(404);
+    await expect(readJson(unknownUser)).resolves.toMatchObject({
+      code: "USER_NOT_FOUND",
+    });
+  });
+
+  it("unpairs one NFC UID without changing profile data or other tag mappings", async () => {
+    const server = await createTestServer();
+    const alice = await initializeUser(server, "alice");
+    const bob = await initializeUser(server, "bob");
+    const staffJwt = await authHeaders("staff", "STAFF");
+    await pairTag(server, alice.headers, "tag-alice-first");
+    await pairTag(server, alice.headers, "tag-alice-second");
+
+    const before = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
+      data: {
+        physical_id: string;
+        nfc_tag_key: string;
+        profile_version: number;
+        collection_version: number;
+      };
+    };
+    expect(before.data.physical_id).toBe("tag-alice-first");
+
+    const response = await server.request(
+      "/staff/unpair_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: " alice ",
+          physical_id: " tag-alice-first ",
+        },
+        staffJwt,
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(readJson(response)).resolves.toEqual({
+      status: "success",
+      message: "User tag unpaired successfully.",
+    });
+    await expect(
+      server.db
+        .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = 'tag-alice-first'")
+        .first(),
+    ).resolves.toBeNull();
+    await expect(
+      server.db
+        .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = 'tag-alice-second'")
+        .first<{ user_id: string }>(),
+    ).resolves.toEqual({ user_id: "alice" });
+
+    const oldTagScan = await scanTag(server, bob.headers, "alice", "tag-alice-first");
+    expect(oldTagScan.status).toBe(403);
+    await expect(readJson(oldTagScan)).resolves.toMatchObject({
+      code: "PHYSICAL_ID_MISMATCH",
+    });
+    expect((await scanTag(server, bob.headers, "alice", "tag-alice-second")).status).toBe(200);
+
+    const after = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
+      data: {
+        physical_id: string;
+        nfc_tag_key: string;
+        profile_version: number;
+        collection_version: number;
+      };
+    };
+    expect(after.data).toMatchObject({
+      physical_id: "tag-alice-second",
+      nfc_tag_key: before.data.nfc_tag_key,
+      profile_version: before.data.profile_version,
+      collection_version: before.data.collection_version,
+    });
+
+    const removeLastTag = await server.request(
+      "/staff/unpair_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: "alice",
+          physical_id: "tag-alice-second",
+        },
+        staffJwt,
+      ),
+    );
+    expect(removeLastTag.status).toBe(200);
+
+    const withoutTags = await readJson(
+      await server.request("/users/me/bootstrap", { headers: alice.headers }),
+    ) as {
+      data: {
+        me: {
+          physical_id: string | null;
+          nfc_tag_key: string;
+          profile_version: number;
+          collection_version: number;
+        };
+      };
+    };
+    expect(withoutTags.data.me).toMatchObject({
+      physical_id: null,
+      nfc_tag_key: before.data.nfc_tag_key,
+      profile_version: before.data.profile_version,
+      collection_version: before.data.collection_version,
+    });
+  });
+
+  it("treats unpairing an absent user-tag mapping as idempotent", async () => {
+    const server = await createTestServer();
+    await initializeUser(server, "alice");
+    const staffJwt = await authHeaders("staff", "STAFF");
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await server.request(
+        "/staff/unpair_user_tag",
+        await jsonRequest(
+          "POST",
+          {
+            user_id: "alice",
+            physical_id: "tag-missing",
+          },
+          staffJwt,
+        ),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(readJson(response)).resolves.toMatchObject({
+        status: "success",
+      });
+    }
+  });
+
+  it("rejects unpairing a tag owned by another user", async () => {
+    const server = await createTestServer();
+    await initializeUser(server, "alice");
+    const bob = await initializeUser(server, "bob");
+    const staffJwt = await authHeaders("staff", "STAFF");
+    await pairTag(server, bob.headers, "tag-bob");
+
+    const response = await server.request(
+      "/staff/unpair_user_tag",
+      await jsonRequest(
+        "POST",
+        {
+          user_id: "alice",
+          physical_id: "tag-bob",
+        },
+        staffJwt,
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(readJson(response)).resolves.toMatchObject({
+      code: "PHYSICAL_ID_MISMATCH",
+    });
+    await expect(
+      server.db.prepare("SELECT user_id FROM nfc_tags WHERE physical_id = 'tag-bob'").first(),
+    ).resolves.toEqual({ user_id: "bob" });
+  });
+
+  it("rejects invalid or unknown staff tag unpair requests", async () => {
+    const server = await createTestServer();
+    const staffJwt = await authHeaders("staff", "STAFF");
+
+    for (const body of [
+      null,
+      "nope",
+      {},
+      { user_id: "", physical_id: "tag-alice" },
+      { user_id: "alice", physical_id: "" },
+      { user_id: "alice", physical_id: "tag-alice", extra: true },
+    ]) {
+      const response = await server.request(
+        "/staff/unpair_user_tag",
+        await jsonRequest("POST", body, staffJwt),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(readJson(response)).resolves.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    }
+
+    const unknownUser = await server.request(
+      "/staff/unpair_user_tag",
       await jsonRequest(
         "POST",
         {
