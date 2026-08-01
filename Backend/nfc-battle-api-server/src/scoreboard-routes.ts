@@ -6,6 +6,11 @@ import { RANK_THRESHOLD } from "./game-config";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { calculateScore } from "./scoring";
 import { errorResponse, success } from "./responses";
+import {
+  getCachedScoreboardRankings,
+  putCachedScoreboardRankings,
+  type ScoreboardRanking,
+} from "./scoreboard-cache";
 import type { AppEnv } from "./types";
 
 const DEFAULT_LIMIT = 50;
@@ -28,14 +33,33 @@ scoreboard.get("/", async (c) => {
       return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
     }
 
-    const rankings =
+    const cachedRankings = await getCachedScoreboardRankings(
+      c.req.url,
+      state,
+      pagination.offset,
+      pagination.limit,
+    );
+    const rankings = cachedRankings ?? (
       state.state === "FROZEN" && state.freeze_id
         ? await getFrozenRankings(c.env.DB, state.freeze_id, pagination.offset, pagination.limit)
-        : await getLiveRankings(c.env.DB, pagination.offset, pagination.limit);
+        : await getLiveRankings(c.env.DB, pagination.offset, pagination.limit)
+    );
 
     const latestState = await getGameState(c.env.DB);
     if (!isSameGameStateSnapshot(state, latestState)) {
       continue;
+    }
+
+    if (!cachedRankings) {
+      c.executionCtx.waitUntil(
+        putCachedScoreboardRankings(
+          c.req.url,
+          state,
+          pagination.offset,
+          pagination.limit,
+          rankings,
+        ),
+      );
     }
 
     return success(c, {
@@ -59,7 +83,11 @@ scoreboard.get("/", async (c) => {
 
 export default scoreboard;
 
-async function getLiveRankings(db: D1Database, offset: number, limit: number) {
+async function getLiveRankings(
+  db: D1Database,
+  offset: number,
+  limit: number,
+): Promise<ScoreboardRanking[]> {
   const results = await getLiveCollectionScoreRows(db, offset, limit);
 
   return results.map((item) => ({
@@ -71,7 +99,12 @@ async function getLiveRankings(db: D1Database, offset: number, limit: number) {
   }));
 }
 
-async function getFrozenRankings(db: D1Database, freezeId: string, offset: number, limit: number) {
+async function getFrozenRankings(
+  db: D1Database,
+  freezeId: string,
+  offset: number,
+  limit: number,
+): Promise<ScoreboardRanking[]> {
   const results = await getFrozenScoreboardRows(db, freezeId, offset, limit);
 
   return results.map((item) => ({

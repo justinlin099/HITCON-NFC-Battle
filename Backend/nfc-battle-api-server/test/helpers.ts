@@ -128,8 +128,17 @@ export async function createTestServer(): Promise<TestServer> {
   return {
     env,
     db,
-    request(path, init) {
-      return Promise.resolve(app.request(`https://localhost${path}`, init, env));
+    async request(path, init) {
+      const backgroundTasks: Promise<unknown>[] = [];
+      const executionCtx = {
+        waitUntil(promise: Promise<unknown>) {
+          backgroundTasks.push(promise);
+        },
+        passThroughOnException() {},
+      } as ExecutionContext;
+      const response = await app.request(`https://localhost${path}`, init, env, executionCtx);
+      await Promise.all(backgroundTasks);
+      return response;
     },
   };
 }

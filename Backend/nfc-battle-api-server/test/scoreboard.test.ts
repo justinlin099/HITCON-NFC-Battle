@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authHeaders,
   createTestServer,
@@ -10,6 +10,10 @@ import {
 } from "./helpers";
 
 describe("mission and scoreboard edge cases", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("returns zero stamp progress for a newly initialized user", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
@@ -121,6 +125,50 @@ describe("mission and scoreboard edge cases", () => {
       { rank: 1, user_id: "bob", score: 10 },
       { rank: 2, user_id: "alice", score: 0 },
     ]);
+  });
+
+  it("caches live rankings by page while continuing to check scoreboard state", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    const bobAuth = await authHeaders("bob");
+    await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
+
+    const cache = new MemoryCache();
+    vi.stubGlobal("caches", { default: cache });
+    const recordingDb = new QueryRecordingDb(server.db);
+    server.env.DB = recordingDb as unknown as D1Database;
+
+    const first = await server.request("/scoreboard?offset=0&limit=2", { headers: aliceAuth });
+    const second = await server.request("/scoreboard?offset=0&limit=2", { headers: bobAuth });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await readJson(second)).toEqual(await readJson(first));
+    expect(recordingDb.rankingQueryCount).toBe(1);
+    expect(recordingDb.gameStateQueryCount).toBe(4);
+
+    const differentPage = await server.request("/scoreboard?offset=0&limit=1", {
+      headers: aliceAuth,
+    });
+    expect(differentPage.status).toBe(200);
+    expect(recordingDb.rankingQueryCount).toBe(2);
+
+    await server.db
+      .prepare(
+        `
+        UPDATE game_state
+        SET state = 'FREEZING', freeze_id = 'freeze_cache_test'
+        WHERE id = 1
+        `,
+      )
+      .run();
+
+    const freezing = await server.request("/scoreboard?offset=0&limit=2", {
+      headers: aliceAuth,
+    });
+    expect(freezing.status).toBe(409);
+    await expect(readJson(freezing)).resolves.toMatchObject({ code: "SCOREBOARD_FREEZING" });
+    expect(recordingDb.rankingQueryCount).toBe(2);
   });
 
   it("uses the freeze cutoff and keeps frozen scoreboard and prize snapshots immutable", async () => {
@@ -317,4 +365,37 @@ async function staffDangerHeaders() {
     ...(await authHeaders("staff", "STAFF")),
     ...staffHeaders(),
   };
+}
+
+class MemoryCache {
+  private readonly responses = new Map<string, Response>();
+
+  async match(request: Request) {
+    return this.responses.get(request.url)?.clone();
+  }
+
+  async put(request: Request, response: Response) {
+    this.responses.set(request.url, response.clone());
+  }
+}
+
+class QueryRecordingDb {
+  rankingQueryCount = 0;
+  gameStateQueryCount = 0;
+
+  constructor(private readonly db: D1Database) {}
+
+  prepare(query: string) {
+    if (query.includes("WITH collection_counts AS")) {
+      this.rankingQueryCount += 1;
+    }
+    if (query.includes("FROM game_state")) {
+      this.gameStateQueryCount += 1;
+    }
+    return this.db.prepare(query);
+  }
+
+  exec(query: string) {
+    return this.db.exec(query);
+  }
 }
