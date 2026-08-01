@@ -141,15 +141,11 @@ staffRoutes.post("/nfc-unlock-code", async (c) => {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
-  const user = await getUserRow(c.env.DB, request.user_id);
-  if (!user) {
-    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
-  }
-
-  const userTags = await getUserTags(c.env.DB, request.user_id);
-  if (!userTags.includes(request.uid)) {
-    return errorResponse(c, 403, "PHYSICAL_ID_MISMATCH", "Physical tag ID does not match user ID.");
-  }
+  // In some cases, the uid has been changed on the physical tag, so we cannot check for a match here. We will just return the unlock code if the user exists.
+  // const userTags = await getUserTags(c.env.DB, request.user_id);
+  // if (!userTags.includes(request.uid)) {
+  //   return errorResponse(c, 403, "PHYSICAL_ID_MISMATCH", "Physical tag ID does not match user ID.");
+  // }
 
   const profile = await getSelfProfile(c.env.DB, request.user_id);
   if (!profile?.nfc_tag_key) {
