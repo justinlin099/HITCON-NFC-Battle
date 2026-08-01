@@ -18,9 +18,8 @@ import 'services/ntag_security_service.dart';
 import 'services/remote_app_config_service.dart';
 import 'services/setup_service.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await RemoteAppConfigService.instance.refresh(force: true);
   runApp(const MyApp());
 }
 
@@ -41,6 +40,11 @@ class _SessionGateState extends State<_SessionGate> {
   }
 
   Future<void> _restoreAndRoute() async {
+    await RemoteAppConfigService.instance.refresh(force: true);
+    if (!mounted) {
+      return;
+    }
+
     final AuthService auth = AuthService();
     final bool restored = await auth.restoreSession();
     if (!mounted) {

@@ -8,8 +8,10 @@ import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/local_profile_store.dart';
 import '../../services/setup_service.dart';
+import '../../widgets/pixel_loading_overlay.dart';
 import '../../widgets/system_emoji_text_style.dart';
 import 'default_avatar_catalog.dart';
+import 'default_avatar_picker_page.dart';
 import 'emoji_catalog.dart';
 import 'https_link_input.dart';
 import 'my_card_editor_page.dart';
@@ -61,6 +63,10 @@ class _SetupPageState extends State<SetupPage> {
   Uint8List? _avatarBytes;
   String? _avatarBase64;
   String? _selectedDefaultAvatarAsset;
+  Map<String, dynamic>? _lastSyncedProfile;
+  Map<String, dynamic>? _pendingProfileSave;
+  Future<bool>? _profileSaveWorker;
+  bool _lastProfileSaveSucceeded = true;
 
   @override
   void initState() {
@@ -93,6 +99,7 @@ class _SetupPageState extends State<SetupPage> {
     if (rawColor is int) {
       _cardColor = Color(rawColor);
     }
+    _lastSyncedProfile = profile == null ? null : _profileUpdates();
 
     setState(() {
       _isLoading = false;
@@ -170,11 +177,17 @@ class _SetupPageState extends State<SetupPage> {
     });
   }
 
-  Future<bool> _saveProfile({bool quiet = false}) async {
-    if (_isSaving) {
-      return false;
+  Future<void> _openDefaultAvatars() async {
+    final DefaultAvatarOption? option = await openDefaultAvatarPicker(
+      context,
+      selectedAssetPath: _selectedDefaultAvatarAsset,
+    );
+    if (option != null && mounted) {
+      await _selectDefaultAvatar(option);
     }
+  }
 
+  bool _validateProfile() {
     if (validateHttpsLink(_linkController.text) != null) {
       final String message = context.l10n.tr('invalidHttpsLink');
       setState(() {
@@ -188,13 +201,11 @@ class _SetupPageState extends State<SetupPage> {
       );
       return false;
     }
+    return true;
+  }
 
-    setState(() {
-      _isSaving = true;
-      _status = quiet ? _status : context.l10n.tr('savingProfile');
-    });
-
-    final Map<String, dynamic> updates = <String, dynamic>{
+  Map<String, dynamic> _profileUpdates() {
+    return <String, dynamic>{
       'display_name': _displayNameController.text.trim(),
       'bio': _bioController.text.trim(),
       'link': buildHttpsLink(_linkController.text),
@@ -204,23 +215,86 @@ class _SetupPageState extends State<SetupPage> {
       if (_avatarBase64 != null) 'pixel_avatar_base64': _avatarBase64,
       if (_tagPaired && _tagUid.isNotEmpty) 'paired_ntag_uid': _tagUid,
     };
+  }
 
-    final String? userId = _authService.currentUserId;
-    if (userId != null) {
-      await _localProfileStore.save(userId, updates);
+  bool _queueCurrentProfileSave() {
+    if (!_validateProfile()) {
+      return false;
     }
-
-    final bool success = await _authService.updateUserProfile(updates);
-
-    if (!mounted) {
-      return true;
-    }
-
-    setState(() {
-      _isSaving = false;
-      _status = context.l10n.tr(success ? 'profileSaved' : 'profileSaveFailed');
-    });
+    _pendingProfileSave = Map<String, dynamic>.from(_profileUpdates());
+    unawaited(_ensureProfileSaveWorker());
     return true;
+  }
+
+  Future<bool> _ensureProfileSaveWorker() {
+    final Future<bool>? current = _profileSaveWorker;
+    if (current != null) {
+      return current;
+    }
+
+    late final Future<bool> tracked;
+    tracked = _processPendingProfileSaves().whenComplete(() {
+      if (identical(_profileSaveWorker, tracked)) {
+        _profileSaveWorker = null;
+      }
+      if (_pendingProfileSave != null) {
+        unawaited(_ensureProfileSaveWorker());
+      }
+    });
+    _profileSaveWorker = tracked;
+    return tracked;
+  }
+
+  Future<bool> _processPendingProfileSaves() async {
+    while (_pendingProfileSave != null) {
+      final Map<String, dynamic> snapshot = _pendingProfileSave!;
+      _pendingProfileSave = null;
+      bool localSuccess = true;
+
+      final String? userId = _authService.currentUserId;
+      if (userId != null) {
+        try {
+          await _localProfileStore.save(userId, snapshot);
+        } catch (_) {
+          localSuccess = false;
+        }
+      }
+
+      final Map<String, dynamic> changed = _changedProfileFields(snapshot);
+      final bool remoteSuccess =
+          changed.isEmpty || await _authService.updateUserProfile(changed);
+      if (remoteSuccess) {
+        _lastSyncedProfile = Map<String, dynamic>.from(snapshot);
+      }
+      _lastProfileSaveSucceeded = localSuccess && remoteSuccess;
+
+      if (!_lastProfileSaveSucceeded && mounted && !_isSaving) {
+        setState(() {
+          _status = context.l10n.tr('profileSaveFailed');
+        });
+      }
+    }
+    return _lastProfileSaveSucceeded;
+  }
+
+  Map<String, dynamic> _changedProfileFields(Map<String, dynamic> snapshot) {
+    final Map<String, dynamic>? previous = _lastSyncedProfile;
+    if (previous == null) {
+      return Map<String, dynamic>.from(snapshot);
+    }
+
+    return <String, dynamic>{
+      for (final MapEntry<String, dynamic> entry in snapshot.entries)
+        if (previous[entry.key] != entry.value) entry.key: entry.value,
+    };
+  }
+
+  Future<bool> _flushProfileSaves() async {
+    bool success = _lastProfileSaveSucceeded;
+    do {
+      success = await _ensureProfileSaveWorker();
+    } while (_pendingProfileSave != null || _profileSaveWorker != null);
+    return success;
   }
 
   Future<void> _startPairing() async {
@@ -251,6 +325,9 @@ class _SetupPageState extends State<SetupPage> {
   }
 
   Future<void> _finishSetup() async {
+    if (_isSaving) {
+      return;
+    }
     if (!_hasName) {
       setState(() {
         _stepIndex = _SetupStep.name.index;
@@ -258,16 +335,44 @@ class _SetupPageState extends State<SetupPage> {
       });
       return;
     }
-
-    if (!await _saveProfile(quiet: true)) {
+    if (!_queueCurrentProfileSave()) {
       return;
     }
-    final String? userId = _authService.currentUserId;
-    if (userId != null) {
-      await _setupService.markComplete(userId);
+
+    setState(() {
+      _isSaving = true;
+      _status = context.l10n.tr('savingProfile');
+    });
+
+    bool success = false;
+    try {
+      success = await runWithPixelLoadingOverlay<bool>(
+        context,
+        label: context.l10n.tr('savingProfile'),
+        action: () async {
+          final bool synced = await _flushProfileSaves();
+          if (!synced) {
+            return false;
+          }
+          final String? userId = _authService.currentUserId;
+          if (userId != null) {
+            await _setupService.markComplete(userId);
+          }
+          return true;
+        },
+      );
+    } catch (_) {
+      success = false;
     }
 
     if (!mounted) {
+      return;
+    }
+    if (!success) {
+      setState(() {
+        _isSaving = false;
+        _status = context.l10n.tr('profileSaveFailed');
+      });
       return;
     }
     unawaited(
@@ -285,20 +390,16 @@ class _SetupPageState extends State<SetupPage> {
       return;
     }
 
-    if (!await _saveProfile(quiet: true)) {
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-
     if (_stepIndex < _SetupStep.values.length - 1) {
+      if (!_queueCurrentProfileSave()) {
+        return;
+      }
       setState(() {
         _stepIndex += 1;
         _status = context.l10n.tr(_SetupStep.values[_stepIndex].hintKey);
       });
     } else {
-      unawaited(_finishSetup());
+      await _finishSetup();
     }
   }
 
@@ -434,8 +535,8 @@ class _SetupPageState extends State<SetupPage> {
                     ),
                     _FooterControls(
                       status: _status,
-                      canGoBack: _stepIndex > 0,
-                      canGoNext: canLeaveStep,
+                      canGoBack: _stepIndex > 0 && !_isSaving,
+                      canGoNext: canLeaveStep && !_isSaving,
                       nextLabel: nextLabel,
                       onBack: _previousStep,
                       onNext: () => unawaited(_nextStep()),
@@ -478,45 +579,13 @@ class _SetupPageState extends State<SetupPage> {
               ),
               const SizedBox(height: 16),
               Text(
-                context.l10n.tr('defaultAvatars'),
-                style: TextStyle(
-                  color: PixelTheme.accentBlue,
-                  fontFamily: 'Unifont',
-                  fontWeight: FontWeight.w900,
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                context.l10n.tr('defaultAvatarHint'),
+                context.l10n.tr('setupImageHint'),
                 style: TextStyle(
                   color: PixelTheme.textGray,
                   fontFamily: 'Unifont',
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
-              ),
-              const SizedBox(height: 10),
-              LayoutBuilder(
-                builder: (BuildContext context, BoxConstraints constraints) {
-                  final double tileWidth = (constraints.maxWidth - 16) / 3;
-                  return Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: defaultAvatarCatalog
-                        .map(
-                          (DefaultAvatarOption option) => _DefaultAvatarTile(
-                            option: option,
-                            width: tileWidth,
-                            selected:
-                                _selectedDefaultAvatarAsset == option.assetPath,
-                            onTap: () =>
-                                unawaited(_selectDefaultAvatar(option)),
-                          ),
-                        )
-                        .toList(growable: false),
-                  );
-                },
               ),
               if (_avatarBytes != null) ...[
                 const SizedBox(height: 16),
@@ -534,32 +603,19 @@ class _SetupPageState extends State<SetupPage> {
                 ),
               ],
               const SizedBox(height: 16),
-              Text(
-                context.l10n.tr('createOwnAvatar'),
-                style: TextStyle(
-                  color: PixelTheme.accentBlue,
-                  fontFamily: 'Unifont',
-                  fontWeight: FontWeight.w900,
-                  fontSize: 12,
-                ),
+              _PixelButton(
+                label: context.l10n.tr('defaultAvatars'),
+                onPressed: _openDefaultAvatars,
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: _PixelButton(
-                      label: context.l10n.tr('drawImage'),
-                      onPressed: _drawImage,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _PixelButton(
-                      label: context.l10n.tr('importImage'),
-                      onPressed: _importImage,
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 10),
+              _PixelButton(
+                label: context.l10n.tr('drawImage'),
+                onPressed: _drawImage,
+              ),
+              const SizedBox(height: 10),
+              _PixelButton(
+                label: context.l10n.tr('importImage'),
+                onPressed: _importImage,
               ),
             ],
           ),
@@ -1165,88 +1221,6 @@ class _EmojiChoice extends StatelessWidget {
         child: Text(
           option.emoji,
           style: systemEmojiTextStyle(fontSize: 26, height: 1),
-        ),
-      ),
-    );
-  }
-}
-
-class _DefaultAvatarTile extends StatelessWidget {
-  const _DefaultAvatarTile({
-    required this.option,
-    required this.width,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final DefaultAvatarOption option;
-  final double width;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final String label = context.l10n.tr(option.labelKey);
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: width,
-          padding: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            color: PixelTheme.bgDark,
-            border: Border.all(
-              color: selected ? PixelTheme.textWhite : PixelTheme.border,
-              width: selected ? 3 : 2,
-            ),
-            boxShadow: selected
-                ? const [
-                    BoxShadow(
-                      color: Colors.black,
-                      blurRadius: 0,
-                      offset: Offset(3, 3),
-                    ),
-                  ]
-                : const [],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AspectRatio(
-                aspectRatio: 1,
-                child: Image.asset(
-                  option.assetPath,
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.none,
-                  gaplessPlayback: true,
-                ),
-              ),
-              const SizedBox(height: 5),
-              SizedBox(
-                height: 26,
-                child: Center(
-                  child: Text(
-                    label,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: selected
-                          ? PixelTheme.accent
-                          : PixelTheme.textWhite,
-                      fontFamily: 'Unifont',
-                      fontSize: 10,
-                      height: 1.15,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

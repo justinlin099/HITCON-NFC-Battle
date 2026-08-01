@@ -128,25 +128,33 @@ class RemoteAppConfigService {
         _timeout,
       );
       if (response.statusCode != HttpStatus.ok) {
+        // Finish the response stream before the authentication request starts.
+        await response.drain<void>().timeout(_timeout);
         throw HttpException(
           'Remote config returned HTTP ${response.statusCode}.',
           uri: uri,
         );
       }
       if (response.contentLength > _maxConfigBytes) {
+        await response.drain<void>().timeout(_timeout);
         throw const FormatException('Remote config is too large.');
       }
 
       final BytesBuilder bytes = BytesBuilder(copy: false);
+      bool exceedsLimit = false;
       await for (final List<int> chunk in response.timeout(_timeout)) {
-        if (bytes.length + chunk.length > _maxConfigBytes) {
-          throw const FormatException('Remote config is too large.');
+        if (exceedsLimit || bytes.length + chunk.length > _maxConfigBytes) {
+          exceedsLimit = true;
+          continue;
         }
         bytes.add(chunk);
       }
+      if (exceedsLimit) {
+        throw const FormatException('Remote config is too large.');
+      }
       return utf8.decode(bytes.takeBytes());
     } finally {
-      client.close(force: true);
+      client.close();
     }
   }
 

@@ -14,6 +14,8 @@ import '../../config/app_config.dart';
 import '../../l10n/app_localizations.dart';
 import '../../widgets/pixel_loading_overlay.dart';
 import '../../widgets/system_emoji_text_style.dart';
+import 'default_avatar_catalog.dart';
+import 'default_avatar_picker_page.dart';
 import 'pixel_theme.dart';
 import 'pixel_card_face.dart';
 import 'pixel_link_dialog.dart';
@@ -24,6 +26,7 @@ import 'ntag_pairing_page.dart';
 import '../../services/auth_service.dart';
 import '../../services/local_collection_store.dart';
 import '../../services/local_profile_store.dart';
+import '../../services/local_print_order_store.dart';
 
 typedef PixelGrid = List<List<Color?>>;
 
@@ -361,14 +364,18 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
       return null;
     }
     try {
-      final img.Image? decoded = img.decodeImage(base64Decode(raw));
-      if (decoded == null) {
-        return null;
-      }
-      return _imageToPixelGridSimple(decoded, _canvasSize);
+      return _decodePixelBytes(base64Decode(raw));
     } catch (_) {
       return null;
     }
+  }
+
+  PixelGrid? _decodePixelBytes(Uint8List bytes) {
+    final img.Image? decoded = img.decodeImage(bytes);
+    if (decoded == null) {
+      return null;
+    }
+    return _imageToPixelGridSimple(decoded, _canvasSize);
   }
 
   Future<void> _saveProfile() async {
@@ -722,23 +729,56 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   }
 
   Future<void> _openPixelEditor() async {
-    final _PixelEditResult? result = await Navigator.of(context)
-        .push<_PixelEditResult>(
-          MaterialPageRoute<_PixelEditResult>(
-            builder: (_) => _PixelEditorScreen(
-              initialPixels: _pixels,
-              cardColor: _cardColor,
-              canvasSize: _canvasSize,
-            ),
-          ),
-        );
-
-    if (result == null) {
+    final _CardImageSource? source = await showDialog<_CardImageSource>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.72),
+      builder: (_) => const _CardImageSourceDialog(),
+    );
+    if (source == null || !mounted) {
       return;
     }
 
+    Uint8List? bytes;
+    switch (source) {
+      case _CardImageSource.draw:
+        bytes = await _openCardPixelEditorWithGrid(
+          context,
+          initialPixels: _cloneGrid(_pixels),
+          cardColor: _cardColor,
+          canvasSize: _canvasSize,
+        );
+        break;
+      case _CardImageSource.importImage:
+        bytes = await openImportedCardPixelEditor(
+          context,
+          cardColor: _cardColor,
+          canvasSize: _canvasSize,
+        );
+        break;
+      case _CardImageSource.defaultAvatar:
+        final DefaultAvatarOption? option = await openDefaultAvatarPicker(
+          context,
+        );
+        if (option != null) {
+          final ByteData data = await rootBundle.load(option.assetPath);
+          bytes = data.buffer.asUint8List(
+            data.offsetInBytes,
+            data.lengthInBytes,
+          );
+        }
+        break;
+    }
+
+    if (bytes == null || !mounted) {
+      return;
+    }
+    final PixelGrid? pixels = _decodePixelBytes(bytes);
+    if (pixels == null) {
+      _showEditorSnack(context.l10n.tr('unsupportedImage'));
+      return;
+    }
     setState(() {
-      _pixels = result.pixels;
+      _pixels = pixels;
     });
     await _saveProfile();
   }
@@ -888,20 +928,10 @@ class _PokemonStyleCard extends StatelessWidget {
 
   List<String> _emojiPreviewRows(String value) {
     final List<String> rows = value.characters
-        .where(_containsEmoji)
+        .where(isEmojiGrapheme)
         .take(3)
         .toList(growable: false);
     return rows.isEmpty ? <String>[value] : rows;
-  }
-
-  bool _containsEmoji(String value) {
-    for (final int rune in value.runes) {
-      if ((rune >= 0x1F000 && rune <= 0x1FAFF) ||
-          (rune >= 0x2600 && rune <= 0x27BF)) {
-        return true;
-      }
-    }
-    return false;
   }
 
   static String emojiLabel(String value) {
@@ -1098,6 +1128,148 @@ class _EditorActionButton extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _CardImageSource { draw, importImage, defaultAvatar }
+
+class _CardImageSourceDialog extends StatelessWidget {
+  const _CardImageSourceDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(color: PixelTheme.accent, width: 3),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              context.l10n.tr('chooseImageSourceTitle'),
+              style: TextStyle(
+                color: PixelTheme.accent,
+                fontFamily: 'Unifont',
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              context.l10n.tr('chooseImageSourceBody'),
+              style: TextStyle(
+                color: PixelTheme.textGray,
+                fontFamily: 'Unifont',
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 14),
+            _EditorActionButton(
+              label: context.l10n.tr('drawImage'),
+              onTap: () => Navigator.of(context).pop(_CardImageSource.draw),
+              color: PixelTheme.textWhite,
+            ),
+            const SizedBox(height: 10),
+            _EditorActionButton(
+              label: context.l10n.tr('chooseImage'),
+              onTap: () =>
+                  Navigator.of(context).pop(_CardImageSource.importImage),
+              color: PixelTheme.textWhite,
+            ),
+            const SizedBox(height: 10),
+            _EditorActionButton(
+              label: context.l10n.tr('defaultImageCollection'),
+              onTap: () =>
+                  Navigator.of(context).pop(_CardImageSource.defaultAvatar),
+              color: PixelTheme.textWhite,
+            ),
+            const SizedBox(height: 10),
+            _EditorActionButton(
+              label: context.l10n.tr('cancel'),
+              onTap: () => Navigator.of(context).pop(),
+              color: PixelTheme.textGray,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ImageSaveConfirmDialog extends StatelessWidget {
+  const _ImageSaveConfirmDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(color: PixelTheme.accent, width: 3),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              context.l10n.tr('confirmSaveImageTitle'),
+              style: TextStyle(
+                color: PixelTheme.accent,
+                fontFamily: 'Unifont',
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              context.l10n.tr('confirmSaveImageBody'),
+              style: TextStyle(
+                color: PixelTheme.textWhite,
+                fontFamily: 'Unifont',
+                fontSize: 12,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: _PixelDialogButton(
+                    label: context.l10n.tr('cancel'),
+                    color: PixelTheme.textGray,
+                    onTap: () => Navigator.of(context).pop(false),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _PixelDialogButton(
+                    label: context.l10n.tr('save'),
+                    color: PixelTheme.accent,
+                    onTap: () => Navigator.of(context).pop(true),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -1388,20 +1560,6 @@ class _BackupImportDialogState extends State<_BackupImportDialog> {
   }
 }
 
-class _PrintOrder {
-  const _PrintOrder({
-    required this.id,
-    required this.barcodeValue,
-    required this.fileName,
-    required this.format,
-  });
-
-  final String id;
-  final String barcodeValue;
-  final String fileName;
-  final String format;
-}
-
 class _CardPrintPreviewScreen extends StatefulWidget {
   const _CardPrintPreviewScreen({
     required this.name,
@@ -1426,8 +1584,16 @@ class _CardPrintPreviewScreen extends StatefulWidget {
 
 class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
   final AuthService _authService = AuthService();
-  _PrintOrder? _order;
+  final LocalPrintOrderStore _printOrderStore = LocalPrintOrderStore();
+  LocalPrintOrder? _order;
+  bool _isLoadingOrder = true;
   bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_restorePrintOrder());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1473,13 +1639,19 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
                     SizedBox(height: s(18)),
                     _PrintInfoPanel(order: _order),
                     SizedBox(height: s(14)),
-                    if (_order == null)
+                    if (_isLoadingOrder)
+                      _EditorActionButton(
+                        label: context.l10n.tr('loading'),
+                        color: PixelTheme.textGray,
+                        onTap: () {},
+                      )
+                    else if (_order == null)
                       _EditorActionButton(
                         label: context.l10n.tr(
                           _isSubmitting ? 'submitting' : 'submitPrintOrder',
                         ),
                         color: PixelTheme.accent,
-                        onTap: _isSubmitting ? () {} : _submitPrintOrder,
+                        onTap: _isSubmitting ? () {} : _requestPrintOrder,
                       )
                     else ...[
                       _BarcodeCard(order: _order!),
@@ -1495,6 +1667,14 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
                         color: PixelTheme.accentBlue,
                         onTap: () => _copyOrderId(_order!.id),
                       ),
+                      const SizedBox(height: 10),
+                      _EditorActionButton(
+                        label: context.l10n.tr(
+                          _isSubmitting ? 'submitting' : 'resubmitPrintOrder',
+                        ),
+                        color: PixelTheme.warning,
+                        onTap: _isSubmitting ? () {} : _requestPrintOrder,
+                      ),
                     ],
                   ],
                 ),
@@ -1504,6 +1684,37 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _restorePrintOrder() async {
+    final String? userId = _authService.currentUserId;
+    final LocalPrintOrder? order = userId == null
+        ? null
+        : await _printOrderStore.load(userId);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _order = order;
+      _isLoadingOrder = false;
+    });
+  }
+
+  Future<void> _requestPrintOrder() async {
+    if (_isSubmitting) {
+      return;
+    }
+    if (_order != null) {
+      final bool? confirmed = await showDialog<bool>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.72),
+        builder: (_) => const _PrintResubmitConfirmDialog(),
+      );
+      if (confirmed != true || !mounted) {
+        return;
+      }
+    }
+    await _submitPrintOrder();
   }
 
   Future<void> _submitPrintOrder() async {
@@ -1565,19 +1776,30 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
       );
       return;
     }
+    final LocalPrintOrder order = LocalPrintOrder(
+      id: id,
+      barcodeValue: barcodeValue,
+      fileName: response['file_name'] as String? ?? 'card-print-$id.png',
+      format: response['format'] as String? ?? 'EVOLIS_PRIMACY_CR80_300DPI_PNG',
+    );
+    final String? userId = _authService.currentUserId;
+    final bool saved =
+        userId != null && await _printOrderStore.save(userId, order);
+    if (!mounted) {
+      return;
+    }
     setState(() {
       _isSubmitting = false;
-      _order = _PrintOrder(
-        id: id,
-        barcodeValue: barcodeValue,
-        fileName: response['file_name'] as String? ?? 'card-print-$id.png',
-        format:
-            response['format'] as String? ?? 'EVOLIS_PRIMACY_CR80_300DPI_PNG',
-      );
+      _order = order;
     });
+    if (!saved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.tr('printOrderSaveFailed'))),
+      );
+    }
   }
 
-  void _openBarcodeSaveScreen(_PrintOrder order) {
+  void _openBarcodeSaveScreen(LocalPrintOrder order) {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(builder: (_) => _BarcodeSaveScreen(order: order)),
     );
@@ -1917,10 +2139,116 @@ class _PrintDescription extends StatelessWidget {
   }
 }
 
+class _PrintResubmitConfirmDialog extends StatelessWidget {
+  const _PrintResubmitConfirmDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(color: PixelTheme.warning, width: 3),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              context.l10n.tr('resubmitPrintTitle'),
+              style: TextStyle(
+                color: PixelTheme.warning,
+                fontFamily: 'Unifont',
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              context.l10n.tr('resubmitPrintBody'),
+              style: TextStyle(
+                color: PixelTheme.textWhite,
+                fontFamily: 'Unifont',
+                fontSize: 12,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: _PixelDialogButton(
+                    label: context.l10n.tr('cancel'),
+                    color: PixelTheme.textGray,
+                    onTap: () => Navigator.of(context).pop(false),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _PixelDialogButton(
+                    label: context.l10n.tr('confirm'),
+                    color: PixelTheme.warning,
+                    onTap: () => Navigator.of(context).pop(true),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PixelDialogButton extends StatelessWidget {
+  const _PixelDialogButton({
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 44,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: PixelTheme.bgDark,
+          border: Border.all(color: color, width: 2),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(3, 3)),
+          ],
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontFamily: 'Unifont',
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PrintInfoPanel extends StatelessWidget {
   const _PrintInfoPanel({required this.order});
 
-  final _PrintOrder? order;
+  final LocalPrintOrder? order;
 
   @override
   Widget build(BuildContext context) {
@@ -1963,7 +2291,7 @@ class _PrintInfoPanel extends StatelessWidget {
 class _BarcodeCard extends StatelessWidget {
   const _BarcodeCard({required this.order});
 
-  final _PrintOrder order;
+  final LocalPrintOrder order;
 
   @override
   Widget build(BuildContext context) {
@@ -2027,7 +2355,7 @@ class _BarcodeCard extends StatelessWidget {
 class _BarcodeSaveScreen extends StatelessWidget {
   const _BarcodeSaveScreen({required this.order});
 
-  final _PrintOrder order;
+  final LocalPrintOrder order;
 
   @override
   Widget build(BuildContext context) {
@@ -3052,6 +3380,24 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
     });
   }
 
+  Future<void> _confirmAndApply() async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.72),
+      builder: (_) => const _ImageSaveConfirmDialog(),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    Navigator.of(context).pop(
+      _PixelEditResult(
+        pixels: _cloneGrid(_pixels),
+        status:
+            'Image will be converted to ${widget.canvasSize}x${widget.canvasSize} pixels',
+      ),
+    );
+  }
+
   void _clearCanvas() {
     _pushHistory();
     setState(() {
@@ -3483,15 +3829,7 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
                   child: SizedBox(
                     width: double.infinity,
                     child: FilledButton(
-                      onPressed: () {
-                        Navigator.of(context).pop(
-                          _PixelEditResult(
-                            pixels: _cloneGrid(_pixels),
-                            status:
-                                'Image will be converted to ${widget.canvasSize}x${widget.canvasSize} pixels',
-                          ),
-                        );
-                      },
+                      onPressed: _confirmAndApply,
                       style: FilledButton.styleFrom(
                         backgroundColor: PixelTheme.accent,
                         foregroundColor: PixelTheme.bgDark,

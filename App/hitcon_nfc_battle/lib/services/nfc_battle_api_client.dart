@@ -138,7 +138,8 @@ class NfcBattleApiClient {
       final HttpClientResponse response = await request.close().timeout(
         _requestTimeout,
       );
-      return _decodeJsonResponse(response);
+      final Map<String, dynamic> decoded = await _decodeJsonResponse(response);
+      return decoded;
     } finally {
       client.close(force: true);
     }
@@ -171,7 +172,8 @@ class NfcBattleApiClient {
       final HttpClientResponse response = await request.close().timeout(
         _requestTimeout,
       );
-      return _decodeJsonResponse(response);
+      final Map<String, dynamic> decoded = await _decodeJsonResponse(response);
+      return decoded;
     } finally {
       client.close(force: true);
     }

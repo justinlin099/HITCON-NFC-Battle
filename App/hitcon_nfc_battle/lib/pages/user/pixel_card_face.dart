@@ -31,6 +31,7 @@ class PixelCardFace extends StatelessWidget {
     this.onTapAttribute,
     this.titleSuffix,
     this.attributeSuffix,
+    this.bottomLeftWatermark,
   });
 
   final String title;
@@ -58,6 +59,7 @@ class PixelCardFace extends StatelessWidget {
   final VoidCallback? onTapAttribute;
   final Widget? titleSuffix;
   final Widget? attributeSuffix;
+  final Widget? bottomLeftWatermark;
 
   @override
   Widget build(BuildContext context) {
@@ -216,6 +218,12 @@ class PixelCardFace extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (bottomLeftWatermark != null)
+                  Positioned(
+                    left: 0,
+                    bottom: 0,
+                    child: IgnorePointer(child: bottomLeftWatermark!),
+                  ),
                 Positioned(
                   right: 0,
                   bottom: 0,
@@ -262,7 +270,7 @@ class PixelCardFace extends StatelessWidget {
         .map(
           (String cluster) => TextSpan(
             text: cluster,
-            style: _containsEmoji(cluster) ? emojiStyle : labelStyle,
+            style: isEmojiGrapheme(cluster) ? emojiStyle : labelStyle,
           ),
         )
         .toList(growable: false);
@@ -306,18 +314,8 @@ class PixelCardFace extends StatelessWidget {
 
   List<String> _attributeEmojiClusters() {
     return attributeEmoji.characters
-        .where(_containsEmoji)
+        .where(isEmojiGrapheme)
         .take(3)
         .toList(growable: false);
-  }
-
-  bool _containsEmoji(String value) {
-    for (final int rune in value.runes) {
-      if ((rune >= 0x1F000 && rune <= 0x1FAFF) ||
-          (rune >= 0x2600 && rune <= 0x27BF)) {
-        return true;
-      }
-    }
-    return false;
   }
 }

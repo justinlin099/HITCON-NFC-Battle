@@ -4,8 +4,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class LocalProfileStore {
   static const String _prefix = 'local_profile_v1';
+  final Map<String, Map<String, dynamic>> _cache =
+      <String, Map<String, dynamic>>{};
 
   Future<Map<String, dynamic>> load(String userId) async {
+    final Map<String, dynamic>? cached = _cache[userId];
+    if (cached != null) {
+      return Map<String, dynamic>.from(cached);
+    }
+
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? raw = prefs.getString(_key(userId));
     if (raw == null || raw.trim().isEmpty) {
@@ -15,7 +22,9 @@ class LocalProfileStore {
     try {
       final dynamic decoded = jsonDecode(raw);
       if (decoded is Map<String, dynamic>) {
-        return Map<String, dynamic>.from(decoded);
+        final Map<String, dynamic> profile = Map<String, dynamic>.from(decoded);
+        _cache[userId] = profile;
+        return Map<String, dynamic>.from(profile);
       }
     } catch (_) {
       return <String, dynamic>{};
@@ -28,6 +37,7 @@ class LocalProfileStore {
     final Map<String, dynamic> current = await load(userId);
     current.addAll(_jsonMap(profile));
     current['updated_at'] = DateTime.now().toIso8601String();
+    _cache[userId] = Map<String, dynamic>.from(current);
     await prefs.setString(_key(userId), jsonEncode(current));
   }
 

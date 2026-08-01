@@ -9,6 +9,7 @@ import 'pixel_theme.dart';
 import 'pixel_card_face.dart';
 import 'pixel_link_dialog.dart';
 import 'pixel_link_icon.dart';
+import 'panasonic_support_mark.dart';
 
 class CardDetailPage extends StatefulWidget {
   const CardDetailPage({
@@ -143,6 +144,15 @@ class _CardDetailPageState extends State<CardDetailPage> {
                                   watermarkScale: 1.6,
                                   imageToTitleSpacing: s(8),
                                   extraContentSpacing: s(8),
+                                  bottomLeftWatermark: Transform.translate(
+                                    offset: Offset(s(8), -s(8)),
+                                    child: PanasonicSupportMark(
+                                      width: cardWidth * 0.34,
+                                      color: PixelTheme.textWhite.withValues(
+                                        alpha: 0.18,
+                                      ),
+                                    ),
+                                  ),
                                   image: _cardImage(),
                                   fixedContent: _LinkRow(
                                     link: widget.link,
