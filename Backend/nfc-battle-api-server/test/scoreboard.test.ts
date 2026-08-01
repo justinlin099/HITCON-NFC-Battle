@@ -100,6 +100,31 @@ describe("mission and scoreboard edge cases", () => {
     ]);
   });
 
+  it("returns the authenticated user's live rank without loading the scoreboard page", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    const bobAuth = await authHeaders("bob");
+    const carolAuth = await authHeaders("carol");
+
+    await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
+    await server.request("/users/me", { headers: carolAuth });
+    expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
+    expect((await scanTag(server, bobAuth, "carol", "tag-carol")).status).toBe(200);
+
+    const response = await server.request("/scoreboard/me", { headers: aliceAuth });
+
+    expect(response.status).toBe(200);
+    await expect(readJson(response)).resolves.toMatchObject({
+      data: {
+        rank: 2,
+        frozen: false,
+        freeze_id: null,
+        scoring_cutoff_at: null,
+      },
+    });
+  });
+
   it("applies the phishing penalty to live scores and ranks", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");

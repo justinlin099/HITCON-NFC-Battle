@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
-import { getLiveCollectionScoreRows } from "./collection-store";
-import { getFrozenScoreboardRows, getPrizeClaimsVersion } from "./freeze-snapshot-store";
+import { getLiveCollectionScoreRows, getLiveUserRank } from "./collection-store";
+import {
+  getFrozenScoreboardRows,
+  getPrizeClaimsVersion,
+  getPrizeResult,
+} from "./freeze-snapshot-store";
 import { RANK_THRESHOLD } from "./game-config";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { calculateScore } from "./scoring";
@@ -74,6 +78,40 @@ scoreboard.get("/", async (c) => {
       freeze_id: state.state === "FROZEN" ? state.freeze_id : null,
       scoring_cutoff_at: state.state === "FROZEN" ? state.scoring_cutoff_at : null,
       rankings,
+    });
+  }
+
+  return errorResponse(
+    c,
+    409,
+    "SCOREBOARD_READ_INCONSISTENT",
+    "Scoreboard state changed while reading. Please retry.",
+  );
+});
+
+scoreboard.get("/me", async (c) => {
+  const authUser = c.get("authUser");
+
+  for (let attempt = 0; attempt < MAX_CONSISTENT_READ_ATTEMPTS; attempt += 1) {
+    const state = await getGameState(c.env.DB);
+    if (state.state === "FREEZING") {
+      return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
+    }
+
+    const rank = state.state === "FROZEN" && state.freeze_id
+      ? (await getPrizeResult(c.env.DB, state.freeze_id, authUser.userId))?.rank ?? null
+      : await getLiveUserRank(c.env.DB, authUser.userId);
+
+    const latestState = await getGameState(c.env.DB);
+    if (!isSameGameStateSnapshot(state, latestState)) {
+      continue;
+    }
+
+    return success(c, {
+      rank,
+      frozen: state.state === "FROZEN",
+      freeze_id: state.state === "FROZEN" ? state.freeze_id : null,
+      scoring_cutoff_at: state.state === "FROZEN" ? state.scoring_cutoff_at : null,
     });
   }
 

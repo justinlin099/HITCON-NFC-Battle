@@ -175,3 +175,41 @@ export async function getLiveCollectionScoreRows(db: D1Database, offset: number,
 
   return results;
 }
+
+export async function getLiveUserRank(db: D1Database, userId: string) {
+  const row = await db
+    .prepare(
+      `
+      WITH collection_counts AS (
+        SELECT scanner_user_id AS user_id, COUNT(*) AS num_of_collection
+        FROM collections
+        GROUP BY scanner_user_id
+      ),
+      phishing_counts AS (
+        SELECT victim_user_id AS user_id, COUNT(*) AS num_of_phishing
+        FROM phishing_events
+        GROUP BY victim_user_id
+      ),
+      scores AS (
+        SELECT
+          users.user_id,
+          (COALESCE(collection_counts.num_of_collection, 0) * ?1)
+            - (COALESCE(phishing_counts.num_of_phishing, 0) * ?2) AS score
+        FROM users
+        LEFT JOIN collection_counts ON collection_counts.user_id = users.user_id
+        LEFT JOIN phishing_counts ON phishing_counts.user_id = users.user_id
+      ),
+      ranked AS (
+        SELECT ROW_NUMBER() OVER (ORDER BY score DESC, user_id ASC) AS rank, user_id
+        FROM scores
+      )
+      SELECT rank
+      FROM ranked
+      WHERE user_id = ?3
+      `,
+    )
+    .bind(SCORE_PER_COLLECTION, PHISHING_PENALTY, userId)
+    .first<{ rank: number }>();
+
+  return row?.rank ?? null;
+}

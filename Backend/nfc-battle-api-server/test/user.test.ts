@@ -15,6 +15,7 @@ describe("user profile behavior", () => {
       };
     };
     expect(aliceInitBody.data.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
+    expect(aliceInitBody.data).not.toHaveProperty("rank");
 
     const missingBob = await server.request("/users/bob", { headers: aliceAuth });
     expect(missingBob.status).toBe(404);

@@ -627,6 +627,38 @@ paths:
                   $ref: '#/components/examples/ScoreboardFreezingError'
                 read_inconsistent:
                   $ref: '#/components/examples/ScoreboardReadInconsistentError'
+  /scoreboard/me:
+    get:
+      tags: [Scoreboard]
+      summary: Get my current rank
+      description: |
+        Returns the authenticated user's global rank. In `OPEN`, the rank uses
+        live scores; in `FROZEN`, it uses the stored scoreboard snapshot. This
+        endpoint is rejected while the scoreboard is `FREEZING` or if its state
+        changes during the read.
+      responses:
+        '200':
+          description: Current rank loaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetMyScoreboardRankResponse'
+              examples:
+                rank:
+                  $ref: '#/components/examples/GetMyScoreboardRankResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          description: Scoreboard is freezing, or the read saw a transient scoreboard state change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                freezing:
+                  $ref: '#/components/examples/ScoreboardFreezingError'
+                read_inconsistent:
+                  $ref: '#/components/examples/ScoreboardReadInconsistentError'
   /staff/scoreboard_status:
     get:
       tags: [Staff]
@@ -1833,6 +1865,37 @@ components:
               items:
                 $ref: '#/components/schemas/ScoreboardItem'
 
+    GetMyScoreboardRankResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: object
+          required: [rank, frozen, freeze_id, scoring_cutoff_at]
+          properties:
+            rank:
+              type: integer
+              nullable: true
+              description: Authenticated user's global rank, or null if the user has no scoreboard entry.
+              example: 7
+            frozen:
+              type: boolean
+              example: false
+            freeze_id:
+              type: string
+              nullable: true
+              description: Current freeze snapshot ID when frozen, otherwise null.
+              example: freeze_20260412_01
+            scoring_cutoff_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Latest event timestamp included in the frozen score snapshot, or null for live scores.
+              example: '2026-04-12T15:00:00Z'
+
     GetMyPrizeResponse:
       type: object
       required: [status, data]
@@ -2180,6 +2243,15 @@ components:
               emoji_icon: 🐱
               score: 2480
               external_prize: false
+
+    GetMyScoreboardRankResponse:
+      value:
+        status: success
+        data:
+          rank: 7
+          frozen: false
+          freeze_id: null
+          scoring_cutoff_at: null
 
     GetMyPrizeResponse:
       value:

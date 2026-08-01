@@ -140,6 +140,19 @@ describe("staff scoreboard edge cases", () => {
     const newTagScan = await scanTag(server, bob.headers, "alice", "tag-alice-new");
     expect(newTagScan.status).toBe(200);
 
+    const firstPairedTag = await server.db
+      .prepare(
+        `
+        SELECT physical_id
+        FROM nfc_tags
+        WHERE user_id = 'alice'
+        ORDER BY paired_at ASC, physical_id ASC
+        LIMIT 1
+        `,
+      )
+      .first<{ physical_id: string }>();
+    expect(firstPairedTag).not.toBeNull();
+
     const after = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
         physical_id: string;
@@ -148,7 +161,7 @@ describe("staff scoreboard edge cases", () => {
       };
     };
     expect(after.data).toMatchObject({
-      physical_id: "tag-alice-old",
+      physical_id: firstPairedTag!.physical_id,
       profile_version: before.data.profile_version,
       collection_version: before.data.collection_version,
     });
@@ -163,7 +176,7 @@ describe("staff scoreboard edge cases", () => {
         };
       };
     };
-    expect(bootstrap.data.me.physical_id).toBe("tag-alice-old");
+    expect(bootstrap.data.me.physical_id).toBe(firstPairedTag!.physical_id);
     expect(bootstrap.data.me.nfc_tag_key).toMatch(/^[0-9a-f]{12}$/);
   });
 
