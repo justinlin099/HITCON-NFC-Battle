@@ -78,4 +78,38 @@ describe("print cards", () => {
     expect(response.status).toBe(413);
     await expect(readJson(response)).resolves.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
   });
+
+  it("replaces a user's previous request and deletes its R2 object", async () => {
+    const server = await createTestServer();
+    const headers = await authHeaders("alice");
+    const upload = async () => {
+      const form = new FormData();
+      form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");
+      const response = await server.request("/print-cards", { method: "POST", headers, body: form });
+      expect(response.status).toBe(200);
+      return readJson(response) as Promise<{ data: { short_token: string } }>;
+    };
+
+    const first = await upload();
+    const firstCard = await server.db
+      .prepare("SELECT object_key FROM print_card_objects WHERE short_token = ?1")
+      .bind(first.data.short_token)
+      .first<{ object_key: string }>();
+    expect(firstCard).not.toBeNull();
+
+    const second = await upload();
+    expect(second.data.short_token).not.toBe(first.data.short_token);
+    await expect(
+      server.db
+        .prepare("SELECT COUNT(*) AS count FROM print_card_objects WHERE user_id = ?1")
+        .bind("alice")
+        .first<{ count: number }>(),
+    ).resolves.toEqual({ count: 1 });
+    await expect(server.env.PRINT_CARD_IMAGES.get(firstCard!.object_key)).resolves.toBeNull();
+
+    const oldToken = await server.request(`/staff/print-cards/${first.data.short_token}`, {
+      headers: await authHeaders("staff", "STAFF"),
+    });
+    expect(oldToken.status).toBe(404);
+  });
 });

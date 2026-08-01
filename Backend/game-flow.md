@@ -56,7 +56,7 @@ The user can still use `PATCH /users/me` to update their profile at any time.
 
 ### Printing and Pairing NFC Cards
 
-The app can call `POST /print-cards` with the user's JWT and one PNG image. The API stores the PNG in protected object storage, stores its opaque object metadata in D1, and returns a short token. The app renders that token as a barcode for the printing workflow. This endpoint may lazy-initialize the user when their JWT is valid.
+The app can call `POST /print-cards` with the user's JWT and one PNG image. The API stores the PNG in protected object storage, stores its opaque object metadata in D1, and returns a short token. The app renders that token as a barcode for the printing workflow. This endpoint may lazy-initialize the user when their JWT is valid. Each new upload replaces that user's previous print-card request: the old metadata and PNG object are replaced, the old R2 object is deleted, and the previous barcode token stops working.
 
 After scanning the barcode, staff can call `GET /staff/print-cards/{short_token}` with a JWT whose `role` is `STAFF` to download the original PNG for printing.
 

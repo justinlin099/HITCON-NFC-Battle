@@ -878,7 +878,9 @@ paths:
         Stores one PNG image in protected object storage for the authenticated
         user and returns a compact, opaque `short_token`. The app renders that
         token as a barcode on the print card. The image is only downloadable by STAFF through
-        `GET /staff/print-cards/{short_token}`.
+        `GET /staff/print-cards/{short_token}`. Each new upload replaces the
+        authenticated user's previous request, deletes its old PNG object, and
+        invalidates its old token.
       requestBody:
         required: true
         content:
