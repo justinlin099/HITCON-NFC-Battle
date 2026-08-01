@@ -22,6 +22,10 @@ class RemoteAppConfigService {
   static const String _cachedApiBaseUrlKey = 'remote_api_base_url_v1';
   static const String _cachedAllowUserTagUnlockKey =
       'remote_allow_user_tag_unlock_v1';
+  static const String _cachedShowPanasonicLogoKey =
+      'remote_show_panasonic_logo_v1';
+  static const String _cachedShowPanasonicLogoOnPrintKey =
+      'remote_show_panasonic_logo_on_print_v1';
   static const Duration _timeout = Duration(seconds: 4);
   static const int _maxConfigBytes = 16 * 1024;
 
@@ -70,6 +74,18 @@ class RemoteAppConfigService {
     if (cachedAllowUserTagUnlock != null) {
       AppConfig.applyRemoteAllowUserTagUnlock(cachedAllowUserTagUnlock);
     }
+    final bool? cachedShowPanasonicLogo = prefs.getBool(
+      _cachedShowPanasonicLogoKey,
+    );
+    if (cachedShowPanasonicLogo != null) {
+      AppConfig.applyRemoteShowPanasonicLogo(cachedShowPanasonicLogo);
+    }
+    final bool? cachedShowPanasonicLogoOnPrint = prefs.getBool(
+      _cachedShowPanasonicLogoOnPrintKey,
+    );
+    AppConfig.applyRemoteShowPanasonicLogoOnPrint(
+      cachedShowPanasonicLogoOnPrint ?? cachedShowPanasonicLogo ?? true,
+    );
 
     try {
       final String document = await _loader(configUri).timeout(_timeout);
@@ -78,10 +94,22 @@ class RemoteAppConfigService {
         throw const FormatException('Remote API URL is not trusted.');
       }
       AppConfig.applyRemoteAllowUserTagUnlock(config.allowUserTagUnlock);
+      AppConfig.applyRemoteShowPanasonicLogo(config.showPanasonicLogo);
+      AppConfig.applyRemoteShowPanasonicLogoOnPrint(
+        config.showPanasonicLogoOnPrint,
+      );
       await prefs.setString(_cachedApiBaseUrlKey, AppConfig.apiBaseUrl);
       await prefs.setBool(
         _cachedAllowUserTagUnlockKey,
         AppConfig.allowUserTagUnlock,
+      );
+      await prefs.setBool(
+        _cachedShowPanasonicLogoKey,
+        AppConfig.showPanasonicLogo,
+      );
+      await prefs.setBool(
+        _cachedShowPanasonicLogoOnPrintKey,
+        AppConfig.showPanasonicLogoOnPrint,
       );
       _log('Remote API config updated: ${AppConfig.apiBaseUrl}');
       return true;
@@ -106,9 +134,22 @@ class RemoteAppConfigService {
     if (allowUserTagUnlock != null && allowUserTagUnlock is! bool) {
       throw const FormatException('Invalid user Tag unlock setting.');
     }
+    final Object? showPanasonicLogo = decoded['show_panasonic_logo'];
+    if (showPanasonicLogo != null && showPanasonicLogo is! bool) {
+      throw const FormatException('Invalid Panasonic logo setting.');
+    }
+    final Object? showPanasonicLogoOnPrint =
+        decoded['show_panasonic_logo_on_print'];
+    if (showPanasonicLogoOnPrint != null && showPanasonicLogoOnPrint is! bool) {
+      throw const FormatException('Invalid print Panasonic logo setting.');
+    }
+    final bool appPanasonicLogo = showPanasonicLogo as bool? ?? true;
     return _RemoteAppConfig(
       apiBaseUrl: value.trim(),
       allowUserTagUnlock: allowUserTagUnlock as bool? ?? true,
+      showPanasonicLogo: appPanasonicLogo,
+      showPanasonicLogoOnPrint:
+          showPanasonicLogoOnPrint as bool? ?? appPanasonicLogo,
     );
   }
 
@@ -169,8 +210,12 @@ class _RemoteAppConfig {
   const _RemoteAppConfig({
     required this.apiBaseUrl,
     required this.allowUserTagUnlock,
+    required this.showPanasonicLogo,
+    required this.showPanasonicLogoOnPrint,
   });
 
   final String apiBaseUrl;
   final bool allowUserTagUnlock;
+  final bool showPanasonicLogo;
+  final bool showPanasonicLogoOnPrint;
 }

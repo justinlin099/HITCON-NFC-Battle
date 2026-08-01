@@ -1,5 +1,53 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../../config/app_config.dart';
+
+class PanasonicBrandingBuilder extends StatelessWidget {
+  const PanasonicBrandingBuilder({
+    super.key,
+    required this.builder,
+    this.forPrint = false,
+  });
+
+  final Widget Function(BuildContext context, bool showPanasonicLogo) builder;
+  final bool forPrint;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: forPrint
+          ? AppConfig.showPanasonicLogoOnPrintListenable
+          : AppConfig.showPanasonicLogoListenable,
+      builder: (BuildContext context, bool showPanasonicLogo, Widget? child) {
+        return builder(context, showPanasonicLogo);
+      },
+    );
+  }
+}
+
+class ExpandedCardPanasonicMark extends StatelessWidget {
+  const ExpandedCardPanasonicMark({
+    super.key,
+    required this.cardWidth,
+    required this.scale,
+    required this.color,
+  });
+
+  final double cardWidth;
+  final double scale;
+  final Color color;
+
+  static const double widthFactor = 0.38;
+  static const double padding = 8;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.translate(
+      offset: Offset(padding * scale, -padding * scale),
+      child: PanasonicSupportMark(width: cardWidth * widthFactor, color: color),
+    );
+  }
+}
 
 class PanasonicSupportMark extends StatelessWidget {
   const PanasonicSupportMark({
@@ -11,17 +59,12 @@ class PanasonicSupportMark extends StatelessWidget {
   final double width;
   final Color color;
 
+  static const String logoAsset = 'assets/images/panasonic_logo_white.png';
+  static const double logoAspectRatio = 11811 / 1841;
+
   @override
   Widget build(BuildContext context) {
     final double captionSize = (width * 0.078).clamp(8.0, 12.0);
-    final double logoHeight = (width * 0.19).clamp(20.0, 30.0);
-    final String fontFamily = switch (defaultTargetPlatform) {
-      TargetPlatform.iOS || TargetPlatform.macOS => 'Helvetica Neue',
-      TargetPlatform.windows => 'Arial',
-      TargetPlatform.android ||
-      TargetPlatform.fuchsia ||
-      TargetPlatform.linux => 'Roboto',
-    };
 
     return Semantics(
       image: true,
@@ -37,30 +80,25 @@ class PanasonicSupportMark extends StatelessWidget {
                 'Supported by',
                 style: TextStyle(
                   color: color,
-                  fontFamily: fontFamily,
+                  fontFamily: 'Unifont',
                   fontSize: captionSize,
                   fontWeight: FontWeight.w600,
                   height: 1,
                 ),
               ),
               SizedBox(height: (width * 0.018).clamp(2.0, 4.0)),
-              SizedBox(
-                width: width,
-                height: logoHeight,
-                child: FittedBox(
+              AspectRatio(
+                aspectRatio: logoAspectRatio,
+                child: Image.asset(
+                  logoAsset,
+                  key: const ValueKey<String>('panasonic-official-logo'),
                   alignment: Alignment.centerLeft,
                   fit: BoxFit.contain,
-                  child: Text(
-                    'Panasonic',
-                    style: TextStyle(
-                      color: color,
-                      fontFamily: fontFamily,
-                      fontSize: 32,
-                      fontWeight: FontWeight.w700,
-                      height: 1,
-                      letterSpacing: 0,
-                    ),
-                  ),
+                  cacheWidth: 1024,
+                  color: color,
+                  colorBlendMode: BlendMode.srcIn,
+                  filterQuality: FilterQuality.high,
+                  gaplessPlayback: true,
                 ),
               ),
             ],

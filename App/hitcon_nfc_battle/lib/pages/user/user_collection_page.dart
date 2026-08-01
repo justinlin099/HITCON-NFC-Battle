@@ -419,6 +419,8 @@ class _UserCollectionCardState extends State<_UserCollectionCard> {
                 title: title,
                 attributeEmoji: attributeEmoji,
                 attributeLabel: attributeLabel,
+                link: widget.card['link'] as String? ?? '',
+                description: widget.card['bio'] as String? ?? '',
                 cardColor: cardColor,
                 imageBuilder: () => _cardImage(unlocked),
               )
@@ -436,6 +438,12 @@ class _UserCollectionCardState extends State<_UserCollectionCard> {
             attributeMaxLines: 3,
             stackAttributePairs: true,
             watermarkScale: 1.6,
+            verticalHitconWatermark: true,
+            verticalHitconScale: ExpandedPixelCardStyle.thumbnailHitconScale,
+            verticalHitconRightInsetFactor:
+                ExpandedPixelCardStyle.thumbnailHitconRightInsetFactor,
+            verticalHitconBottomInsetFactor:
+                ExpandedPixelCardStyle.thumbnailHitconBottomInsetFactor,
             image: _cardImage(unlocked),
           ),
         ),

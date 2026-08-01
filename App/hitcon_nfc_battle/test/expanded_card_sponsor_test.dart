@@ -45,7 +45,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
 
     final Finder panasonic = find.byType(PanasonicSupportMark);
-    final Finder hitcon = find.text('HITCON 2026');
+    final Finder hitcon = find.byKey(
+      const ValueKey<String>('hitcon-watermark'),
+    );
     expect(panasonic, findsOneWidget);
     expect(hitcon, findsOneWidget);
     expect(
