@@ -87,13 +87,17 @@ function signJwt(userId, role) {
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signingInput = `${encodedHeader}.${encodedPayload}`;
-  const signature = crypto.hmac("sha256", JWT_SECRET, signingInput, "base64rawurl");
+  const signature = base64ToBase64Url(crypto.hmac("sha256", JWT_SECRET, signingInput, "base64"));
 
   return `${signingInput}.${signature}`;
 }
 
 function base64UrlEncode(value) {
   return encoding.b64encode(value, "rawurl");
+}
+
+function base64ToBase64Url(value) {
+  return value.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function parsePositiveInteger(value, fallback) {
