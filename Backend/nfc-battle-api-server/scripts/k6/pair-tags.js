@@ -49,6 +49,13 @@ export default function (data) {
   const sequence = exec.scenario.iterationInTest + 1;
   const userId = `${PAIR_USER_PREFIX}_${data.runId}_${sequence}`;
   const physicalId = physicalIdFor(data.runId, sequence);
+  const headers = {
+    Authorization: `Bearer ${signJwt(userId)}`,
+  };
+
+  const initializeResponse = http.get(`${BASE_URL}/users/me`, {
+    headers,
+  });
   const response = http.post(
     `${BASE_URL}/tags/pair`,
     JSON.stringify({
@@ -56,13 +63,14 @@ export default function (data) {
     }),
     {
       headers: {
-        Authorization: `Bearer ${signJwt(userId)}`,
+        ...headers,
         "Content-Type": "application/json",
       },
     },
   );
 
   check(response, {
+    "GET /users/me initializes pair user": () => initializeResponse.status === 200,
     "POST /tags/pair returns 200": (res) => res.status === 200,
     "tag paired successfully": (res) => {
       const body = res.json();
