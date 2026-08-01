@@ -300,6 +300,7 @@ export async function updateUserProfile(db: D1Database, userId: string, update: 
     .run();
 }
 
-function defaultDisplayName(userId: string) {
-  return `Player_${userId.slice(0, 8) || "new"}`;
+function defaultDisplayName(_userId: string) {
+  // make default name empty now
+  return "";
 }
