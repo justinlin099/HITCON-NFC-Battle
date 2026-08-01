@@ -117,7 +117,9 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
 
     final Object? args = ModalRoute.of(context)?.settings.arguments;
     _showAdminModeSwitch =
-        _authService.isAdmin || (args is Map && args['fromAdminMode'] == true);
+        _authService.isAdmin ||
+        _authService.isEventStaff ||
+        (args is Map && args['fromAdminMode'] == true);
     if (args is Map && args['tab'] is int) {
       final int tab = args['tab'] as int;
       if (tab >= 0 && tab <= 2) {
@@ -687,6 +689,8 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                         imageBase64: card['pixel_avatar_base64'] as String?,
                         attributeEmoji: attributeEmoji,
                         attributeLabel: attributeLabel,
+                        link: link,
+                        description: description,
                         heroTag: heroTag,
                         onTap: () async => _openCardDetail(
                           heroTag: heroTag,
@@ -809,7 +813,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     }
 
     final String? currentUserId = _authService.currentUserId;
-    if (currentUserId == null || !_authService.isRegularUser) {
+    if (currentUserId == null || !_authService.canCollectCards) {
       _hideNfcScanTransition(generation);
       return;
     }
@@ -1895,6 +1899,8 @@ class _PixelCard extends StatefulWidget {
     required this.imageBase64,
     required this.attributeEmoji,
     required this.attributeLabel,
+    required this.link,
+    required this.description,
     required this.heroTag,
     required this.onTap,
   });
@@ -1907,6 +1913,8 @@ class _PixelCard extends StatefulWidget {
   final String? imageBase64;
   final String attributeEmoji;
   final String attributeLabel;
+  final String link;
+  final String description;
   final String heroTag;
   final Future<void> Function() onTap;
 
@@ -1975,6 +1983,12 @@ class _PixelCardState extends State<_PixelCard> {
       attributeMaxLines: 3,
       stackAttributePairs: true,
       watermarkScale: 1.6,
+      verticalHitconWatermark: true,
+      verticalHitconScale: ExpandedPixelCardStyle.thumbnailHitconScale,
+      verticalHitconRightInsetFactor:
+          ExpandedPixelCardStyle.thumbnailHitconRightInsetFactor,
+      verticalHitconBottomInsetFactor:
+          ExpandedPixelCardStyle.thumbnailHitconBottomInsetFactor,
       image: image,
     );
 
@@ -1986,6 +2000,8 @@ class _PixelCardState extends State<_PixelCard> {
           title: widget.title,
           attributeEmoji: widget.attributeEmoji,
           attributeLabel: widget.attributeLabel,
+          link: widget.link,
+          description: widget.description,
           cardColor: widget.cardColor,
           imageBuilder: _cardImage,
         ),

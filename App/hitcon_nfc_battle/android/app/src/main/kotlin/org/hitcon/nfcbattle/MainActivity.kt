@@ -16,16 +16,22 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var pendingNfcUid: String? = null
     private var pendingWasNfcIntent = false
+    private var tagMaintenanceMode = false
+    private var activityResumed = false
     private val nfcAdapter: NfcAdapter? by lazy {
         NfcAdapter.getDefaultAdapter(this)
     }
 
     override fun onResume() {
         super.onResume()
-        enableNfcForegroundDispatch()
+        activityResumed = true
+        if (!tagMaintenanceMode) {
+            enableNfcForegroundDispatch()
+        }
     }
 
     override fun onPause() {
+        activityResumed = false
         disableNfcForegroundDispatch()
         super.onPause()
     }
@@ -53,6 +59,17 @@ class MainActivity : FlutterActivity() {
                     result.success(pendingNfcUid)
                     pendingNfcUid = null
                     pendingWasNfcIntent = false
+                }
+                "setTagMaintenanceMode" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    tagMaintenanceMode = enabled
+                    if (enabled) {
+                        disableNfcForegroundDispatch()
+                    } else if (activityResumed) {
+                        enableNfcForegroundDispatch()
+                    }
+                    Log.d("HitconNfcIntent", "tagMaintenanceMode=$enabled")
+                    result.success(null)
                 }
                 else -> result.notImplemented()
             }

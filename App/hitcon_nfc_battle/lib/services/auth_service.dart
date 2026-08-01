@@ -13,6 +13,11 @@ import 'ntag_security_service.dart';
 
 enum UserRole { admin, user, eventStaff, unknown }
 
+extension UserRoleCapabilities on UserRole {
+  bool get canCollectCards =>
+      this == UserRole.user || this == UserRole.eventStaff;
+}
+
 class AuthService {
   static final AuthService _instance = AuthService._internal();
 
@@ -40,6 +45,7 @@ class AuthService {
   String? _lastAuthError;
   String? _lastApiErrorCode;
   int? _lastAuthStatusCode;
+  String? _lastNtagSecretError;
 
   Future<bool> loginWithToken(String token) async {
     _lastAuthError = null;
@@ -281,46 +287,80 @@ class AuthService {
     required String purpose,
     String? userId,
   }) async {
+    _lastNtagSecretError = null;
     if (!_ensureSession()) {
-      _log('No user logged in');
+      _setNtagSecretError('No authenticated session is available.');
+      return null;
+    }
+    if (uid.trim().isEmpty) {
+      _setNtagSecretError('The phone could not read the physical Tag UID.');
       return null;
     }
 
     try {
       final String targetUserId = (userId ?? '').trim();
-      if (purpose == 'unlock' &&
-          targetUserId.isNotEmpty &&
-          (isAdmin || isEventStaff)) {
+      if (purpose == 'unlock' && (isAdmin || isEventStaff)) {
+        if (targetUserId.isEmpty) {
+          _setNtagSecretError(
+            'The Tag URL does not contain a user_id, so the STAFF API cannot identify its owner.',
+          );
+          return null;
+        }
         final Map<String, dynamic> result = await _api.post(
           '/staff/nfc-unlock-code',
           token: _jwtToken!,
           body: <String, dynamic>{'user_id': targetUserId, 'uid': uid},
         );
-        return _secretFromNfcTagKey(_jsonMap(result['data'])['unlock_code']);
+        final NtagLockSecret? secret = _secretFromNfcTagKey(
+          _jsonMap(result['data'])['unlock_code'],
+        );
+        if (secret == null) {
+          _setNtagSecretError(
+            'The STAFF API response did not contain a valid 12-digit unlock_code.',
+          );
+        }
+        return secret;
       }
 
       final Map<String, dynamic>? profile =
           _userProfile ?? await fetchUserProfile();
+      if (profile == null) {
+        _setNtagSecretError('The current user profile could not be loaded.');
+        return null;
+      }
       if (purpose == 'unlock') {
         final String pairedUid =
-            (profile?['paired_ntag_uid'] as String? ??
-                    profile?['physical_id'] as String? ??
+            (profile['paired_ntag_uid'] as String? ??
+                    profile['physical_id'] as String? ??
                     '')
                 .trim()
                 .toUpperCase();
         if (pairedUid.isNotEmpty && pairedUid != uid.trim().toUpperCase()) {
-          _log(
-            'Server API only exposes the current user nfc_tag_key; cannot unlock another user tag uid=$uid paired=$pairedUid',
+          _setNtagSecretError(
+            'The scanned Tag UID does not match the Tag paired to this account.',
           );
           return null;
         }
       }
-      return _secretFromNfcTagKey(profile?['nfc_tag_key']);
+      final NtagLockSecret? secret = _secretFromNfcTagKey(
+        profile['nfc_tag_key'],
+      );
+      if (secret == null) {
+        _setNtagSecretError(
+          'The user profile does not contain a valid 6-byte nfc_tag_key.',
+        );
+      }
+      return secret;
     } catch (e) {
-      _log('Error requesting NTAG secret: $e');
+      _setNtagSecretError(e.toString());
     }
 
     return null;
+  }
+
+  void _setNtagSecretError(String reason) {
+    _lastNtagSecretError = reason;
+    debugPrint('[NtagUnlock] $reason');
   }
 
   Future<Map<String, dynamic>?> fetchCollectionRecords() async {
@@ -775,6 +815,39 @@ class AuthService {
     }
   }
 
+  Future<bool> unpairStaffUserTag({
+    required String userId,
+    required String uid,
+  }) async {
+    _lastAuthError = null;
+    if (!_ensureSession()) {
+      _lastAuthError = 'No authenticated session is available.';
+      return false;
+    }
+    final String normalizedUserId = userId.trim();
+    final String normalizedUid = uid.trim().toUpperCase();
+    if (normalizedUserId.isEmpty || normalizedUid.isEmpty) {
+      _lastAuthError = 'User ID and physical Tag UID are required.';
+      return false;
+    }
+
+    try {
+      await _api.post(
+        '/staff/unpair_user_tag',
+        token: _jwtToken!,
+        body: <String, dynamic>{
+          'user_id': normalizedUserId,
+          'physical_id': normalizedUid,
+        },
+      );
+      return true;
+    } catch (e) {
+      _lastAuthError = e.toString();
+      _log('Error unpairing a staff-assigned user tag: $e');
+      return false;
+    }
+  }
+
   Future<Map<String, dynamic>?> fetchStaffScoreboardStatus(
     String dangerToken,
   ) async {
@@ -1135,8 +1208,10 @@ class AuthService {
   Map<String, dynamic>? get userProfile => _userProfile;
   String? get lastAuthError => _lastAuthError;
   String? get lastApiErrorCode => _lastApiErrorCode;
+  String? get lastNtagSecretError => _lastNtagSecretError;
   bool get isLoggedIn => _jwtToken != null && _currentUserId != null;
   bool get isAdmin => _currentRole == UserRole.admin;
   bool get isEventStaff => _currentRole == UserRole.eventStaff;
   bool get isRegularUser => _currentRole == UserRole.user;
+  bool get canCollectCards => _currentRole.canCollectCards;
 }

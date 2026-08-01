@@ -33,7 +33,7 @@
 | 項目 | 現況 | 影響 |
 |---|---|---|
 | 登入 token 發行契約缺失 | API 只驗 JWT，未定義取得、換發、撤銷方式 | 換手機、token 過期、封測帳號與遺失處理沒有正式流程 |
-| 使用者內容檢舉、封鎖、帳號刪除 API | 不存在 | App 有暱稱、頭像、自介與外部連結，需要營運與商店政策處理流程 |
+| 使用者內容檢舉、封鎖、帳號刪除 API | 不存在 | App 有暱稱、大頭貼、自介與外部連結，需要營運與商店政策處理流程 |
 | Profile 欄位不足 | link、卡色被塞進 bio marker；emoji 是未定義格式的字串 | 驗證、搜尋、遷移與跨版本相容性差 |
 | Phishing API 信任 client 傳入 victim | victim 本來可以從 JWT 得知 | 惡意 client 可偽造受害者 ID |
 | NTAG credential 暴露範圍過大 | `/users/me` 與 bootstrap 都回傳長期金鑰 | 一般 profile API 洩漏時會連帶暴露 Tag 寫入密碼 |
@@ -42,7 +42,7 @@
 
 | 項目 | 現況 | 影響 |
 |---|---|---|
-| Bootstrap 回傳全部完整 profile 與 base64 頭像 | App 每次刷新及掃卡後都可能重抓 | 收藏增加後容易超過 App 的 5 MiB response 上限 |
+| Bootstrap 回傳全部完整 profile 與 base64 大頭貼 | App 每次刷新及掃卡後都可能重抓 | 收藏增加後容易超過 App 的 5 MiB response 上限 |
 | Collection 與 scoreboard 分頁資訊不足 | scoreboard 沒有 `total_count` / `has_more` | App 無法分辨「目前回傳 50 筆」和「總共有 50 人」 |
 | Error envelope 缺少 request ID | App 只能看到 code/message | 現場問題難以從 App log 對到 Worker log |
 | 寫入類 API 缺少一致的 idempotency | NFC intent、deep link、網路重試都可能重送 | 可能重複收藏、重複扣分、重複下單或重複核銷 |
@@ -56,7 +56,7 @@
 | Method | Path | App 用途 | 結論 |
 |---|---|---|---|
 | GET | `/users/me` | 取得自己 profile、配對 UID、目前也取得 Tag 金鑰 | 已接，但不應在此回傳 Tag credential |
-| PATCH | `/users/me` | 更新名字、emoji、bio、頭像 | 已接，但缺欄位限制與 link/card color 原生欄位 |
+| PATCH | `/users/me` | 更新名字、emoji、bio、大頭貼 | 已接，但缺欄位限制與 link/card color 原生欄位 |
 | GET | `/users/me/bootstrap` | 自己資料與完整收藏清單 | 已接，但 payload 會持續膨脹 |
 | GET | `/users/{user_id}` | 查看其他使用者 profile | 已接 |
 | GET | `/users/{user_id}/collection` | 查看其他使用者收藏 | 已接，建議分頁 |
@@ -780,7 +780,7 @@ Server：
 
 ## 11. P1 契約：檢舉、封鎖與帳號資料處理
 
-App 會公開顯示使用者產生的暱稱、頭像、自介、emoji 與外部連結。正式封測前至少需要明確決定內容治理與資料刪除流程。
+App 會公開顯示使用者產生的暱稱、大頭貼、自介、emoji 與外部連結。正式封測前至少需要明確決定內容治理與資料刪除流程。
 
 ### 建議 API
 

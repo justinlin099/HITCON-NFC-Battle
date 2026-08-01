@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:nfc_manager/nfc_manager.dart';
 import 'package:nfc_manager/platform_tags.dart';
 
@@ -51,6 +52,7 @@ class NtagSecurityService {
     NtagLockSecret secret,
   ) async {
     if (!secret.isValid) {
+      _logUnlockFailure('The local unlock credential has an invalid length.');
       return const NtagSecurityResult(
         success: false,
         messageKey: 'ntagLockSecretInvalid',
@@ -60,6 +62,9 @@ class NtagSecurityService {
     try {
       final _NtagAccess? access = await _loadAccess(tag);
       if (access == null) {
+        _logUnlockFailure(
+          'GET_VERSION or the NTAG configuration-page read failed.',
+        );
         return const NtagSecurityResult(
           success: false,
           messageKey: 'ntagUnsupported',
@@ -116,6 +121,12 @@ class NtagSecurityService {
           authResponse.length < 2 ||
           authResponse[0] != secret.pack[0] ||
           authResponse[1] != secret.pack[1]) {
+        final String reason = authResponse == null
+            ? 'PWD_AUTH returned no response.'
+            : authResponse.length < 2
+            ? 'PWD_AUTH returned fewer than 2 PACK bytes.'
+            : 'PWD_AUTH returned a PACK that does not match the server credential.';
+        _logUnlockFailure(reason);
         return const NtagSecurityResult(
           success: false,
           messageKey: 'ntagAuthenticationFailed',
@@ -139,12 +150,17 @@ class NtagSecurityService {
         messageKey: 'ntagUnlockedForRewrite',
       );
     } catch (error) {
+      _logUnlockFailure('NTAG command failed: $error');
       return NtagSecurityResult(
         success: false,
         messageKey: 'ntagUnlockFailed',
         values: <String, Object?>{'error': error},
       );
     }
+  }
+
+  void _logUnlockFailure(String reason) {
+    debugPrint('[NtagUnlock] $reason');
   }
 
   Future<_NtagAccess?> _loadAccess(NfcTag tag) async {

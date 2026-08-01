@@ -17,6 +17,7 @@ import 'admin_nfc_session.dart';
 import 'admin_pair_user_tag_page.dart';
 import 'admin_print_cards_page.dart';
 import 'admin_scoreboard_control_page.dart';
+import 'admin_unpair_user_tag_page.dart';
 
 class AdminHomePage extends StatefulWidget {
   const AdminHomePage({super.key});
@@ -39,7 +40,7 @@ class _AdminHomePageState extends State<AdminHomePage> {
     return DefaultTextStyle.merge(
       style: const TextStyle(fontFamily: 'Unifont'),
       child: DefaultTabController(
-        length: 6,
+        length: 7,
         child: Scaffold(
           backgroundColor: PixelTheme.bgDark,
           appBar: AppBar(
@@ -59,6 +60,7 @@ class _AdminHomePageState extends State<AdminHomePage> {
               tabs: [
                 Tab(text: context.l10n.tr('writeTag')),
                 Tab(text: context.l10n.tr('staffPairUserTagShort')),
+                Tab(text: context.l10n.tr('staffUnpairUserTagShort')),
                 Tab(text: context.l10n.tr('confirmPrize')),
                 Tab(text: context.l10n.tr('staffPrintShort')),
                 Tab(text: context.l10n.tr('unlockTag')),
@@ -70,6 +72,7 @@ class _AdminHomePageState extends State<AdminHomePage> {
             children: [
               AdminTagWriterPage(),
               AdminPairUserTagPage(),
+              AdminUnpairUserTagPage(),
               AdminPrizeClaimPage(),
               AdminPrintCardsPage(),
               AdminTagUnlockPage(),
@@ -91,11 +94,18 @@ class AdminTagWriterPage extends StatefulWidget {
 
 class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
   static const String _blankAppUri = 'https://game.hitcon2026.online/b';
+  static const Duration _sameTagCooldown = Duration(seconds: 3);
+  static const Duration _tagHandlingGracePeriod = Duration(milliseconds: 500);
 
   final AdminNfcSession _nfcSession = AdminNfcSession();
   String _status = '';
   String _lastUid = '-';
+  String _lastHandledUid = '';
+  DateTime _lastHandledAt = DateTime.fromMillisecondsSinceEpoch(0);
   bool _isWriting = false;
+  bool _isHandlingTag = false;
+  bool _isDisposed = false;
+  bool _isMaintainingNfc = false;
 
   @override
   void didChangeDependencies() {
@@ -107,7 +117,8 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
 
   @override
   void dispose() {
-    _nfcSession.dispose();
+    _isDisposed = true;
+    unawaited(_stopContinuousWriting(updateState: false));
     super.dispose();
   }
 
@@ -117,27 +128,42 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
     }
 
     final AppLocalizations l10n = context.l10n;
+    bool isAvailable = false;
+    try {
+      isAvailable = await NfcManager.instance.isAvailable();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = l10n.tr('nfcError', <String, Object?>{'error': error});
+        });
+      }
+      return;
+    }
+    if (!isAvailable) {
+      if (mounted) {
+        setState(() {
+          _status = l10n.tr('nfcUnavailable');
+        });
+      }
+      return;
+    }
+
+    await _beginNfcMaintenance();
+    if (!mounted || _isDisposed) {
+      return;
+    }
     setState(() {
       _isWriting = true;
       _status = l10n.tr('holdTagToWrite');
       _lastUid = '-';
+      _lastHandledUid = '';
     });
 
     NfcSessionLease? sessionLease;
     try {
-      final bool isAvailable = await NfcManager.instance.isAvailable();
-      if (!isAvailable) {
-        if (mounted) {
-          setState(() {
-            _isWriting = false;
-            _status = l10n.tr('nfcUnavailable');
-          });
-        }
-        return;
-      }
-
       sessionLease = await _nfcSession.acquire(onPreempt: _handlePreempted);
       if (sessionLease == null) {
+        await _endNfcMaintenance();
         if (mounted) {
           setState(() {
             _isWriting = false;
@@ -150,77 +176,129 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
 
       await NfcManager.instance.startSession(
         pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
-        onDiscovered: (NfcTag tag) async {
-          final String uid = const NtagSecurityService().readTagId(tag);
-          final Ndef? ndef = Ndef.from(tag);
-          if (ndef == null || !ndef.isWritable) {
-            await _nfcSession.stop(activeLease);
-            if (!mounted) {
-              return;
-            }
-            setState(() {
-              _isWriting = false;
-              _lastUid = uid.isEmpty ? '-' : uid;
-              _status = l10n.tr('tagNotWritable');
-            });
-            return;
-          }
-
-          try {
-            await ndef.write(_buildTagMessage());
-            await _nfcSession.stop(activeLease);
-            if (!mounted) {
-              return;
-            }
-            setState(() {
-              _isWriting = false;
-              _lastUid = uid.isEmpty ? '-' : uid;
-              _status = l10n.tr('writeComplete');
-            });
-          } catch (error) {
-            await _nfcSession.stop(activeLease);
-            if (!mounted) {
-              return;
-            }
-            setState(() {
-              _isWriting = false;
-              _lastUid = uid.isEmpty ? '-' : uid;
-              _status = nfcWriteErrorMessage(l10n, error);
-            });
-          }
-        },
+        onDiscovered: (NfcTag tag) =>
+            _handleWritableTag(tag, l10n, activeLease),
         onError: (NfcError error) async {
-          await _nfcSession.stop(activeLease);
-          if (!mounted) {
-            return;
-          }
-          setState(() {
-            _isWriting = false;
-            _status = nfcSessionErrorMessage(l10n, error);
-          });
+          await _finishWritingWithError(error, l10n, activeLease);
         },
       );
     } catch (error) {
-      if (sessionLease != null) {
-        await _nfcSession.stop(sessionLease);
-      }
-      if (mounted) {
-        setState(() {
-          _isWriting = false;
-          _status = nfcSessionErrorMessage(l10n, error);
-        });
-      }
+      await _finishWritingWithError(error, l10n, sessionLease);
     }
   }
 
   Future<void> _handlePreempted() async {
-    if (!mounted) {
+    _isHandlingTag = false;
+    await _endNfcMaintenance();
+    if (!mounted || _isDisposed) {
       return;
     }
     setState(() {
       _isWriting = false;
       _status = context.l10n.tr('nfcSessionBusy');
     });
+  }
+
+  Future<void> _handleWritableTag(
+    NfcTag tag,
+    AppLocalizations l10n,
+    NfcSessionLease sessionLease,
+  ) async {
+    if (!sessionLease.isActive ||
+        _isHandlingTag ||
+        !_isWriting ||
+        _isDisposed) {
+      return;
+    }
+
+    final String uid = const NtagSecurityService().readTagId(tag);
+    final DateTime now = DateTime.now();
+    if (uid.isNotEmpty &&
+        uid == _lastHandledUid &&
+        now.difference(_lastHandledAt) < _sameTagCooldown) {
+      return;
+    }
+
+    _isHandlingTag = true;
+    _lastHandledUid = uid;
+    _lastHandledAt = now;
+    String status;
+    try {
+      final Ndef? ndef = Ndef.from(tag);
+      if (ndef == null || !ndef.isWritable) {
+        status = l10n.tr('tagNotWritableContinue');
+      } else {
+        await ndef.write(_buildTagMessage());
+        status = l10n.tr('writeCompleteContinue');
+      }
+    } catch (error) {
+      status = l10n.tr('writeFailedContinue', <String, Object?>{
+        'error': nfcErrorDetail(l10n, error),
+      });
+    }
+
+    if (mounted && !_isDisposed && sessionLease.isActive) {
+      setState(() {
+        _lastUid = uid.isEmpty ? '-' : uid;
+        _status = status;
+      });
+    }
+    await Future<void>.delayed(_tagHandlingGracePeriod);
+    _isHandlingTag = false;
+  }
+
+  Future<void> _finishWritingWithError(
+    Object error,
+    AppLocalizations l10n,
+    NfcSessionLease? sessionLease,
+  ) async {
+    if (sessionLease != null && !sessionLease.isActive) {
+      return;
+    }
+    if (sessionLease != null) {
+      await _nfcSession.stop(sessionLease);
+    }
+    await _endNfcMaintenance();
+    _isHandlingTag = false;
+    if (!mounted || _isDisposed) {
+      return;
+    }
+    setState(() {
+      _isWriting = false;
+      _status = nfcSessionErrorMessage(l10n, error);
+    });
+  }
+
+  Future<void> _stopContinuousWriting({bool updateState = true}) async {
+    if (_isHandlingTag && updateState) {
+      return;
+    }
+    await _nfcSession.stop();
+    await _endNfcMaintenance();
+    _isHandlingTag = false;
+    if (!updateState || !mounted || _isDisposed) {
+      return;
+    }
+    setState(() {
+      _isWriting = false;
+      _status = context.l10n.tr('scanStopped');
+    });
+  }
+
+  Future<void> _beginNfcMaintenance() async {
+    if (_isMaintainingNfc) {
+      return;
+    }
+    _isMaintainingNfc = true;
+    await NfcDeepLinkService.instance.beginTagMaintenance();
+  }
+
+  Future<void> _endNfcMaintenance() async {
+    if (!_isMaintainingNfc) {
+      return;
+    }
+    _isMaintainingNfc = false;
+    await NfcDeepLinkService.instance.endTagMaintenance();
   }
 
   NdefMessage _buildTagMessage() {
@@ -259,11 +337,9 @@ class _AdminTagWriterPageState extends State<AdminTagWriterPage> {
           ),
           const SizedBox(height: 14),
           _PixelButton(
-            label: context.l10n.tr(
-              _isWriting ? 'waitingForTagShort' : 'writeTag',
-            ),
-            color: PixelTheme.accent,
-            onTap: _writeTag,
+            label: context.l10n.tr(_isWriting ? 'stopScan' : 'writeTag'),
+            color: _isWriting ? PixelTheme.warning : PixelTheme.accent,
+            onTap: _isWriting ? _stopContinuousWriting : _writeTag,
           ),
         ],
       ),
@@ -482,7 +558,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
   @override
   void dispose() {
     _isDisposed = true;
-    _endDeepLinkSuppression();
+    unawaited(_endDeepLinkSuppression());
     if (!_isHandlingTag) {
       _nfcSession.dispose();
     }
@@ -515,7 +591,10 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
       return;
     }
 
-    _beginDeepLinkSuppression();
+    await _beginDeepLinkSuppression();
+    if (_isDisposed) {
+      return;
+    }
     setState(() {
       _isUnlocking = true;
       _status = l10n.tr('holdTagToUnlock');
@@ -527,7 +606,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
     try {
       sessionLease = await _nfcSession.acquire(onPreempt: _handlePreempted);
       if (sessionLease == null) {
-        _endDeepLinkSuppression();
+        await _endDeepLinkSuppression();
         if (mounted) {
           setState(() {
             _isUnlocking = false;
@@ -553,16 +632,21 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
             uid = _security.readTagId(tag);
             records = await _readTextRecords(tag);
             final String userId = records['user_id'] ?? '';
-            final NtagLockSecret? secret = await AuthService()
+            final AuthService authService = AuthService();
+            final NtagLockSecret? secret = await authService
                 .requestNtagLockSecret(
                   uid: uid,
                   purpose: 'unlock',
                   userId: userId,
                 );
             result = secret == null
-                ? const NtagSecurityResult(
+                ? NtagSecurityResult(
                     success: false,
-                    messageKey: 'adminUnlockSecretFailed',
+                    messageKey: 'adminUnlockSecretFailedWithReason',
+                    values: <String, Object?>{
+                      'reason':
+                          authService.lastNtagSecretError ?? l10n.tr('unknown'),
+                    },
                   )
                 : await _security.unlockForRewrite(tag, secret);
           } catch (error) {
@@ -598,7 +682,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
           errorMessage: nfcSessionErrorMessage(l10n, error),
         );
       } else {
-        _endDeepLinkSuppression();
+        await _endDeepLinkSuppression();
         if (mounted) {
           setState(() {
             _isUnlocking = false;
@@ -614,7 +698,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
       return;
     }
     await _nfcSession.stop();
-    _endDeepLinkSuppression();
+    await _endDeepLinkSuppression();
     if (!mounted) {
       return;
     }
@@ -639,7 +723,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
     }
     await _nfcSession.stop(sessionLease);
     _isHandlingTag = false;
-    _endDeepLinkSuppression();
+    await _endDeepLinkSuppression();
     if (!mounted || _isDisposed) {
       return;
     }
@@ -655,7 +739,7 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
   Future<void> _handlePreempted() async {
     _isHandlingTag = false;
     _isFinishingUnlock = false;
-    _endDeepLinkSuppression();
+    await _endDeepLinkSuppression();
     if (!mounted || _isDisposed) {
       return;
     }
@@ -665,20 +749,20 @@ class _AdminTagUnlockPageState extends State<AdminTagUnlockPage> {
     });
   }
 
-  void _beginDeepLinkSuppression() {
+  Future<void> _beginDeepLinkSuppression() async {
     if (_isSuppressingDeepLinks) {
       return;
     }
     _isSuppressingDeepLinks = true;
-    NfcDeepLinkService.instance.beginTagMaintenance();
+    await NfcDeepLinkService.instance.beginTagMaintenance();
   }
 
-  void _endDeepLinkSuppression() {
+  Future<void> _endDeepLinkSuppression() async {
     if (!_isSuppressingDeepLinks) {
       return;
     }
     _isSuppressingDeepLinks = false;
-    NfcDeepLinkService.instance.endTagMaintenance();
+    await NfcDeepLinkService.instance.endTagMaintenance();
   }
 
   @override

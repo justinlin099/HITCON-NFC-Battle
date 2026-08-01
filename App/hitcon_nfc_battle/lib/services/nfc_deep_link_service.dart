@@ -72,11 +72,17 @@ class NfcDeepLinkService {
     _expectedRescanUserId = null;
   }
 
-  void beginTagMaintenance() {
+  Future<void> beginTagMaintenance() async {
+    final bool shouldSuspendNativeDispatch = _tagMaintenanceDepth == 0;
     _tagMaintenanceDepth += 1;
+    if (shouldSuspendNativeDispatch) {
+      await _setNativeTagMaintenanceMode(true);
+    }
   }
 
-  void endTagMaintenance({Duration cooldown = const Duration(seconds: 3)}) {
+  Future<void> endTagMaintenance({
+    Duration cooldown = const Duration(seconds: 3),
+  }) async {
     if (_tagMaintenanceDepth > 0) {
       _tagMaintenanceDepth -= 1;
     }
@@ -85,6 +91,20 @@ class NfcDeepLinkService {
       if (until.isAfter(_suppressTagRequestsUntil)) {
         _suppressTagRequestsUntil = until;
       }
+      await _setNativeTagMaintenanceMode(false);
+    }
+  }
+
+  Future<void> _setNativeTagMaintenanceMode(bool enabled) async {
+    try {
+      await _nativeNfcLaunch.invokeMethod<void>(
+        'setTagMaintenanceMode',
+        <String, Object?>{'enabled': enabled},
+      );
+    } on MissingPluginException {
+      // Native foreground dispatch is Android-only.
+    } on PlatformException {
+      // NFC reader sessions remain usable on platforms without this bridge.
     }
   }
 

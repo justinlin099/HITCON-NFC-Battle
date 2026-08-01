@@ -46,23 +46,35 @@ class CardDetailPage extends StatefulWidget {
 }
 
 class _CardDetailPageState extends State<CardDetailPage> {
-  static const Duration _textDelay = Duration(milliseconds: 450);
+  static const Duration _contentFadeDuration = Duration(milliseconds: 320);
   static const double _dismissVelocity = 350;
 
+  bool _isDismissing = false;
   bool _showText = false;
+  bool _routeHasStartedForward = false;
+  bool _contentFadeScheduled = false;
   Uint8List? _imageBytes;
+  Animation<double>? _routeAnimation;
 
   @override
   void initState() {
     super.initState();
     _imageBytes = _decodeImageBytes(widget.imageBase64);
-    Future<void>.delayed(_textDelay, () {
-      if (mounted) {
-        setState(() {
-          _showText = true;
-        });
-      }
-    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final Animation<double>? routeAnimation = ModalRoute.of(context)?.animation;
+    if (identical(routeAnimation, _routeAnimation)) {
+      return;
+    }
+    _routeAnimation?.removeStatusListener(_handleRouteAnimationStatus);
+    _routeAnimation = routeAnimation;
+    routeAnimation?.addStatusListener(_handleRouteAnimationStatus);
+    if (routeAnimation?.status == AnimationStatus.forward) {
+      _routeHasStartedForward = true;
+    }
   }
 
   @override
@@ -71,6 +83,12 @@ class _CardDetailPageState extends State<CardDetailPage> {
     if (oldWidget.imageBase64 != widget.imageBase64) {
       _imageBytes = _decodeImageBytes(widget.imageBase64);
     }
+  }
+
+  @override
+  void dispose() {
+    _routeAnimation?.removeStatusListener(_handleRouteAnimationStatus);
+    super.dispose();
   }
 
   @override
@@ -89,7 +107,7 @@ class _CardDetailPageState extends State<CardDetailPage> {
           children: [
             Positioned.fill(
               child: GestureDetector(
-                onTap: () => Navigator.of(context).maybePop(),
+                onTap: _dismissCard,
                 child: Container(
                   color: PixelTheme.bgDark.withValues(alpha: 0.75),
                 ),
@@ -112,6 +130,8 @@ class _CardDetailPageState extends State<CardDetailPage> {
 
                   final double contentPad = (cardWidth * 0.06).clamp(6.0, 16.0);
                   final double scale = (cardWidth / 320).clamp(0.85, 1.1);
+                  final double expandedCardScale =
+                      cardWidth / ExpandedPixelCardStyle.referenceCardWidth;
                   double s(double value) => value * scale;
 
                   return Center(
@@ -128,46 +148,63 @@ class _CardDetailPageState extends State<CardDetailPage> {
                                 width: cardWidth,
                                 height: cardHeight,
                                 dismissVelocity: _dismissVelocity,
-                                onDismiss: () =>
-                                    Navigator.of(context).maybePop(),
-                                child: PixelCardFace(
-                                  title: widget.title,
-                                  attributeEmoji: widget.attributeEmoji,
-                                  attributeLabel: widget.attributeLabel,
-                                  cardColor: widget.cardColor,
-                                  showText: _showText,
-                                  titleFontSize: s(22),
-                                  titleFontWeight: FontWeight.w900,
-                                  attributeFontSize: s(12),
-                                  emojiFontSize: s(16),
-                                  titleMaxLines: 2,
-                                  watermarkScale: 1.6,
-                                  imageToTitleSpacing: s(8),
-                                  extraContentSpacing: s(8),
-                                  bottomLeftWatermark: Transform.translate(
-                                    offset: Offset(s(8), -s(8)),
-                                    child: PanasonicSupportMark(
-                                      width: cardWidth * 0.34,
-                                      color: PixelTheme.textWhite.withValues(
-                                        alpha: 0.18,
+                                onDismiss: _dismissCard,
+                                child: PanasonicBrandingBuilder(
+                                  builder: (context, showPanasonicLogo) {
+                                    return PixelCardFace(
+                                      title: widget.title,
+                                      attributeEmoji: widget.attributeEmoji,
+                                      attributeLabel: widget.attributeLabel,
+                                      cardColor: widget.cardColor,
+                                      showText: _showText,
+                                      textFadeDuration: _contentFadeDuration,
+                                      titleFontSize: s(22),
+                                      titleFontWeight: FontWeight.w900,
+                                      attributeFontSize: s(12),
+                                      emojiFontSize: s(16),
+                                      titleMaxLines: 2,
+                                      watermarkScale: 1.6,
+                                      watermarkFooterHeight: showPanasonicLogo
+                                          ? ExpandedPixelCardStyle
+                                                    .watermarkFooterHeight *
+                                                expandedCardScale
+                                          : 0,
+                                      verticalHitconWatermark: true,
+                                      imageToTitleSpacing: s(8),
+                                      extraContentSpacing: s(8),
+                                      bottomLeftWatermark: showPanasonicLogo
+                                          ? AnimatedOpacity(
+                                              duration: _contentFadeDuration,
+                                              curve: Curves.easeInOut,
+                                              opacity: _showText ? 1 : 0,
+                                              child: ExpandedCardPanasonicMark(
+                                                cardWidth: cardWidth,
+                                                scale: expandedCardScale,
+                                                color: PixelTheme.textWhite
+                                                    .withValues(alpha: 0.18),
+                                              ),
+                                            )
+                                          : null,
+                                      image: _cardImage(),
+                                      fixedContent: _LinkRow(
+                                        link: widget.link,
+                                        fontSize: s(10),
+                                        onTap: widget.link.trim().isEmpty
+                                            ? null
+                                            : () => confirmAndOpenLink(
+                                                context,
+                                                widget.link,
+                                              ),
                                       ),
-                                    ),
-                                  ),
-                                  image: _cardImage(),
-                                  fixedContent: _LinkRow(
-                                    link: widget.link,
-                                    fontSize: s(10),
-                                    onTap: widget.link.trim().isEmpty
-                                        ? null
-                                        : () => confirmAndOpenLink(
-                                            context,
-                                            widget.link,
-                                          ),
-                                  ),
-                                  extraContent: _CardDescription(
-                                    description: widget.description,
-                                    fontSize: s(13),
-                                  ),
+                                      extraContent: _CardDescription(
+                                        description: widget.description,
+                                        fontSize: s(
+                                          ExpandedPixelCardStyle
+                                              .descriptionFontSize,
+                                        ),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                             ),
@@ -201,6 +238,39 @@ class _CardDetailPageState extends State<CardDetailPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _dismissCard() async {
+    if (_isDismissing) {
+      return;
+    }
+    _isDismissing = true;
+    final bool popped = await Navigator.of(context).maybePop();
+    if (!popped && mounted) {
+      _isDismissing = false;
+    }
+  }
+
+  void _handleRouteAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.forward) {
+      _routeHasStartedForward = true;
+      return;
+    }
+    if (status != AnimationStatus.completed ||
+        !_routeHasStartedForward ||
+        _contentFadeScheduled ||
+        _isDismissing) {
+      return;
+    }
+    _contentFadeScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isDismissing) {
+        return;
+      }
+      setState(() {
+        _showText = true;
+      });
+    });
   }
 
   String _formatDate(String raw) {
@@ -599,7 +669,7 @@ class _CardDescription extends StatelessWidget {
       style: TextStyle(
         color: PixelTheme.textWhite,
         fontSize: fontSize,
-        height: 1.25,
+        height: ExpandedPixelCardStyle.descriptionLineHeight,
         fontFamily: 'Unifont',
       ),
     );

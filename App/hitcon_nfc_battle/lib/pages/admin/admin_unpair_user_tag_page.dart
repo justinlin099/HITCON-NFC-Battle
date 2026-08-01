@@ -6,29 +6,22 @@ import 'package:nfc_manager/nfc_manager.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/nfc_deep_link_service.dart';
-import '../../services/nfc_error_messages.dart';
-import '../../services/nfc_session_controller.dart';
-import '../../services/nfc_tag_payload.dart';
 import '../../services/ntag_security_service.dart';
 import '../user/pixel_theme.dart';
-import 'admin_nfc_session.dart';
 import 'admin_pixel_widgets.dart';
 
-class AdminPairUserTagPage extends StatefulWidget {
-  const AdminPairUserTagPage({super.key});
+class AdminUnpairUserTagPage extends StatefulWidget {
+  const AdminUnpairUserTagPage({super.key});
 
   @override
-  State<AdminPairUserTagPage> createState() => _AdminPairUserTagPageState();
+  State<AdminUnpairUserTagPage> createState() => _AdminUnpairUserTagPageState();
 }
 
-class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
+class _AdminUnpairUserTagPageState extends State<AdminUnpairUserTagPage> {
   static const NtagSecurityService _security = NtagSecurityService();
   static const Duration _tagGracePeriod = Duration(milliseconds: 400);
 
   final TextEditingController _userIdController = TextEditingController();
-  final AdminNfcSession _nfcSession = AdminNfcSession(
-    owner: NfcSessionOwner.badgePairing,
-  );
 
   String _status = '';
   String _lastUid = '-';
@@ -40,7 +33,7 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_status.isEmpty) {
-      _status = context.l10n.tr('staffPairUserPrompt');
+      _status = context.l10n.tr('staffUnpairUserPrompt');
     }
   }
 
@@ -49,12 +42,12 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     _userIdController.dispose();
     unawaited(_endDeepLinkSuppression());
     if (!_isHandlingTag) {
-      _nfcSession.dispose();
+      unawaited(_stopSessionQuietly());
     }
     super.dispose();
   }
 
-  Future<void> _startPairing() async {
+  Future<void> _startUnpairing() async {
     if (_isScanning) {
       return;
     }
@@ -62,15 +55,21 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     final String userId = _userIdController.text.trim();
     if (userId.isEmpty) {
       setState(() {
-        _status = l10n.tr('staffPairUserIdRequired');
+        _status = l10n.tr('staffUnpairUserIdRequired');
       });
       return;
     }
+
+    final bool confirmed = await _confirmUnpair(userId);
+    if (!confirmed || !mounted) {
+      return;
+    }
+
     bool available;
     try {
       available = await NfcManager.instance.isAvailable();
     } catch (error) {
-      await _finishSession(null, error: error);
+      await _finishWithError(error);
       return;
     }
     if (!available) {
@@ -87,33 +86,14 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     setState(() {
       _isScanning = true;
       _lastUid = '-';
-      _status = l10n.tr('staffPairHoldTag');
+      _status = l10n.tr('staffUnpairHoldTag');
     });
-
-    NfcSessionLease? sessionLease;
+    await _stopSessionQuietly();
     try {
-      sessionLease = await _nfcSession.acquire(onPreempt: _handlePreempted);
-      if (sessionLease == null) {
-        await _endDeepLinkSuppression();
-        if (mounted) {
-          setState(() {
-            _isScanning = false;
-            _status = l10n.tr('nfcSessionBusy');
-          });
-        }
-        return;
-      }
-      if (!_isScanning || !mounted) {
-        await _nfcSession.stop(sessionLease);
-        return;
-      }
-
-      final NfcSessionLease activeLease = sessionLease;
-
       await NfcManager.instance.startSession(
         pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
         onDiscovered: (NfcTag tag) async {
-          if (!activeLease.isActive || _isHandlingTag || !mounted) {
+          if (_isHandlingTag || !mounted) {
             return;
           }
           _isHandlingTag = true;
@@ -123,85 +103,99 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
             if (uid.isEmpty) {
               throw StateError(l10n.tr('tagIdMissing'));
             }
-            final Ndef? ndef = Ndef.from(tag);
-            if (ndef == null || !ndef.isWritable) {
-              throw StateError(l10n.tr('tagNotWritable'));
-            }
-
-            final bool pairAccepted = await AuthService().pairStaffUserTag(
+            final AuthService auth = AuthService();
+            final bool unpaired = await auth.unpairStaffUserTag(
               userId: userId,
               uid: uid,
             );
-            if (!activeLease.isActive) {
-              return;
-            }
-            final NtagLockSecret? secret = await AuthService()
-                .requestNtagLockSecret(
-                  uid: uid,
-                  purpose: 'unlock',
-                  userId: userId,
-                );
-            if (!activeLease.isActive) {
-              return;
-            }
-            if (!pairAccepted && secret == null) {
-              throw StateError(l10n.tr('staffPairApiFailed'));
-            }
-            if (secret == null) {
-              throw StateError(l10n.tr('adminUnlockSecretFailed'));
-            }
-
-            final Uri uri = Uri.https(
-              'game.hitcon2026.online',
-              '/b',
-              <String, String>{'u': userId},
-            );
-            await ndef.write(NfcTagPayload.buildUriMessage(uri));
-            if (!activeLease.isActive) {
-              return;
-            }
-            final NtagSecurityResult lockResult = await _security
-                .protectForRewrite(tag, secret);
-            if (!lockResult.success) {
+            if (!unpaired) {
               throw StateError(
-                l10n.tr(lockResult.messageKey, lockResult.values),
+                l10n.tr('staffUnpairApiFailed', <String, Object?>{
+                  'error': auth.lastAuthError ?? l10n.tr('unknown'),
+                }),
               );
             }
-            status = l10n.tr('staffPairComplete');
+            status = l10n.tr('staffUnpairComplete');
           } catch (error) {
-            status = l10n.tr('staffPairFailed', <String, Object?>{
-              'error': error,
-            });
+            status = error is StateError
+                ? error.message.toString()
+                : l10n.tr('nfcError', <String, Object?>{'error': error});
           }
 
-          if (mounted && activeLease.isActive) {
+          if (mounted) {
             setState(() {
               _lastUid = uid.isEmpty ? '-' : uid;
               _status = status;
             });
           }
           await Future<void>.delayed(_tagGracePeriod);
-          await _finishSession(activeLease);
+          await _stopSessionQuietly();
+          _isHandlingTag = false;
+          await _endDeepLinkSuppression();
+          if (mounted) {
+            setState(() {
+              _isScanning = false;
+            });
+          }
         },
-        onError: (NfcError error) async {
-          await _finishSession(activeLease, error: error);
+        onError: (dynamic error) async {
+          await _finishWithError(error);
         },
       );
     } catch (error) {
-      await _finishSession(sessionLease, error: error);
+      await _finishWithError(error);
     }
   }
 
-  Future<void> _finishSession(
-    NfcSessionLease? sessionLease, {
-    Object? error,
-  }) async {
-    if (sessionLease != null && !sessionLease.isActive) {
-      return;
-    }
-    if (sessionLease != null) {
-      await _nfcSession.stop(sessionLease);
-    }
+  Future<bool> _confirmUnpair(String userId) async {
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              backgroundColor: PixelTheme.bgMid,
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.zero,
+              ),
+              title: Text(
+                context.l10n.tr('staffUnpairConfirmTitle'),
+                style: TextStyle(
+                  color: PixelTheme.warning,
+                  fontFamily: 'Unifont',
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              content: Text(
+                context.l10n.tr('staffUnpairConfirmBody', <String, Object?>{
+                  'userId': userId,
+                }),
+                style: TextStyle(
+                  color: PixelTheme.textWhite,
+                  fontFamily: 'Unifont',
+                  height: 1.5,
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: Text(context.l10n.tr('cancel')),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: Text(
+                    context.l10n.tr('confirm'),
+                    style: TextStyle(color: PixelTheme.warning),
+                  ),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+  }
+
+  Future<void> _finishWithError(Object error) async {
+    await _stopSessionQuietly();
     _isHandlingTag = false;
     await _endDeepLinkSuppression();
     if (!mounted) {
@@ -209,17 +203,15 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     }
     setState(() {
       _isScanning = false;
-      if (error != null) {
-        _status = nfcSessionErrorMessage(context.l10n, error);
-      }
+      _status = context.l10n.tr('nfcError', <String, Object?>{'error': error});
     });
   }
 
-  Future<void> _stopPairing() async {
+  Future<void> _stopUnpairing() async {
     if (_isHandlingTag) {
       return;
     }
-    await _nfcSession.stop();
+    await _stopSessionQuietly();
     await _endDeepLinkSuppression();
     if (!mounted) {
       return;
@@ -230,16 +222,12 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     });
   }
 
-  Future<void> _handlePreempted() async {
-    _isHandlingTag = false;
-    await _endDeepLinkSuppression();
-    if (!mounted) {
-      return;
+  Future<void> _stopSessionQuietly() async {
+    try {
+      await NfcManager.instance.stopSession();
+    } catch (_) {
+      // Android may already have disposed the tag after the callback.
     }
-    setState(() {
-      _isScanning = false;
-      _status = context.l10n.tr('nfcSessionBusy');
-    });
   }
 
   Future<void> _beginDeepLinkSuppression() async {
@@ -264,10 +252,10 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
       padding: const EdgeInsets.all(14),
       children: <Widget>[
         AdminPixelPanel(
-          title: context.l10n.tr('staffPairUserTag'),
+          title: context.l10n.tr('staffUnpairUserTag'),
           children: <Widget>[
             Text(
-              context.l10n.tr('staffPairUserDescription'),
+              context.l10n.tr('staffUnpairUserDescription'),
               style: TextStyle(
                 color: PixelTheme.textGray,
                 fontFamily: 'Unifont',
@@ -285,12 +273,13 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
             AdminStatusLine(label: 'UID', value: _lastUid),
             const SizedBox(height: 4),
             AdminPixelButton(
+              key: const ValueKey<String>('staff-unpair-start-button'),
               label: context.l10n.tr(
-                _isScanning ? 'stopScan' : 'staffPairStart',
+                _isScanning ? 'stopScan' : 'staffUnpairStart',
               ),
-              icon: _isScanning ? Icons.stop_rounded : Icons.nfc_rounded,
-              color: _isScanning ? PixelTheme.warning : PixelTheme.accent,
-              onPressed: _isScanning ? _stopPairing : _startPairing,
+              icon: _isScanning ? Icons.stop_rounded : Icons.link_off_rounded,
+              color: PixelTheme.warning,
+              onPressed: _isScanning ? _stopUnpairing : _startUnpairing,
             ),
           ],
         ),

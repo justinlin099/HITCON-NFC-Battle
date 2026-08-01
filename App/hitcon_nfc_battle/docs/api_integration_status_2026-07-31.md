@@ -35,6 +35,7 @@
 | POST | `/staff/prize-claims` | STAFF 掃會眾 Tag 後核銷凍結獎項 |
 | POST | `/staff/nfc-unlock-code` | STAFF 以 Tag URL user ID 加 physical UID 取得解鎖碼 |
 | POST | `/staff/pair_user_tag` | STAFF 指定使用者、寫入 NDEF、伺服器配對並鎖定 NTAG |
+| POST | `/staff/unpair_user_tag` | STAFF 掃描實體 Tag，依 user ID 與 physical UID 解除伺服器配對 |
 | GET | `/staff/scoreboard_status` | 管理頁查詢凍結狀態與 cutoff 資訊 |
 | POST | `/staff/freeze_scoreboard` | 管理頁二次確認後凍結排行榜 |
 | POST | `/staff/resume_scoreboard` | 管理頁二次確認後恢復排行榜 |
@@ -75,7 +76,7 @@
 
 ### 合理的本機功能，不需要後端 API
 
-- 48x48 圖片繪製器、圖片裁切、預設像素頭像。
+- 48x48 圖片繪製器、圖片裁切、預設像素大頭貼。
 - 主題、繁中／英文、頁面動畫與卡片 3D 拖曳。
 - JSON 檔案／剪貼簿備份還原；內容是本機 collection cache。
 - NFC NDEF 寫入、Tag 密碼鎖定與實際解鎖指令；server 只負責配對與提供 credential。

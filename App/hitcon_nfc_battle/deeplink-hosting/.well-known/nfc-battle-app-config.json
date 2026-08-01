@@ -1,5 +1,7 @@
 {
   "schema": 1,
   "api_base_url": "https://nfc-battle-staging.hitcon2026.online",
-  "allow_user_tag_unlock": true
+  "allow_user_tag_unlock": false,
+  "show_panasonic_logo": true,
+  "show_panasonic_logo_on_print": true
 }

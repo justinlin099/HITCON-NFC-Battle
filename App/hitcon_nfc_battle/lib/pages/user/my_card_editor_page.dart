@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:file_picker/file_picker.dart';
@@ -23,6 +25,7 @@ import 'pixel_link_icon.dart';
 import 'emoji_catalog.dart';
 import 'https_link_input.dart';
 import 'ntag_pairing_page.dart';
+import 'panasonic_support_mark.dart';
 import '../../services/auth_service.dart';
 import '../../services/local_collection_store.dart';
 import '../../services/local_profile_store.dart';
@@ -841,86 +844,106 @@ class _PokemonStyleCard extends StatelessWidget {
     final double cardWidth = MediaQuery.of(context).size.width - 24;
     final double cardHeight = cardWidth / ratio;
     final double scale = (cardWidth / 320).clamp(0.85, 1.1);
+    final double expandedCardScale =
+        cardWidth / ExpandedPixelCardStyle.referenceCardWidth;
     double s(double value) => value * scale;
     final String displayLink = link.trim().isEmpty
         ? 'https://hitcon.org'
         : link;
     final String attributeLabel = emojiLabel(emoji).toUpperCase();
 
-    return SizedBox(
-      width: cardWidth,
-      height: cardHeight,
-      child: PixelCardFace(
-        title: name,
-        attributeEmoji: '',
-        attributeLabel: attributeLabel,
-        cardColor: cardColor,
-        showText: true,
-        titleFontSize: s(22),
-        titleFontWeight: FontWeight.w900,
-        attributeFontSize: s(12),
-        emojiFontSize: s(16),
-        titleMaxLines: 2,
-        watermarkScale: 1.6,
-        imageToTitleSpacing: s(8),
-        extraContentSpacing: s(8),
-        onTapTitle: onEditName,
-        onTapAttribute: onEditEmoji,
-        titleSuffix: Icon(
-          Icons.edit_rounded,
-          size: s(14),
-          color: PixelTheme.textWhite,
-        ),
-        attributeSuffix: Icon(
-          Icons.edit_rounded,
-          size: s(12),
-          color: PixelTheme.textWhite,
-        ),
-        image: GestureDetector(
-          onTap: onEditImage,
-          behavior: HitTestBehavior.opaque,
-          child: _hasAnyPixel(pixels)
-              ? CustomPaint(
-                  painter: _PixelCanvasPainter(pixels: pixels, showGrid: false),
-                  child: const SizedBox.expand(),
+    return PanasonicBrandingBuilder(
+      builder: (context, showPanasonicLogo) => SizedBox(
+        width: cardWidth,
+        height: cardHeight,
+        child: PixelCardFace(
+          title: name,
+          attributeEmoji: '',
+          attributeLabel: attributeLabel,
+          cardColor: cardColor,
+          showText: true,
+          titleFontSize: s(22),
+          titleFontWeight: FontWeight.w900,
+          attributeFontSize: s(12),
+          emojiFontSize: s(16),
+          titleMaxLines: 2,
+          watermarkScale: 1.6,
+          watermarkFooterHeight: showPanasonicLogo
+              ? ExpandedPixelCardStyle.myCardWatermarkFooterHeight *
+                    expandedCardScale
+              : 0,
+          verticalHitconWatermark: true,
+          fadeExtraContentAtBottom: true,
+          imageToTitleSpacing: s(8),
+          extraContentSpacing: s(8),
+          bottomLeftWatermark: showPanasonicLogo
+              ? ExpandedCardPanasonicMark(
+                  cardWidth: cardWidth,
+                  scale: expandedCardScale,
+                  color: PixelTheme.textWhite.withValues(alpha: 0.18),
                 )
-              : Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ..._emojiPreviewRows(emoji).map(
-                        (String rowEmoji) => Text(
-                          rowEmoji,
-                          style: systemEmojiTextStyle(
-                            fontSize: s(32),
-                            height: 1.0,
-                            color: PixelTheme.textWhite,
+              : null,
+          onTapTitle: onEditName,
+          onTapAttribute: onEditEmoji,
+          titleSuffix: Icon(
+            Icons.edit_rounded,
+            size: s(14),
+            color: PixelTheme.textWhite,
+          ),
+          attributeSuffix: Icon(
+            Icons.edit_rounded,
+            size: s(12),
+            color: PixelTheme.textWhite,
+          ),
+          image: GestureDetector(
+            onTap: onEditImage,
+            behavior: HitTestBehavior.opaque,
+            child: _hasAnyPixel(pixels)
+                ? CustomPaint(
+                    painter: _PixelCanvasPainter(
+                      pixels: pixels,
+                      showGrid: false,
+                    ),
+                    child: const SizedBox.expand(),
+                  )
+                : Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ..._emojiPreviewRows(emoji).map(
+                          (String rowEmoji) => Text(
+                            rowEmoji,
+                            style: systemEmojiTextStyle(
+                              fontSize: s(32),
+                              height: 1.0,
+                              color: PixelTheme.textWhite,
+                            ),
                           ),
                         ),
-                      ),
-                      SizedBox(height: s(6)),
-                      Text(
-                        context.l10n.tr('tapEditImage'),
-                        style: TextStyle(
-                          color: PixelTheme.textWhite,
-                          fontSize: s(12),
-                          fontWeight: FontWeight.w900,
+                        SizedBox(height: s(6)),
+                        Text(
+                          context.l10n.tr('tapEditImage'),
+                          style: TextStyle(
+                            color: PixelTheme.textWhite,
+                            fontSize: s(12),
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-        ),
-        fixedContent: _EditorLinkRow(
-          link: displayLink,
-          onEditLink: onEditLink,
-          onTestLink: onTestLink,
-          fontSize: s(10),
-        ),
-        extraContent: _EditorDescription(
-          description: description,
-          onTap: onEditDescription,
-          fontSize: s(13),
+          ),
+          fixedContent: _EditorLinkRow(
+            link: displayLink,
+            onEditLink: onEditLink,
+            onTestLink: onTestLink,
+            fontSize: s(10),
+          ),
+          extraContent: _EditorDescription(
+            description: description,
+            onTap: onEditDescription,
+            fontSize: s(ExpandedPixelCardStyle.descriptionFontSize),
+          ),
         ),
       ),
     );
@@ -1029,11 +1052,12 @@ class _EditorDescription extends StatelessWidget {
           const SizedBox(width: 6),
           Expanded(
             child: Text(
+              key: const ValueKey<String>('my-card-description-text'),
               description,
               style: TextStyle(
                 color: PixelTheme.textWhite,
                 fontSize: fontSize,
-                height: 1.25,
+                height: ExpandedPixelCardStyle.descriptionLineHeight,
                 fontFamily: 'Unifont',
               ),
             ),
@@ -1583,8 +1607,12 @@ class _CardPrintPreviewScreen extends StatefulWidget {
 }
 
 class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
+  static const int _printWidthPx = 638;
+  static const int _printHeightPx = 1011;
+
   final AuthService _authService = AuthService();
   final LocalPrintOrderStore _printOrderStore = LocalPrintOrderStore();
+  final GlobalKey _printArtworkKey = GlobalKey();
   LocalPrintOrder? _order;
   bool _isLoadingOrder = true;
   bool _isSubmitting = false;
@@ -1609,7 +1637,7 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
         body: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              const double ratio = 53.98 / 85.60;
+              const double ratio = _printWidthPx / _printHeightPx;
               final double cardWidth = (constraints.maxWidth - 32).clamp(
                 240.0,
                 360.0,
@@ -1634,6 +1662,7 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
                         cardColor: widget.cardColor,
                         pixels: widget.pixels,
                         scale: scale,
+                        artworkKey: _printArtworkKey,
                       ),
                     ),
                     SizedBox(height: s(18)),
@@ -1727,14 +1756,7 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
           context,
           label: context.l10n.tr('preparingPrintFile'),
           action: () async {
-            final Uint8List artworkPng = _buildCr80PrintPng(
-              name: widget.name,
-              link: widget.link,
-              emoji: widget.emoji,
-              description: widget.description,
-              cardColor: widget.cardColor,
-              pixels: widget.pixels,
-            );
+            final Uint8List artworkPng = await _capturePrintArtwork();
             return _authService.submitCardPrintOrder(
               artworkPng: artworkPng,
               metadata: const <String, dynamic>{
@@ -1799,6 +1821,47 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
     }
   }
 
+  Future<Uint8List> _capturePrintArtwork() async {
+    await WidgetsBinding.instance.endOfFrame;
+    final BuildContext? artworkContext = _printArtworkKey.currentContext;
+    final RenderObject? renderObject = artworkContext?.findRenderObject();
+    if (renderObject is! RenderRepaintBoundary || !renderObject.hasSize) {
+      throw StateError('Print preview is not ready to capture.');
+    }
+
+    final double pixelRatio = _printWidthPx / renderObject.size.width;
+    final ui.Image image = await renderObject.toImage(pixelRatio: pixelRatio);
+    try {
+      final ByteData? pngData = await image.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
+      if (pngData == null) {
+        throw StateError('Could not encode the print preview as PNG.');
+      }
+      final Uint8List pngBytes = pngData.buffer.asUint8List(
+        pngData.offsetInBytes,
+        pngData.lengthInBytes,
+      );
+      if (image.width == _printWidthPx && image.height == _printHeightPx) {
+        return Uint8List.fromList(pngBytes);
+      }
+
+      final img.Image? decoded = img.decodePng(pngBytes);
+      if (decoded == null) {
+        throw StateError('Could not normalize the print preview dimensions.');
+      }
+      final img.Image normalized = img.copyResize(
+        decoded,
+        width: _printWidthPx,
+        height: _printHeightPx,
+        interpolation: img.Interpolation.nearest,
+      );
+      return Uint8List.fromList(img.encodePng(normalized, level: 6));
+    } finally {
+      image.dispose();
+    }
+  }
+
   void _openBarcodeSaveScreen(LocalPrintOrder order) {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(builder: (_) => _BarcodeSaveScreen(order: order)),
@@ -1842,40 +1905,60 @@ class _PrintableCardPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     double s(double value) => value * scale;
+    final double expandedCardScale =
+        width / ExpandedPixelCardStyle.referenceCardWidth;
     final String displayLink = link.trim().isEmpty
         ? 'https://hitcon.org'
         : link;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(width * 0.06),
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: PixelCardFace(
-          title: name,
-          attributeEmoji: '',
-          attributeLabel: _printEmojiLabel(emoji),
-          cardColor: cardColor,
-          showText: true,
-          showOuterFrame: false,
-          showDropShadow: false,
-          watermarkScale: 1.6,
-          titleFontSize: s(22),
-          titleFontWeight: FontWeight.w900,
-          attributeFontSize: s(12),
-          emojiFontSize: s(16),
-          titleMaxLines: 2,
-          imageToTitleSpacing: s(8),
-          extraContentSpacing: s(8),
-          image: _CardArtworkPreview(
-            pixels: pixels,
-            emoji: emoji,
-            fontSize: s(32),
-          ),
-          fixedContent: _PrintLinkRow(link: displayLink, fontSize: s(10)),
-          extraContent: _PrintDescription(
-            description: description,
-            fontSize: s(13),
+    return PanasonicBrandingBuilder(
+      forPrint: true,
+      builder: (context, showPanasonicLogo) => ClipRRect(
+        borderRadius: BorderRadius.circular(width * 0.06),
+        child: SizedBox(
+          width: width,
+          height: height,
+          child: PixelCardFace(
+            title: name,
+            attributeEmoji: '',
+            attributeLabel: _printEmojiLabel(emoji),
+            cardColor: cardColor,
+            showText: true,
+            showOuterFrame: false,
+            showDropShadow: false,
+            watermarkScale: 1.6,
+            verticalHitconWatermark: true,
+            extraContentScrollable: false,
+            contentAboveWatermarks: true,
+            extraContentBottomPadding: 0,
+            watermarkFooterHeight: showPanasonicLogo
+                ? ExpandedPixelCardStyle.printWatermarkFooterHeight *
+                      expandedCardScale
+                : 0,
+            bottomLeftWatermark: showPanasonicLogo
+                ? ExpandedCardPanasonicMark(
+                    cardWidth: width,
+                    scale: expandedCardScale,
+                    color: PixelTheme.textWhite.withValues(alpha: 0.18),
+                  )
+                : null,
+            titleFontSize: s(22),
+            titleFontWeight: FontWeight.w900,
+            attributeFontSize: s(12),
+            emojiFontSize: s(16),
+            titleMaxLines: 1,
+            imageToTitleSpacing: s(8),
+            extraContentSpacing: s(8),
+            image: _CardArtworkPreview(
+              pixels: pixels,
+              emoji: emoji,
+              fontSize: s(32),
+            ),
+            fixedContent: _PrintLinkRow(link: displayLink, fontSize: s(10)),
+            extraContent: _PrintDescription(
+              description: description,
+              fontSize: s(13),
+            ),
           ),
         ),
       ),
@@ -1894,6 +1977,7 @@ class _TiltablePrintableCardPreview extends StatefulWidget {
     required this.cardColor,
     required this.pixels,
     required this.scale,
+    required this.artworkKey,
   });
 
   final double width;
@@ -1905,6 +1989,7 @@ class _TiltablePrintableCardPreview extends StatefulWidget {
   final Color cardColor;
   final PixelGrid pixels;
   final double scale;
+  final GlobalKey artworkKey;
 
   @override
   State<_TiltablePrintableCardPreview> createState() =>
@@ -1965,16 +2050,19 @@ class _TiltablePrintableCardPreviewState
                 thickness: 2,
               ),
             ),
-            _PrintableCardPreview(
-              width: widget.width,
-              height: widget.height,
-              name: widget.name,
-              link: widget.link,
-              emoji: widget.emoji,
-              description: widget.description,
-              cardColor: widget.cardColor,
-              pixels: widget.pixels,
-              scale: widget.scale,
+            RepaintBoundary(
+              key: widget.artworkKey,
+              child: _PrintableCardPreview(
+                width: widget.width,
+                height: widget.height,
+                name: widget.name,
+                link: widget.link,
+                emoji: widget.emoji,
+                description: widget.description,
+                cardColor: widget.cardColor,
+                pixels: widget.pixels,
+                scale: widget.scale,
+              ),
             ),
           ],
         ),
@@ -2128,7 +2216,10 @@ class _PrintDescription extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(
+      key: const ValueKey<String>('print-card-description'),
       description,
+      maxLines: 4,
+      overflow: TextOverflow.ellipsis,
       style: TextStyle(
         color: PixelTheme.textWhite,
         fontSize: fontSize,
@@ -2412,126 +2503,6 @@ String _printEmojiLabel(String value) {
   return label.trim().isEmpty ? 'Emoji' : label;
 }
 
-String _printEmojiTextForFile(String value) {
-  final List<String> labels = _PokemonStyleCard.emojiLabel(value)
-      .split(RegExp(r'\s{2,}'))
-      .map((String item) => _asciiFallback(item))
-      .where((String item) => item.isNotEmpty)
-      .take(3)
-      .toList(growable: false);
-  return labels.isEmpty ? 'EMOJI' : labels.join('  ');
-}
-
-Uint8List _buildCr80PrintPng({
-  required String name,
-  required String link,
-  required String emoji,
-  required String description,
-  required Color cardColor,
-  required PixelGrid pixels,
-}) {
-  const int width = 638;
-  const int height = 1011;
-  const int pad = 38;
-  const int imageSize = width - pad * 2;
-  final img.Image output = img.Image(width: width, height: height);
-  final _Rgba bgDark = _rgba(PixelTheme.bgDark);
-  final _Rgba accent = _rgba(cardColor);
-  final _Rgba white = _rgba(PixelTheme.textWhite);
-
-  for (int y = 0; y < height; y += 1) {
-    for (int x = 0; x < width; x += 1) {
-      final double direction = ((x / width) + (y / height)) * 0.5;
-      final double t = 0.18 + direction * 0.30;
-      final int r = (bgDark.r * (1 - t) + accent.r * t).round();
-      final int g = (bgDark.g * (1 - t) + accent.g * t).round();
-      final int b = (bgDark.b * (1 - t) + accent.b * t).round();
-      _setPixel(output, x, y, _Rgba(r, g, b, 255));
-    }
-  }
-
-  _fillRect(output, pad, pad, imageSize, imageSize, bgDark);
-  _strokeRect(output, pad, pad, imageSize, imageSize, accent, 6);
-
-  if (_hasAnyPixel(pixels)) {
-    final int gridSize = pixels.length;
-    final double cell = (imageSize - 16) / gridSize;
-    for (int y = 0; y < gridSize; y += 1) {
-      for (int x = 0; x < gridSize; x += 1) {
-        final Color? pixel = pixels[y][x];
-        if (pixel == null) {
-          continue;
-        }
-        _fillRect(
-          output,
-          pad + 8 + (x * cell).floor(),
-          pad + 8 + (y * cell).floor(),
-          cell.ceil(),
-          cell.ceil(),
-          _rgba(pixel),
-        );
-      }
-    }
-  } else {
-    _drawAsciiText(
-      output,
-      _asciiFallback(emoji, fallback: 'EMOJI'),
-      pad + 160,
-      pad + 245,
-      img.arial48,
-      white,
-    );
-  }
-
-  int y = pad + imageSize + 34;
-  _drawAsciiText(
-    output,
-    _asciiFallback(name, fallback: 'MY CARD'),
-    pad,
-    y,
-    img.arial24,
-    white,
-  );
-  y += 44;
-  _drawAsciiText(
-    output,
-    _printEmojiTextForFile(emoji),
-    pad,
-    y,
-    img.arial24,
-    accent,
-  );
-  y += 42;
-  _drawAsciiText(
-    output,
-    _asciiFallback(link.trim().isEmpty ? 'https://hitcon.org' : link),
-    pad,
-    y,
-    img.arial14,
-    white,
-  );
-  y += 34;
-  _fillRect(output, pad, y, width - pad * 2, 3, white);
-  y += 24;
-  for (final String line in _wrapAscii(
-    _asciiFallback(description, fallback: 'HITCON NFC Battle card'),
-    54,
-  ).take(7)) {
-    _drawAsciiText(output, line, pad, y, img.arial14, white);
-    y += 24;
-  }
-  _drawAsciiText(
-    output,
-    'HITCON 2026',
-    width - 214,
-    height - 32,
-    img.arial24,
-    _Rgba(white.r, white.g, white.b, 46),
-  );
-
-  return Uint8List.fromList(img.encodePng(output, level: 6));
-}
-
 class _Rgba {
   const _Rgba(this.r, this.g, this.b, this.a);
 
@@ -2569,64 +2540,6 @@ void _fillRect(
     for (int xx = x; xx < x + width; xx += 1) {
       _setPixel(image, xx, yy, color);
     }
-  }
-}
-
-void _strokeRect(
-  img.Image image,
-  int x,
-  int y,
-  int width,
-  int height,
-  _Rgba color,
-  int stroke,
-) {
-  _fillRect(image, x, y, width, stroke, color);
-  _fillRect(image, x, y + height - stroke, width, stroke, color);
-  _fillRect(image, x, y, stroke, height, color);
-  _fillRect(image, x + width - stroke, y, stroke, height, color);
-}
-
-void _drawAsciiText(
-  img.Image image,
-  String text,
-  int x,
-  int y,
-  img.BitmapFont font,
-  _Rgba color,
-) {
-  img.drawString(
-    image,
-    text,
-    font: font,
-    x: x,
-    y: y,
-    color: img.ColorRgba8(color.r, color.g, color.b, color.a),
-  );
-}
-
-String _asciiFallback(String value, {String fallback = ''}) {
-  final String result = value
-      .replaceAll(RegExp(r'[^\x20-\x7E]'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  return result.isEmpty ? fallback : result;
-}
-
-Iterable<String> _wrapAscii(String value, int maxChars) sync* {
-  final List<String> words = value.split(' ');
-  String line = '';
-  for (final String word in words) {
-    final String next = line.isEmpty ? word : '$line $word';
-    if (next.length > maxChars && line.isNotEmpty) {
-      yield line;
-      line = word;
-    } else {
-      line = next;
-    }
-  }
-  if (line.isNotEmpty) {
-    yield line;
   }
 }
 

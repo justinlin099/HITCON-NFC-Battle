@@ -9,11 +9,25 @@ import 'package:hitcon_nfc_battle/pages/admin/admin_pixel_widgets.dart';
 import 'package:hitcon_nfc_battle/pages/admin/admin_print_cards_page.dart';
 import 'package:hitcon_nfc_battle/pages/admin/admin_scoreboard_control_page.dart';
 import 'package:hitcon_nfc_battle/pages/user/pixel_theme.dart';
+import 'package:hitcon_nfc_battle/services/nfc_deep_link_service.dart';
 import 'package:hitcon_nfc_battle/services/nfc_session_controller.dart';
 
 void main() {
+  const MethodChannel nativeNfcChannel = MethodChannel(
+    'hitcon_nfc_battle/nfc_intent',
+  );
+
   setUp(() {
     PixelTheme.active = PixelTheme.getPalette(PixelTheme.defaultScheme);
+    NfcDeepLinkService.instance.resetTagMaintenanceForTest();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(nativeNfcChannel, (_) async => null);
+  });
+
+  tearDown(() {
+    NfcDeepLinkService.instance.resetTagMaintenanceForTest();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(nativeNfcChannel, null);
   });
 
   Widget app(Widget child) {
@@ -86,7 +100,7 @@ void main() {
       await tester.pumpWidget(app(const AdminPairUserTagPage()));
       await tester.enterText(find.byType(TextField), 'user-123');
       await tester.tap(find.text('開始配對 Tag'));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(collectionLease!.isActive, isFalse);
       expect(collectionWasPreempted, isTrue);
@@ -133,7 +147,7 @@ void main() {
       NfcSessionController.instance.resetForTest();
       await tester.pumpWidget(app(page));
       await tester.tap(find.text(button));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       final MethodCall startCall = platformCalls.firstWhere(
         (MethodCall call) => call.method == 'Nfc#startSession',
@@ -158,6 +172,7 @@ void main() {
         );
         await tester.pump();
         expect(find.text('04:A1:B2:C3'), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 500));
       }
 
       await tester.pumpWidget(const SizedBox.shrink());
