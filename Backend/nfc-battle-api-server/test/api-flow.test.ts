@@ -64,7 +64,7 @@ describe("NFC Battle API flow", () => {
       status: "success",
       data: {
         user_id: "sponsor-one",
-        display_name: "Player_sponsor-",
+        display_name: "",
         emoji_icon: "🙂",
       },
     });

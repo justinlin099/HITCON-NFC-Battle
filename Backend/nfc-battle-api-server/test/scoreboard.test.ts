@@ -84,7 +84,7 @@ describe("mission and scoreboard edge cases", () => {
       {
         rank: 2,
         user_id: "alice",
-        display_name: "Player_alice",
+        display_name: "",
         emoji_icon: "🙂",
         score: 0,
         external_prize: false,
@@ -92,7 +92,7 @@ describe("mission and scoreboard edge cases", () => {
       {
         rank: 3,
         user_id: "carol",
-        display_name: "Player_carol",
+        display_name: "",
         emoji_icon: "🙂",
         score: 0,
         external_prize: false,

@@ -28,7 +28,7 @@ describe("user profile behavior", () => {
       status: "success",
       data: {
         user_id: "bob",
-        display_name: "Player_bob",
+        display_name: "",
         emoji_icon: "🙂",
       },
     });
@@ -42,7 +42,7 @@ describe("user profile behavior", () => {
       status: "success",
       data: {
         user_id: "bob",
-        display_name: "Player_bob",
+        display_name: "",
         emoji_icon: "🙂",
       },
     });
@@ -67,7 +67,7 @@ describe("user profile behavior", () => {
             unchanged: false,
             data: {
               user_id: "bob",
-              display_name: "Player_bob",
+              display_name: "",
               emoji_icon: "🙂",
             },
           },
@@ -99,7 +99,7 @@ describe("user profile behavior", () => {
       data: {
         user_id: "bob",
         role: "ATTENDEE",
-        display_name: "Player_bob",
+        display_name: "",
         emoji_icon: "🙂",
         bio: "",
         pixel_avatar_base64: "",
@@ -186,8 +186,6 @@ describe("user profile behavior", () => {
       await jsonRequest(
         "PATCH",
         {
-          display_name: "Player_alice",
-          emoji_icon: "🙂",
           bio: "",
           pixel_avatar_base64: "",
         },
@@ -346,7 +344,7 @@ describe("user profile behavior", () => {
             unchanged: false,
             data: {
               user_id: "carol",
-              display_name: "Player_carol",
+              display_name: "",
               emoji_icon: "🙂",
             },
           },
@@ -387,7 +385,7 @@ describe("user profile behavior", () => {
         users: [
           {
             user_id: "carol",
-            display_name: "Player_carol",
+            display_name: "",
             emoji_icon: "🙂",
           },
         ],
@@ -623,7 +621,7 @@ describe("user profile behavior", () => {
           users: [
             {
               user_id: "carol",
-              display_name: "Player_carol",
+              display_name: "",
               emoji_icon: "🙂",
             },
           ],
