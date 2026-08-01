@@ -7,6 +7,7 @@ import '../../config/app_config.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/nfc_deep_link_service.dart';
+import '../../services/nfc_error_messages.dart';
 import '../../services/nfc_session_controller.dart';
 import '../../services/nfc_tag_payload.dart';
 import '../../services/ntag_security_service.dart';
@@ -94,7 +95,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
     } catch (error) {
       if (mounted) {
         setState(() {
-          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
+          _status = nfcSessionErrorMessage(l10n, error);
         });
       }
       return;
@@ -191,9 +192,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
               status = l10n.tr('ntagWriteLocked');
             }
           } catch (error) {
-            status = l10n.tr('nfcReadFailed', <String, Object?>{
-              'error': error,
-            });
+            status = nfcWriteErrorMessage(l10n, error);
           }
 
           if (mounted) {
@@ -213,7 +212,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
             ),
           );
         },
-        onError: (dynamic error) async {
+        onError: (NfcError error) async {
           if (!lease.isActive || _isDisposed) {
             return;
           }
@@ -222,9 +221,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
             return;
           }
           setState(() {
-            _status = l10n.tr('nfcReadFailed', <String, Object?>{
-              'error': error,
-            });
+            _status = nfcSessionErrorMessage(l10n, error);
             _isReading = false;
             _isHandlingTag = false;
           });
@@ -234,7 +231,7 @@ class _NtagPairingPageState extends State<NtagPairingPage> {
       await _stopOwnedSession(lease);
       if (mounted) {
         setState(() {
-          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
+          _status = nfcSessionErrorMessage(l10n, error);
           _isReading = false;
           _isHandlingTag = false;
         });
@@ -432,7 +429,7 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
     } catch (error) {
       if (mounted) {
         setState(() {
-          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
+          _status = nfcSessionErrorMessage(l10n, error);
         });
       }
       return;
@@ -501,7 +498,7 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
             result = NtagSecurityResult(
               success: false,
               messageKey: 'nfcReadFailed',
-              values: <String, Object?>{'error': error},
+              values: <String, Object?>{'error': nfcErrorDetail(l10n, error)},
             );
           }
 
@@ -518,7 +515,7 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
             _finishUnlockHandling(lease, unlockSucceeded: result.success),
           );
         },
-        onError: (dynamic error) async {
+        onError: (NfcError error) async {
           if (!lease.isActive || _isDisposed) {
             return;
           }
@@ -527,9 +524,7 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
             return;
           }
           setState(() {
-            _status = l10n.tr('nfcReadFailed', <String, Object?>{
-              'error': error,
-            });
+            _status = nfcSessionErrorMessage(l10n, error);
             _isReading = false;
             _isHandlingTag = false;
           });
@@ -539,7 +534,7 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
       await _stopOwnedSession(lease);
       if (mounted) {
         setState(() {
-          _status = l10n.tr('nfcReadFailed', <String, Object?>{'error': error});
+          _status = nfcSessionErrorMessage(l10n, error);
           _isReading = false;
           _isHandlingTag = false;
         });

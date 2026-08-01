@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hitcon_nfc_battle/services/nfc_session_controller.dart';
 
@@ -50,6 +52,35 @@ void main() {
     expect(toolLease!.isActive, isTrue);
     expect(controller.activeOwner, NfcSessionOwner.ntagReader);
   });
+
+  test(
+    'waits for the old NFC session to close before granting the next',
+    () async {
+      final Completer<void> oldSessionClosed = Completer<void>();
+      await controller.acquire(
+        NfcSessionOwner.collectionScanner,
+        onPreempt: () => oldSessionClosed.future,
+      );
+
+      var nextSessionGranted = false;
+      final Future<NfcSessionLease?> nextLease = controller
+          .acquire(NfcSessionOwner.badgePairing, preemptExisting: true)
+          .then((NfcSessionLease? lease) {
+            nextSessionGranted = true;
+            return lease;
+          });
+
+      await Future<void>.delayed(Duration.zero);
+      expect(nextSessionGranted, isFalse);
+
+      oldSessionClosed.complete();
+      final NfcSessionLease? lease = await nextLease;
+
+      expect(lease, isNotNull);
+      expect(lease!.isActive, isTrue);
+      expect(controller.activeOwner, NfcSessionOwner.badgePairing);
+    },
+  );
 
   test('does not let an old lease release the new owner', () async {
     final NfcSessionLease? collectionLease = await controller.acquire(
