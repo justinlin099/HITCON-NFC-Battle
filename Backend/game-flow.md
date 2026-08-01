@@ -123,7 +123,7 @@ The user can use `GET /missions/stamp` to see `stamp_threshold` and their progre
 
 ### Scoreboard
 
-The user can use `GET /scoreboard` with `offset` and `limit` to query the global scoreboard. While the scoreboard state is `OPEN`, this endpoint returns live scores. While the scoreboard state is `FREEZING`, this endpoint should be rejected because a consistent snapshot is being calculated. While the scoreboard state is `FROZEN`, this endpoint returns the stored freeze snapshot, so scores do not change even if the app continues to record pairing, scanning, phishing, profile, and collection updates.
+The user can use `GET /scoreboard` with `offset` and `limit` to query the global scoreboard. While the scoreboard state is `OPEN`, this endpoint returns live scores. While the scoreboard state is `FREEZING`, this endpoint should be rejected because a consistent snapshot is being calculated. While the scoreboard state is `FROZEN`, this endpoint returns the stored freeze snapshot, so scores do not change even if the app continues to record pairing, scanning, phishing, profile, and collection updates. Every ranking includes `external_prize`, which is live in both `OPEN` and `FROZEN` and shows whether the external prize has been claimed without changing score or rank.
 
 ### In Case of Someone Lost Their App
 
@@ -158,7 +158,13 @@ Also, the API server has an endpoint `POST /staff/resume_scoreboard` to resume t
 
 The user can lookup their prize after the scoreboard is frozen via `GET /users/me/prize`.
 
-Staff can call `POST /staff/prize-claims` with the attendee's `user_id` and a UID read from one of that attendee's paired NFC tags. The submitted UID must belong to the submitted user. A claim succeeds only when the stored snapshot for the current `freeze_id` says the attendee won a stamp prize or rank prize. Each attendee can claim only once per freeze snapshot; an ineligible attendee or a repeated claim returns an error.
+Staff can call `POST /staff/prize-claims` with the attendee's `user_id`, a UID read from one of that attendee's paired NFC tags, and a prize `type`. The submitted UID must belong to the submitted user. `type: STAMP` is available during the event as soon as the attendee has collected at least `stamp_threshold` sponsor plus community stamps; it is claimable once per attendee and is not tied to a scoreboard freeze. `type: RANKING` succeeds only when the stored snapshot for the current `freeze_id` says the attendee won the ranking prize, and is claimable once per attendee and freeze snapshot. An ineligible or repeated claim returns an error.
+
+### External Prize Redemption
+
+The external prize is awarded according to criteria managed outside this game, so the API never calculates eligibility for it and it is not tied to a scoreboard freeze. A staff member records it in the shared `prize_claims` log by calling `POST /staff/prize-claims` with the attendee's `user_id`, a UID read from one of their paired NFC tags, and `type: EXTERNAL`. The UID must belong to that attendee. A user can claim the external prize only once; a repeated request returns `PRIZE_ALREADY_CLAIMED`.
+
+Staff can call `GET /staff/prize-claims/{user_id}?type=EXTERNAL` to check whether the attendee has already claimed the external prize and, when they have, see the claim time and staff user ID. An `EXTERNAL` claim is exposed as `external_prize` on the scoreboard but never changes a score, rank, freeze snapshot, stamp prize, or ranking prize.
 
 ## After the Conference
 

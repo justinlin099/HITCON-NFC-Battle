@@ -87,6 +87,7 @@ describe("mission and scoreboard edge cases", () => {
         display_name: "Player_alice",
         emoji_icon: "🙂",
         score: 0,
+        external_prize: false,
       },
       {
         rank: 3,
@@ -94,6 +95,7 @@ describe("mission and scoreboard edge cases", () => {
         display_name: "Player_carol",
         emoji_icon: "🙂",
         score: 0,
+        external_prize: false,
       },
     ]);
   });

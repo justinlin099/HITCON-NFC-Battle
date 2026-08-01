@@ -104,6 +104,7 @@ export interface CollectionCountRow {
   emoji_icon: string;
   num_of_collection: number;
   num_of_phishing: number;
+  external_prize: number;
 }
 
 export async function getLiveCollectionScoreRows(db: D1Database, offset: number, limit: number) {
@@ -131,11 +132,16 @@ export async function getLiveCollectionScoreRows(db: D1Database, offset: number,
           users.emoji_icon,
           COALESCE(collection_counts.num_of_collection, 0) AS num_of_collection,
           COALESCE(phishing_counts.num_of_phishing, 0) AS num_of_phishing,
+          CASE WHEN external_prize_claims.user_id IS NULL THEN 0 ELSE 1 END AS external_prize,
           (COALESCE(collection_counts.num_of_collection, 0) * ?1)
             - (COALESCE(phishing_counts.num_of_phishing, 0) * ?2) AS score
         FROM users
         LEFT JOIN collection_counts ON collection_counts.user_id = users.user_id
         LEFT JOIN phishing_counts ON phishing_counts.user_id = users.user_id
+        LEFT JOIN prize_claims AS external_prize_claims
+          ON external_prize_claims.user_id = users.user_id
+          AND external_prize_claims.type = 'EXTERNAL'
+          AND external_prize_claims.freeze_id = ''
       ),
       ranked AS (
         SELECT
@@ -146,7 +152,8 @@ export async function getLiveCollectionScoreRows(db: D1Database, offset: number,
           display_name,
           emoji_icon,
           num_of_collection,
-          num_of_phishing
+          num_of_phishing,
+          external_prize
         FROM scores
       )
       SELECT
@@ -155,7 +162,8 @@ export async function getLiveCollectionScoreRows(db: D1Database, offset: number,
         display_name,
         emoji_icon,
         num_of_collection,
-        num_of_phishing
+        num_of_phishing,
+        external_prize
       FROM ranked
       ORDER BY rank ASC
       LIMIT ?3

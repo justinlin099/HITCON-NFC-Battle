@@ -24,6 +24,7 @@ const CONTRACT_PATHS = [
   "/print-cards",
   "/staff/print-cards/{short_token}",
   "/staff/prize-claims",
+  "/staff/prize-claims/{user_id}",
   "/staff/nfc-unlock-code",
 ];
 
@@ -56,6 +57,11 @@ const CONTRACT_OPERATIONS = [
     requestPath: "/staff/print-cards/abcdefgh",
   },
   { method: "POST", openapiPath: "/staff/prize-claims", requestPath: "/staff/prize-claims" },
+  {
+    method: "GET",
+    openapiPath: "/staff/prize-claims/{user_id}",
+    requestPath: "/staff/prize-claims/alice?type=EXTERNAL",
+  },
   { method: "POST", openapiPath: "/staff/nfc-unlock-code", requestPath: "/staff/nfc-unlock-code" },
 ];
 

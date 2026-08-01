@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import { getLiveCollectionScoreRows } from "./collection-store";
-import { getFrozenScoreboardRows } from "./freeze-snapshot-store";
+import { getFrozenScoreboardRows, getPrizeClaimsVersion } from "./freeze-snapshot-store";
 import { RANK_THRESHOLD } from "./game-config";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { calculateScore } from "./scoring";
@@ -33,11 +33,14 @@ scoreboard.get("/", async (c) => {
       return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
     }
 
+    const prizeClaimsVersion = await getPrizeClaimsVersion(c.env.DB);
+
     const cachedRankings = await getCachedScoreboardRankings(
       c.req.url,
       state,
       pagination.offset,
       pagination.limit,
+      prizeClaimsVersion,
     );
     const rankings = cachedRankings ?? (
       state.state === "FROZEN" && state.freeze_id
@@ -58,6 +61,7 @@ scoreboard.get("/", async (c) => {
           pagination.offset,
           pagination.limit,
           rankings,
+          prizeClaimsVersion,
         ),
       );
     }
@@ -96,6 +100,7 @@ async function getLiveRankings(
     display_name: item.display_name,
     emoji_icon: item.emoji_icon,
     score: calculateScore(item.num_of_collection, item.num_of_phishing),
+    external_prize: item.external_prize === 1,
   }));
 }
 
@@ -113,6 +118,7 @@ async function getFrozenRankings(
     display_name: item.display_name,
     emoji_icon: item.emoji_icon,
     score: item.final_score,
+    external_prize: item.external_prize === 1,
   }));
 }
 

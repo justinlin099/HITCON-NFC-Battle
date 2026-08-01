@@ -12,8 +12,19 @@ export interface PrizeResultRow {
   rank: number | null;
 }
 
+export type PrizeClaimType = "EXTERNAL" | "STAMP" | "RANKING";
+
+// Sentinel freeze ID for claims not tied to a frozen scoreboard snapshot.
+export const EXTERNAL_PRIZE_FREEZE_ID = "";
+
+export interface PrizeClaimRow {
+  claimed_at: string;
+  claimed_by_user_id: string;
+}
+
 export async function claimPrize(
   db: D1Database,
+  type: PrizeClaimType,
   freezeId: string,
   userId: string,
   claimedByUserId: string,
@@ -22,14 +33,40 @@ export async function claimPrize(
   const result = await db
     .prepare(
       `
-      INSERT OR IGNORE INTO prize_claims (freeze_id, user_id, claimed_at, claimed_by_user_id)
-      VALUES (?1, ?2, ?3, ?4)
+      INSERT OR IGNORE INTO prize_claims (type, freeze_id, user_id, claimed_at, claimed_by_user_id)
+      VALUES (?1, ?2, ?3, ?4, ?5)
       `,
     )
-    .bind(freezeId, userId, claimedAt, claimedByUserId)
+    .bind(type, freezeId, userId, claimedAt, claimedByUserId)
     .run();
 
   return result.meta.changes > 0;
+}
+
+export async function getPrizeClaim(
+  db: D1Database,
+  type: PrizeClaimType,
+  freezeId: string,
+  userId: string,
+) {
+  return db
+    .prepare(
+      `
+      SELECT claimed_at, claimed_by_user_id
+      FROM prize_claims
+      WHERE type = ?1 AND freeze_id = ?2 AND user_id = ?3
+      `,
+    )
+    .bind(type, freezeId, userId)
+    .first<PrizeClaimRow>();
+}
+
+export async function getPrizeClaimsVersion(db: D1Database) {
+  const state = await db
+    .prepare("SELECT version FROM prize_claims_state WHERE id = 1")
+    .first<{ version: number }>();
+
+  return state?.version ?? 0;
 }
 
 export interface FrozenScoreboardRow {
@@ -38,6 +75,7 @@ export interface FrozenScoreboardRow {
   display_name: string;
   emoji_icon: string;
   final_score: number;
+  external_prize: number;
 }
 
 export async function recordPhishingEvent(
@@ -215,9 +253,14 @@ export async function getFrozenScoreboardRows(
         users.user_id,
         users.display_name,
         users.emoji_icon,
-        prize_results.final_score
+        prize_results.final_score,
+        CASE WHEN external_prize_claims.user_id IS NULL THEN 0 ELSE 1 END AS external_prize
       FROM prize_results
       INNER JOIN users ON users.user_id = prize_results.user_id
+      LEFT JOIN prize_claims AS external_prize_claims
+        ON external_prize_claims.user_id = prize_results.user_id
+        AND external_prize_claims.type = 'EXTERNAL'
+        AND external_prize_claims.freeze_id = ''
       WHERE prize_results.freeze_id = ?1
       ORDER BY prize_results.rank ASC
       LIMIT ?2

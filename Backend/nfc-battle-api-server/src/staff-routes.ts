@@ -2,13 +2,17 @@ import { Hono } from "hono";
 import {
   claimPrize,
   deletePrizeSnapshot,
+  EXTERNAL_PRIZE_FREEZE_ID,
+  getPrizeClaim,
   getPrizeResult,
   markPhishingEventsApplied,
   unmarkPhishingEventsApplied,
   writePrizeSnapshot,
+  type PrizeClaimType,
 } from "./freeze-snapshot-store";
 import { isFreezingStale } from "./freeze";
 import { RANK_THRESHOLD, STAMP_THRESHOLD } from "./game-config";
+import { getStampCounts } from "./collection-store";
 import {
   getGameState,
   markScoreboardFrozen,
@@ -32,6 +36,7 @@ const staffRoutes = new Hono<AppEnv>();
 const FREEZE_SCOREBOARD_KEYS = new Set(["scoring_cutoff_at"]);
 const USER_TAG_KEYS = new Set(["user_id", "physical_id"]);
 const USER_UID_KEYS = new Set(["user_id", "uid"]);
+const PRIZE_CLAIM_KEYS = new Set(["user_id", "uid", "type"]);
 const SHORT_TOKEN_PATTERN = /^[A-Za-z0-9_-]{8,32}$/;
 
 staffRoutes.use("*", requireAuth, requireStaffRole);
@@ -107,14 +112,9 @@ staffRoutes.get("/print-cards/:short_token", async (c) => {
 });
 
 staffRoutes.post("/prize-claims", async (c) => {
-  const request = validateUserUidRequest(await readJson(c));
+  const request = validatePrizeClaimRequest(await readJson(c));
   if (!request) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
-  }
-
-  const state = await getGameState(c.env.DB);
-  if (state.state !== "FROZEN" || !state.freeze_id) {
-    return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
   }
 
   const user = await getUserRow(c.env.DB, request.user_id);
@@ -127,14 +127,71 @@ staffRoutes.post("/prize-claims", async (c) => {
     return errorResponse(c, 403, "PHYSICAL_ID_MISMATCH", "Physical tag ID does not match user ID.");
   }
 
+  if (request.type === "EXTERNAL") {
+    const claimedAt = await claimExternalPrize(
+      c.env.DB,
+      request.user_id,
+      c.get("authUser").userId,
+    );
+    if (!claimedAt) {
+      return errorResponse(c, 409, "PRIZE_ALREADY_CLAIMED", "Prize has already been claimed.");
+    }
+
+    return success(c, {
+      type: "EXTERNAL",
+      freeze_id: null,
+      user_id: request.user_id,
+      claimed_at: claimedAt,
+      claimed_by_user_id: c.get("authUser").userId,
+    });
+  }
+
+  if (request.type === "STAMP") {
+    const counts = await getStampCounts(c.env.DB, request.user_id);
+    const stampCount = (counts?.sponsor_count ?? 0) + (counts?.community_count ?? 0);
+    if (stampCount < STAMP_THRESHOLD) {
+      return errorResponse(c, 409, "PRIZE_NOT_ELIGIBLE", "User is not eligible for a prize.");
+    }
+
+    const claimedAt = await claimLivePrize(
+      c.env.DB,
+      "STAMP",
+      request.user_id,
+      c.get("authUser").userId,
+    );
+    if (!claimedAt) {
+      return errorResponse(c, 409, "PRIZE_ALREADY_CLAIMED", "Prize has already been claimed.");
+    }
+
+    return success(c, {
+      type: "STAMP",
+      freeze_id: null,
+      user_id: request.user_id,
+      stamp_prize: true,
+      rank_prize: false,
+      rank: null,
+      claimed_at: claimedAt,
+      claimed_by_user_id: c.get("authUser").userId,
+    });
+  }
+
+  const state = await getGameState(c.env.DB);
+  if (state.state !== "FROZEN" || !state.freeze_id) {
+    return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
+  }
+
   const prize = await getPrizeResult(c.env.DB, state.freeze_id, request.user_id);
-  if (!prize || (prize.stamp_prize !== 1 && prize.rank_prize !== 1)) {
+  if (
+    !prize ||
+    prize.rank_prize !== 1
+  ) {
     return errorResponse(c, 409, "PRIZE_NOT_ELIGIBLE", "User is not eligible for a prize.");
   }
 
   const claimedAt = nowIso();
   const claimed = await claimPrize(
     c.env.DB,
+    request.type,
     state.freeze_id,
     request.user_id,
     c.get("authUser").userId,
@@ -145,12 +202,41 @@ staffRoutes.post("/prize-claims", async (c) => {
   }
 
   return success(c, {
+    type: request.type,
     freeze_id: state.freeze_id,
     user_id: request.user_id,
-    stamp_prize: prize.stamp_prize === 1,
-    rank_prize: prize.rank_prize === 1,
+    stamp_prize: false,
+    rank_prize: true,
     rank: prize.rank,
     claimed_at: claimedAt,
+  });
+});
+
+staffRoutes.get("/prize-claims/:user_id", async (c) => {
+  const userId = c.req.param("user_id");
+  const type = parsePrizeClaimType(c.req.query("type"));
+  if (!type) {
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+  }
+
+  const user = await getUserRow(c.env.DB, userId);
+  if (!user) {
+    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+  }
+
+  const freezeId = await prizeClaimFreezeId(c.env.DB, type);
+  if (freezeId === null) {
+    return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
+  }
+
+  const claim = await getPrizeClaim(c.env.DB, type, freezeId, userId);
+  return success(c, {
+    user_id: userId,
+    type,
+    freeze_id: type === "RANKING" ? freezeId : null,
+    claimed: claim !== null,
+    claimed_at: claim?.claimed_at ?? null,
+    claimed_by_user_id: claim?.claimed_by_user_id ?? null,
   });
 });
 
@@ -295,6 +381,56 @@ function validateUserUidRequest(value: unknown) {
   }
 
   return { user_id: userId, uid };
+}
+
+function validatePrizeClaimRequest(value: unknown) {
+  if (!isPlainObject(value) || !hasOnlyKeys(value, PRIZE_CLAIM_KEYS)) {
+    return null;
+  }
+
+  const userId = requiredString(value, "user_id");
+  const uid = requiredString(value, "uid");
+  const type = parsePrizeClaimType(value.type);
+  if (!userId || !uid || !type) {
+    return null;
+  }
+
+  return { user_id: userId, uid, type };
+}
+
+function parsePrizeClaimType(value: unknown): PrizeClaimType | null {
+  return value === "EXTERNAL" || value === "STAMP" || value === "RANKING" ? value : null;
+}
+
+async function claimExternalPrize(db: D1Database, userId: string, claimedByUserId: string) {
+  return claimLivePrize(db, "EXTERNAL", userId, claimedByUserId);
+}
+
+async function claimLivePrize(
+  db: D1Database,
+  type: "EXTERNAL" | "STAMP",
+  userId: string,
+  claimedByUserId: string,
+) {
+  const claimedAt = nowIso();
+  const claimed = await claimPrize(
+    db,
+    type,
+    EXTERNAL_PRIZE_FREEZE_ID,
+    userId,
+    claimedByUserId,
+    claimedAt,
+  );
+  return claimed ? claimedAt : null;
+}
+
+async function prizeClaimFreezeId(db: D1Database, type: PrizeClaimType) {
+  if (type === "EXTERNAL" || type === "STAMP") {
+    return EXTERNAL_PRIZE_FREEZE_ID;
+  }
+
+  const state = await getGameState(db);
+  return state.state === "FROZEN" && state.freeze_id ? state.freeze_id : null;
 }
 
 async function rollbackFailedFreeze(db: D1Database, freezeId: string) {

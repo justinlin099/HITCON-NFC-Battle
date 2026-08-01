@@ -1,6 +1,6 @@
 import type { GameStateRow } from "./game-state";
 
-const CACHE_VERSION = "1";
+const CACHE_VERSION = "2";
 const OPEN_TTL_SECONDS = 2;
 const FROZEN_TTL_SECONDS = 60;
 
@@ -10,6 +10,7 @@ export interface ScoreboardRanking {
   display_name: string;
   emoji_icon: string;
   score: number;
+  external_prize: boolean;
 }
 
 export async function getCachedScoreboardRankings(
@@ -17,6 +18,7 @@ export async function getCachedScoreboardRankings(
   state: GameStateRow,
   offset: number,
   limit: number,
+  prizeClaimsVersion: number,
 ) {
   const cache = getDefaultCache();
   if (!cache) {
@@ -24,7 +26,9 @@ export async function getCachedScoreboardRankings(
   }
 
   try {
-    const response = await cache.match(scoreboardCacheKey(requestUrl, state, offset, limit));
+    const response = await cache.match(
+      scoreboardCacheKey(requestUrl, state, offset, limit, prizeClaimsVersion),
+    );
     if (!response) {
       return null;
     }
@@ -42,6 +46,7 @@ export async function putCachedScoreboardRankings(
   offset: number,
   limit: number,
   rankings: ScoreboardRanking[],
+  prizeClaimsVersion: number,
 ) {
   const cache = getDefaultCache();
   if (!cache) {
@@ -57,7 +62,10 @@ export async function putCachedScoreboardRankings(
   });
 
   try {
-    await cache.put(scoreboardCacheKey(requestUrl, state, offset, limit), response);
+    await cache.put(
+      scoreboardCacheKey(requestUrl, state, offset, limit, prizeClaimsVersion),
+      response,
+    );
   } catch {
     // Cache availability must not affect the scoreboard endpoint.
   }
@@ -68,6 +76,7 @@ function scoreboardCacheKey(
   state: GameStateRow,
   offset: number,
   limit: number,
+  prizeClaimsVersion: number,
 ) {
   const url = new URL(requestUrl);
   url.pathname = "/__internal/cache/scoreboard";
@@ -79,6 +88,7 @@ function scoreboardCacheKey(
   }
   url.searchParams.set("offset", String(offset));
   url.searchParams.set("limit", String(limit));
+  url.searchParams.set("prize_claims_version", String(prizeClaimsVersion));
   return new Request(url.toString());
 }
 

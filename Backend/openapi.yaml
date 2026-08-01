@@ -58,6 +58,13 @@ info:
     results on every request. Resume invalidates the current freeze snapshot and
     reopens scoring.
 
+    The external prize is not calculated by this game. Staff record it in
+    `prize_claims` with `type: EXTERNAL` after applying the external criteria.
+    The stamp prize uses `type: STAMP` and can be claimed during the event
+    after reaching the live stamp threshold. The frozen ranking prize uses
+    `type: RANKING` in the same claim log. The scoreboard exposes external redemptions as
+    `external_prize`, without changing scores or ranks.
+
     Current provisional scoring formula, used for both live and frozen scores:
     `score = 10 * num_of_collection - 10 * num_of_phishing`. The phishing
     penalty is applied to the phishing victim. This formula may be finalized or
@@ -88,14 +95,18 @@ info:
     - `POST /staff/unpair_user_tag`
     - `GET /staff/print-cards/{short_token}`
     - `POST /staff/nfc-unlock-code`
+    - `POST /staff/prize-claims` with `type: EXTERNAL`
+    - `GET /staff/prize-claims/{user_id}?type=EXTERNAL`
+    - `POST /staff/prize-claims` with `type: STAMP`
+    - `GET /staff/prize-claims/{user_id}?type=STAMP`
 
     The following endpoints are available only in `FROZEN`:
     - `GET /users/me/prize`; rejected in `OPEN` and `FREEZING` with
       `SCOREBOARD_NOT_FROZEN`. If the scoreboard state changes during a
       consistent read, it is rejected with `SCOREBOARD_READ_INCONSISTENT` and
       clients should retry.
-    - `POST /staff/prize-claims`; rejected in `OPEN` and `FREEZING` with
-      `SCOREBOARD_NOT_FROZEN`.
+    - `POST /staff/prize-claims` with `type: RANKING`; rejected in `OPEN` and
+      `FREEZING` with `SCOREBOARD_NOT_FROZEN`.
 
     The following endpoints are available in `OPEN` and `FROZEN`, but rejected
     in `FREEZING`:
@@ -567,7 +578,9 @@ paths:
         In `FROZEN`, this endpoint returns the stored freeze snapshot, so scores
         do not change even if pairing, scanning, phishing records, and profile
         updates continue after the conference ends. The response includes the
-        snapshot `freeze_id` and `scoring_cutoff_at`.
+        snapshot `freeze_id` and `scoring_cutoff_at`. Each ranking includes a
+        live `external_prize` flag, which does not affect score, rank,
+        or the freeze snapshot.
 
         If the scoreboard state changes during a consistent read, the endpoint
         returns `SCOREBOARD_READ_INCONSISTENT` and clients should retry.
@@ -932,12 +945,16 @@ paths:
   /staff/prize-claims:
     post:
       tags: [Staff]
-      summary: Claim a frozen prize for an attendee
+      summary: Claim an external, stamp, or ranking prize for an attendee
       description: |
         Requires a STAFF JWT. The submitted NFC UID must belong to `user_id`.
-        A claim is allowed only when the current frozen snapshot says the user
-        won at least one prize, and each user can be claimed only once per
-        freeze snapshot.
+        `type: EXTERNAL` records a prize awarded under criteria outside this
+        game, does not require the scoreboard to be frozen, and is limited to
+        one claim per attendee. `type: STAMP` is available during the event
+        after the attendee reaches the live sponsor-plus-community stamp
+        threshold, and is limited to one claim per attendee. `type: RANKING`
+        requires a frozen scoreboard and its stored ranking-prize result, and
+        is limited to one claim per attendee and freeze snapshot.
       security:
         - bearerAuth: []
       requestBody:
@@ -967,6 +984,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /staff/prize-claims/{user_id}:
+    get:
+      tags: [Staff]
+      summary: Check an attendee's prize claim
+      description: |
+        Requires a STAFF JWT. `type: EXTERNAL` checks the externally-awarded
+        prize without requiring a scoreboard freeze. `type: STAMP` checks the
+        event-wide live stamp claim. `type: RANKING` checks the current frozen
+        scoreboard snapshot and is rejected if it is not frozen.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema:
+            type: string
+          example: kktix_hash_abc123
+        - in: query
+          name: type
+          required: true
+          schema:
+            $ref: '#/components/schemas/PrizeClaimType'
+          example: EXTERNAL
+      responses:
+        '200':
+          description: Prize claim status loaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPrizeClaimStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
+        '409':
+          $ref: '#/components/responses/ScoreboardNotFrozenError'
   /staff/nfc-unlock-code:
     post:
       tags: [Staff]
@@ -1508,7 +1566,7 @@ components:
 
     ClaimPrizeRequest:
       type: object
-      required: [user_id, uid]
+      required: [user_id, uid, type]
       additionalProperties: false
       properties:
         user_id:
@@ -1518,6 +1576,16 @@ components:
           type: string
           description: Physical NFC UID read from the attendee's tag.
           example: '04:1A:2B:3C:4D:5E:6F'
+        type:
+          $ref: '#/components/schemas/PrizeClaimType'
+
+    PrizeClaimType:
+      type: string
+      enum: [EXTERNAL, STAMP, RANKING]
+      description: |
+        `EXTERNAL` is awarded under criteria outside this game. `STAMP` is
+        independently claimable during the event once the live stamp threshold
+        is met. `RANKING` is calculated when the scoreboard freezes.
 
     ClaimPrizeResponse:
       type: object
@@ -1528,10 +1596,13 @@ components:
           enum: [success]
         data:
           type: object
-          required: [freeze_id, user_id, stamp_prize, rank_prize, rank, claimed_at]
+          required: [type, freeze_id, user_id, claimed_at]
           properties:
+            type:
+              $ref: '#/components/schemas/PrizeClaimType'
             freeze_id:
               type: string
+              nullable: true
             user_id:
               type: string
             stamp_prize:
@@ -1544,6 +1615,37 @@ components:
             claimed_at:
               type: string
               format: date-time
+            claimed_by_user_id:
+              type: string
+              description: Staff user who recorded an `EXTERNAL` claim.
+
+    GetPrizeClaimStatusResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: object
+          required: [user_id, type, freeze_id, claimed, claimed_at, claimed_by_user_id]
+          properties:
+            user_id:
+              type: string
+            type:
+              $ref: '#/components/schemas/PrizeClaimType'
+            freeze_id:
+              type: string
+              nullable: true
+            claimed:
+              type: boolean
+            claimed_at:
+              type: string
+              format: date-time
+              nullable: true
+            claimed_by_user_id:
+              type: string
+              nullable: true
 
     GetNfcUnlockCodeRequest:
       type: object
@@ -1659,7 +1761,7 @@ components:
 
     ScoreboardItem:
       type: object
-      required: [rank, user_id, display_name, emoji_icon, score]
+      required: [rank, user_id, display_name, emoji_icon, score, external_prize]
       properties:
         rank:
           type: integer
@@ -1677,6 +1779,10 @@ components:
         score:
           type: integer
           example: 2500
+        external_prize:
+          type: boolean
+          description: Whether staff has recorded an external-prize claim. This does not affect score or rank.
+          example: false
 
     GetScoreboardResponse:
       type: object
@@ -2065,11 +2171,13 @@ components:
               display_name: Root_User
               emoji_icon: 💻
               score: 2500
+              external_prize: false
             - rank: 2
               user_id: kktix_hash_ctf
               display_name: CTF_Player
               emoji_icon: 🐱
               score: 2480
+              external_prize: false
 
     GetMyPrizeResponse:
       value:
