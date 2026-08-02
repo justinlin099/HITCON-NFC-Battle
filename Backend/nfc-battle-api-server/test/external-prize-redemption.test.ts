@@ -10,6 +10,52 @@ import {
 } from "./helpers";
 
 describe("external prize claims", () => {
+  it("invalidates scoreboard caches only for external claims", async () => {
+    const server = await createTestServer();
+    await initializeUser(server, "alice");
+    await initializeUser(server, "bob");
+    await initializeUser(server, "carol");
+
+    const getCacheVersion = async () => {
+      const row = await server.db
+        .prepare("SELECT version FROM prize_claims_state WHERE id = 1")
+        .first<{ version: number }>();
+      return row?.version;
+    };
+
+    expect(await getCacheVersion()).toBe(0);
+
+    await server.db
+      .prepare(
+        `
+        INSERT INTO prize_claims (type, freeze_id, user_id, claimed_by_user_id)
+        VALUES ('STAMP', '', 'alice', 'staff')
+        `,
+      )
+      .run();
+    expect(await getCacheVersion()).toBe(0);
+
+    await server.db
+      .prepare(
+        `
+        INSERT INTO prize_claims (type, freeze_id, user_id, claimed_by_user_id)
+        VALUES ('RANKING', 'freeze-test', 'bob', 'staff')
+        `,
+      )
+      .run();
+    expect(await getCacheVersion()).toBe(0);
+
+    await server.db
+      .prepare(
+        `
+        INSERT INTO prize_claims (type, freeze_id, user_id, claimed_by_user_id)
+        VALUES ('EXTERNAL', '', 'carol', 'staff')
+        `,
+      )
+      .run();
+    expect(await getCacheVersion()).toBe(1);
+  });
+
   it("lets staff claim an externally-awarded prize once and check its status", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
