@@ -13,6 +13,8 @@ export interface ScoreboardRanking {
   external_prize: boolean;
 }
 
+export type LiveUserRanks = Record<string, number>;
+
 export async function getCachedScoreboardRankings(
   requestUrl: string,
   state: GameStateRow,
@@ -71,6 +73,50 @@ export async function putCachedScoreboardRankings(
   }
 }
 
+export async function getCachedLiveUserRanks(requestUrl: string) {
+  const cache = getDefaultCache();
+  if (!cache) {
+    return null;
+  }
+
+  try {
+    const response = await cache.match(liveUserRanksCacheKey(requestUrl));
+    if (!response) {
+      return null;
+    }
+
+    const ranks: unknown = await response.json();
+    return ranks !== null && typeof ranks === "object" && !Array.isArray(ranks)
+      ? ranks as LiveUserRanks
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function putCachedLiveUserRanks(
+  requestUrl: string,
+  ranks: LiveUserRanks,
+) {
+  const cache = getDefaultCache();
+  if (!cache) {
+    return;
+  }
+
+  const response = new Response(JSON.stringify(ranks), {
+    headers: {
+      "Cache-Control": `max-age=${OPEN_TTL_SECONDS}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  try {
+    await cache.put(liveUserRanksCacheKey(requestUrl), response);
+  } catch {
+    // Cache availability must not affect the scoreboard endpoint.
+  }
+}
+
 function scoreboardCacheKey(
   requestUrl: string,
   state: GameStateRow,
@@ -89,6 +135,15 @@ function scoreboardCacheKey(
   url.searchParams.set("offset", String(offset));
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("prize_claims_version", String(prizeClaimsVersion));
+  return new Request(url.toString());
+}
+
+function liveUserRanksCacheKey(requestUrl: string) {
+  const url = new URL(requestUrl);
+  url.pathname = "/__internal/cache/scoreboard/user-ranks";
+  url.search = "";
+  url.searchParams.set("v", CACHE_VERSION);
+  url.searchParams.set("state", "OPEN");
   return new Request(url.toString());
 }
 

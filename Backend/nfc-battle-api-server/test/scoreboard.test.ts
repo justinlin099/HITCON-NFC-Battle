@@ -100,7 +100,7 @@ describe("mission and scoreboard edge cases", () => {
     ]);
   });
 
-  it("returns the authenticated user's live rank without loading the scoreboard page", async () => {
+  it("shares a cached live rank snapshot across users while continuing to check state", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
     const bobAuth = await authHeaders("bob");
@@ -112,10 +112,16 @@ describe("mission and scoreboard edge cases", () => {
     expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
     expect((await scanTag(server, bobAuth, "carol", "tag-carol")).status).toBe(200);
 
-    const response = await server.request("/scoreboard/me", { headers: aliceAuth });
+    const cache = new MemoryCache();
+    vi.stubGlobal("caches", { default: cache });
+    const recordingDb = new QueryRecordingDb(server.db);
+    server.env.DB = recordingDb as unknown as D1Database;
 
-    expect(response.status).toBe(200);
-    await expect(readJson(response)).resolves.toMatchObject({
+    const aliceResponse = await server.request("/scoreboard/me", { headers: aliceAuth });
+    const bobResponse = await server.request("/scoreboard/me", { headers: bobAuth });
+
+    expect(aliceResponse.status).toBe(200);
+    await expect(readJson(aliceResponse)).resolves.toMatchObject({
       data: {
         rank: 2,
         frozen: false,
@@ -123,6 +129,33 @@ describe("mission and scoreboard edge cases", () => {
         scoring_cutoff_at: null,
       },
     });
+    expect(bobResponse.status).toBe(200);
+    await expect(readJson(bobResponse)).resolves.toMatchObject({
+      data: {
+        rank: 1,
+        frozen: false,
+        freeze_id: null,
+        scoring_cutoff_at: null,
+      },
+    });
+    expect(recordingDb.rankingQueryCount).toBe(1);
+    expect(recordingDb.gameStateQueryCount).toBe(4);
+
+    await server.db
+      .prepare(
+        `
+        UPDATE game_state
+        SET state = 'FREEZING', freeze_id = 'freeze_rank_cache_test'
+        WHERE id = 1
+        `,
+      )
+      .run();
+
+    const freezing = await server.request("/scoreboard/me", { headers: aliceAuth });
+    expect(freezing.status).toBe(409);
+    await expect(readJson(freezing)).resolves.toMatchObject({ code: "SCOREBOARD_FREEZING" });
+    expect(recordingDb.rankingQueryCount).toBe(1);
+    expect(recordingDb.gameStateQueryCount).toBe(5);
   });
 
   it("applies the phishing penalty to live scores and ranks", async () => {

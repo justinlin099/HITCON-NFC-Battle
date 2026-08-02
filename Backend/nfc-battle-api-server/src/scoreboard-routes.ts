@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
-import { getLiveCollectionScoreRows, getLiveUserRank } from "./collection-store";
+import { getLiveCollectionScoreRows, getLiveUserRanks } from "./collection-store";
 import {
   getFrozenScoreboardRows,
   getPrizeClaimsVersion,
@@ -11,8 +11,11 @@ import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { calculateScore } from "./scoring";
 import { errorResponse, success } from "./responses";
 import {
+  getCachedLiveUserRanks,
   getCachedScoreboardRankings,
+  putCachedLiveUserRanks,
   putCachedScoreboardRankings,
+  type LiveUserRanks,
   type ScoreboardRanking,
 } from "./scoreboard-cache";
 import type { AppEnv } from "./types";
@@ -98,13 +101,26 @@ scoreboard.get("/me", async (c) => {
       return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
     }
 
-    const rank = state.state === "FROZEN" && state.freeze_id
-      ? (await getPrizeResult(c.env.DB, state.freeze_id, authUser.userId))?.rank ?? null
-      : await getLiveUserRank(c.env.DB, authUser.userId);
+    let cachedLiveRanks: LiveUserRanks | null = null;
+    let liveRanks: LiveUserRanks | null = null;
+    let rank: number | null;
+    if (state.state === "FROZEN" && state.freeze_id) {
+      rank = (await getPrizeResult(c.env.DB, state.freeze_id, authUser.userId))?.rank ?? null;
+    } else {
+      cachedLiveRanks = state.state === "OPEN"
+        ? await getCachedLiveUserRanks(c.req.url)
+        : null;
+      liveRanks = cachedLiveRanks ?? await getLiveUserRanks(c.env.DB);
+      rank = liveRanks[authUser.userId] ?? null;
+    }
 
     const latestState = await getGameState(c.env.DB);
     if (!isSameGameStateSnapshot(state, latestState)) {
       continue;
+    }
+
+    if (state.state === "OPEN" && cachedLiveRanks === null && liveRanks !== null) {
+      c.executionCtx.waitUntil(putCachedLiveUserRanks(c.req.url, liveRanks));
     }
 
     return success(c, {

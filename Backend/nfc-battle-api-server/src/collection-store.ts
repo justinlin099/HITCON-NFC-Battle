@@ -176,8 +176,8 @@ export async function getLiveCollectionScoreRows(db: D1Database, offset: number,
   return results;
 }
 
-export async function getLiveUserRank(db: D1Database, userId: string) {
-  const row = await db
+export async function getLiveUserRanks(db: D1Database) {
+  const { results } = await db
     .prepare(
       `
       WITH collection_counts AS (
@@ -203,13 +203,16 @@ export async function getLiveUserRank(db: D1Database, userId: string) {
         SELECT ROW_NUMBER() OVER (ORDER BY score DESC, user_id ASC) AS rank, user_id
         FROM scores
       )
-      SELECT rank
+      SELECT rank, user_id
       FROM ranked
-      WHERE user_id = ?3
       `,
     )
-    .bind(SCORE_PER_COLLECTION, PHISHING_PENALTY, userId)
-    .first<{ rank: number }>();
+    .bind(SCORE_PER_COLLECTION, PHISHING_PENALTY)
+    .all<{ rank: number; user_id: string }>();
 
-  return row?.rank ?? null;
+  const ranks: Record<string, number> = Object.create(null);
+  for (const row of results) {
+    ranks[row.user_id] = row.rank;
+  }
+  return ranks;
 }
