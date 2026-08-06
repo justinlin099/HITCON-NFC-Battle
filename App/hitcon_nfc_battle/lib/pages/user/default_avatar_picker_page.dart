@@ -45,7 +45,13 @@ class _DefaultAvatarPickerPageState extends State<DefaultAvatarPickerPage> {
     return Scaffold(
       backgroundColor: PixelTheme.bgDark,
       appBar: AppBar(
-        title: Text(context.l10n.tr('defaultAvatars')),
+        title: Text(
+          context.l10n.tr('defaultAvatars'),
+          style: const TextStyle(
+            fontFamily: 'Unifont',
+            fontWeight: FontWeight.w900,
+          ),
+        ),
         centerTitle: true,
         backgroundColor: PixelTheme.bgMid,
         foregroundColor: PixelTheme.accent,

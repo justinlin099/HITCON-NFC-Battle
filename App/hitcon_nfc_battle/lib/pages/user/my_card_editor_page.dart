@@ -30,6 +30,8 @@ import '../../services/auth_service.dart';
 import '../../services/local_collection_store.dart';
 import '../../services/local_profile_store.dart';
 import '../../services/local_print_order_store.dart';
+import '../../services/nfc_battle_api_client.dart';
+import 'offline_retry_banner.dart';
 
 typedef PixelGrid = List<List<Color?>>;
 
@@ -257,6 +259,9 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   PixelGrid _pixels = _createEmptyGrid(_canvasSize);
   String? _pairedUid;
   bool _isLoadingProfile = true;
+  bool _profileRequestInFlight = false;
+  bool _hasLoadedProfile = false;
+  bool _isProfileOffline = false;
   int _handledPairingRequest = 0;
 
   @override
@@ -296,58 +301,82 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
   }
 
   Future<void> _loadProfile() async {
-    final String? userId = _authService.currentUserId;
-    final List<Object?> results = await Future.wait<Object?>(<Future<Object?>>[
-      _authService.fetchUserProfile(),
-      userId == null
-          ? Future<Map<String, dynamic>>.value(<String, dynamic>{})
-          : _localProfileStore.load(userId),
-    ]);
-    final Map<String, dynamic>? apiProfile =
-        results[0] as Map<String, dynamic>?;
-    final Map<String, dynamic> localProfile =
-        results[1] as Map<String, dynamic>? ?? <String, dynamic>{};
-    final Map<String, dynamic> profile = <String, dynamic>{
-      if (apiProfile != null) ...apiProfile,
-      ...localProfile,
-    };
-
-    if (!mounted) {
+    if (_profileRequestInFlight) {
       return;
     }
+    setState(() {
+      _profileRequestInFlight = true;
+      if (!_hasLoadedProfile) {
+        _isLoadingProfile = true;
+      }
+    });
+    final String? userId = _authService.currentUserId;
+    Object? requestError;
+    try {
+      final Map<String, dynamic> localProfile = userId == null
+          ? <String, dynamic>{}
+          : await _localProfileStore.load(userId);
+      if (localProfile.isNotEmpty && mounted) {
+        setState(() {
+          _applyProfile(localProfile);
+          _hasLoadedProfile = true;
+          _isLoadingProfile = false;
+        });
+      }
 
-    if (profile.isEmpty) {
+      final Map<String, dynamic>? apiProfile = await _authService
+          .fetchUserProfile(
+            onError: (Object error) {
+              requestError = error;
+            },
+          );
+      if (!mounted) {
+        return;
+      }
       setState(() {
+        if (apiProfile != null) {
+          _applyProfile(apiProfile);
+          _hasLoadedProfile = true;
+          _isProfileOffline = false;
+        } else {
+          _isProfileOffline =
+              requestError != null && isNetworkConnectionError(requestError!);
+        }
         _isLoadingProfile = false;
       });
-      return;
+    } finally {
+      _profileRequestInFlight = false;
+      if (mounted) {
+        setState(() {
+          _isLoadingProfile = false;
+        });
+      }
     }
+  }
 
+  void _applyProfile(Map<String, dynamic> profile) {
     final PixelGrid? loadedPixels = _decodePixelAvatar(
       profile['pixel_avatar_base64'] as String?,
     );
     final Object? rawColor = profile['card_color'];
 
-    setState(() {
-      _name = _profileString(profile, 'display_name', _name);
-      final String loadedLink = _profileString(profile, 'link', _link);
-      _link = validateHttpsLink(loadedLink) == null
-          ? buildHttpsLink(loadedLink)
-          : '';
-      _emoji = _profileString(profile, 'attribute_emoji', _emoji);
-      _description = _profileString(profile, 'bio', _description);
-      _pairedUid = _profileString(profile, 'paired_ntag_uid', _pairedUid ?? '');
-      if (_pairedUid != null && _pairedUid!.trim().isEmpty) {
-        _pairedUid = null;
-      }
-      if (rawColor is int) {
-        _cardColor = Color(rawColor);
-      }
-      if (loadedPixels != null) {
-        _pixels = loadedPixels;
-      }
-      _isLoadingProfile = false;
-    });
+    _name = _profileString(profile, 'display_name', _name);
+    final String loadedLink = _profileString(profile, 'link', _link);
+    _link = validateHttpsLink(loadedLink) == null
+        ? buildHttpsLink(loadedLink)
+        : '';
+    _emoji = _profileString(profile, 'attribute_emoji', _emoji);
+    _description = _profileString(profile, 'bio', _description);
+    _pairedUid = _profileString(profile, 'paired_ntag_uid', _pairedUid ?? '');
+    if (_pairedUid != null && _pairedUid!.trim().isEmpty) {
+      _pairedUid = null;
+    }
+    if (rawColor is int) {
+      _cardColor = Color(rawColor);
+    }
+    if (loadedPixels != null) {
+      _pixels = loadedPixels;
+    }
   }
 
   String _profileString(
@@ -434,6 +463,13 @@ class _MyCardEditorPageState extends State<MyCardEditorPage> {
             ListView(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
               children: [
+                if (_isProfileOffline) ...<Widget>[
+                  OfflineRetryBanner(
+                    onRetry: _loadProfile,
+                    isRetrying: _profileRequestInFlight,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 _PokemonStyleCard(
                   name: _name,
                   link: _link,

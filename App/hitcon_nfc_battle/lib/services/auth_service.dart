@@ -195,7 +195,9 @@ class AuthService {
     }
   }
 
-  Future<Map<String, dynamic>?> fetchUserProfile() async {
+  Future<Map<String, dynamic>?> fetchUserProfile({
+    void Function(Object error)? onError,
+  }) async {
     if (!_ensureSession()) {
       _log('No user logged in');
       return null;
@@ -210,9 +212,11 @@ class AuthService {
       _userProfile = _normalizeProfile(result['data']);
       _currentUserId = _userProfile?['user_id'] as String? ?? _currentUserId;
       _setRoleFromApiRole(_userProfile?['role'] as String?);
+      await _cacheUserProfile(_userProfile!);
       await _cachePairingState(_userProfile!);
       return _userProfile;
     } catch (e) {
+      onError?.call(e);
       _lastAuthError = e.toString();
       _lastAuthStatusCode = e is ApiException ? e.statusCode : null;
       _log('Error fetching user profile: $e');
@@ -363,14 +367,22 @@ class AuthService {
     debugPrint('[NtagUnlock] $reason');
   }
 
-  Future<Map<String, dynamic>?> fetchCollectionRecords() async {
+  Future<Map<String, dynamic>?> fetchCollectionRecords({
+    void Function(Object error)? onError,
+  }) async {
     if (!_ensureSession()) {
       _log('No user logged in');
       return null;
     }
 
     try {
-      final Map<String, dynamic>? profile = await fetchUserProfile();
+      Object? profileError;
+      final Map<String, dynamic>? profile = await fetchUserProfile(
+        onError: (Object error) {
+          profileError = error;
+          onError?.call(error);
+        },
+      );
       final List<String>? collectionIds = _stringList(profile?['collection']);
       if (profile != null && collectionIds != null) {
         if (collectionIds.isEmpty) {
@@ -395,15 +407,22 @@ class AuthService {
         }
       }
 
-      return _fetchCollectionBootstrap();
+      if (profileError != null && isNetworkConnectionError(profileError!)) {
+        return null;
+      }
+
+      return _fetchCollectionBootstrap(onError: onError);
     } catch (e) {
+      onError?.call(e);
       _log('Error fetching collection records: $e');
     }
 
     return null;
   }
 
-  Future<Map<String, dynamic>?> _fetchCollectionBootstrap() async {
+  Future<Map<String, dynamic>?> _fetchCollectionBootstrap({
+    void Function(Object error)? onError,
+  }) async {
     try {
       final Map<String, dynamic> result = await _api.get(
         '/users/me/bootstrap',
@@ -412,12 +431,14 @@ class AuthService {
       final Map<String, dynamic> data = _jsonMap(result['data']);
       final Map<String, dynamic> me = _normalizeProfile(data['me']);
       _userProfile = me;
+      await _cacheUserProfile(me);
       await _cachePairingState(me);
       return _collectionFromUsers(
         owner: me,
         users: (data['collected_users'] as List<dynamic>? ?? <dynamic>[]),
       );
     } catch (e) {
+      onError?.call(e);
       _log('Error bootstrapping collection records: $e');
     }
 
@@ -500,7 +521,9 @@ class AuthService {
     return refreshed.length == collectionIds.length ? refreshed : null;
   }
 
-  Future<Map<String, dynamic>?> fetchStampMission() async {
+  Future<Map<String, dynamic>?> fetchStampMission({
+    void Function(Object error)? onError,
+  }) async {
     if (!_ensureSession()) {
       _log('No user logged in');
       return null;
@@ -513,6 +536,7 @@ class AuthService {
       );
       return _jsonMap(result['data']);
     } catch (e) {
+      onError?.call(e);
       _log('Error fetching stamp mission: $e');
       return null;
     }
@@ -606,7 +630,10 @@ class AuthService {
     }
   }
 
-  Future<Map<String, dynamic>?> fetchUserCollection(String targetUserId) async {
+  Future<Map<String, dynamic>?> fetchUserCollection(
+    String targetUserId, {
+    void Function(Object error)? onError,
+  }) async {
     if (!_ensureSession()) {
       return null;
     }
@@ -625,6 +652,7 @@ class AuthService {
         users: data['users'] as List<dynamic>? ?? <dynamic>[],
       );
     } catch (e) {
+      onError?.call(e);
       _log('Error fetching user collection: $e');
     }
 
@@ -632,8 +660,9 @@ class AuthService {
   }
 
   Future<Map<String, dynamic>?> fetchPublicUserProfile(
-    String targetUserId,
-  ) async {
+    String targetUserId, {
+    void Function(Object error)? onError,
+  }) async {
     if (!_ensureSession() || targetUserId.trim().isEmpty) {
       return null;
     }
@@ -645,6 +674,7 @@ class AuthService {
       );
       return _normalizeVisibleProfile(_jsonMap(result['data']));
     } catch (e) {
+      onError?.call(e);
       _log('Error fetching public user profile: $e');
     }
 
@@ -654,6 +684,7 @@ class AuthService {
   Future<Map<String, dynamic>?> fetchScoreboard({
     int offset = 0,
     int limit = 50,
+    void Function(Object error)? onError,
   }) async {
     if (!_ensureSession()) {
       return null;
@@ -667,7 +698,28 @@ class AuthService {
       );
       return _jsonMap(result['data']);
     } catch (e) {
+      onError?.call(e);
       _log('Error fetching scoreboard: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> fetchMyScoreboardRank({
+    void Function(Object error)? onError,
+  }) async {
+    if (!_ensureSession()) {
+      return null;
+    }
+
+    try {
+      final Map<String, dynamic> result = await _api.get(
+        '/scoreboard/me',
+        token: _jwtToken!,
+      );
+      return _jsonMap(result['data']);
+    } catch (e) {
+      onError?.call(e);
+      _log('Error fetching current scoreboard rank: $e');
     }
     return null;
   }
@@ -1118,6 +1170,18 @@ class AuthService {
     final String normalizedLeft = normalize(left);
     final String normalizedRight = normalize(right);
     return normalizedLeft.isNotEmpty && normalizedLeft == normalizedRight;
+  }
+
+  Future<void> _cacheUserProfile(Map<String, dynamic> profile) async {
+    final String userId = (profile['user_id'] as String? ?? '').trim();
+    if (userId.isEmpty || userId != _currentUserId) {
+      return;
+    }
+    try {
+      await _localProfileStore.save(userId, profile);
+    } catch (error) {
+      _log('Could not cache user profile for $userId: $error');
+    }
   }
 
   Future<void> _cachePairingState(Map<String, dynamic> profile) async {

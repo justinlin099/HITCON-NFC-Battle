@@ -19,7 +19,9 @@ import '../../services/auth_service.dart';
 import '../../services/local_collection_store.dart';
 import '../../services/local_profile_store.dart';
 import '../../services/nfc_deep_link_service.dart';
+import '../../services/nfc_battle_api_client.dart';
 import '../../widgets/admin_mode_switch_button.dart';
+import 'offline_retry_banner.dart';
 
 class CardCollectionPage extends StatefulWidget {
   const CardCollectionPage({super.key});
@@ -43,6 +45,8 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   int _myCardPairingRequest = 0;
 
   bool _isLoading = true;
+  bool _dataLoadInFlight = false;
+  bool _isOffline = false;
   bool _isHandlingNfcRequest = false;
   bool _isCardDetailOpen = false;
   bool _ntagReminderChecked = false;
@@ -134,23 +138,49 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   }
 
   Future<void> _loadData({bool showLoading = true}) async {
-    if (showLoading) {
-      setState(() {
+    if (_dataLoadInFlight) {
+      return;
+    }
+    setState(() {
+      _dataLoadInFlight = true;
+      if (showLoading) {
         _isLoading = true;
-      });
+      }
+    });
+
+    bool networkFailed = false;
+    void recordError(Object error) {
+      networkFailed = networkFailed || isNetworkConnectionError(error);
     }
 
     try {
       final String? userId = _authService.currentUserId;
       List<Map<String, dynamic>> localCards = <Map<String, dynamic>>[];
       if (userId != null) {
+        final Map<String, dynamic> localCache = await _localStore.load(userId);
         localCards = await _localStore.loadCards(userId);
+        final Object? rawCollectionIndex = localCache['collection_index'];
+        final Map<String, dynamic>? cachedCollectionIndex =
+            rawCollectionIndex is Map
+            ? rawCollectionIndex.map(
+                (Object? key, Object? value) =>
+                    MapEntry<String, dynamic>(key.toString(), value),
+              )
+            : null;
+        if (mounted &&
+            (localCards.isNotEmpty || cachedCollectionIndex != null)) {
+          setState(() {
+            _localCards = localCards;
+            _collectionData = cachedCollectionIndex ?? _collectionData;
+            _isLoading = false;
+          });
+        }
       }
 
       final Future<Map<String, dynamic>?> collectionFuture = _authService
-          .fetchCollectionRecords();
+          .fetchCollectionRecords(onError: recordError);
       final Future<Map<String, dynamic>?> stampMissionFuture = _authService
-          .fetchStampMission();
+          .fetchStampMission(onError: recordError);
       final Map<String, dynamic>? collectionResult = await collectionFuture;
       final Map<String, dynamic>? stampMission = await stampMissionFuture;
       if (userId != null && collectionResult != null) {
@@ -166,14 +196,18 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
       }
 
       setState(() {
-        _collectionData = collectionResult;
-        _stampMission = stampMission;
+        _collectionData = collectionResult ?? _collectionData;
+        _stampMission = stampMission ?? _stampMission;
         _localCards = localCards;
+        _isOffline = networkFailed;
       });
     } finally {
-      if (mounted && showLoading) {
+      _dataLoadInFlight = false;
+      if (mounted) {
         setState(() {
-          _isLoading = false;
+          if (showLoading) {
+            _isLoading = false;
+          }
         });
       }
     }
@@ -635,6 +669,16 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
               controller: _collectionScrollController,
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
+                if (_isOffline)
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: OfflineRetryBanner(
+                        onRetry: () => _loadData(showLoading: false),
+                        isRetrying: _dataLoadInFlight,
+                      ),
+                    ),
+                  ),
                 SliverToBoxAdapter(
                   child: _HeroHeader(
                     totalCollected: _stampProgress,
@@ -1098,8 +1142,8 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         PageRouteBuilder<void>(
           opaque: false,
           barrierColor: Colors.transparent,
-          transitionDuration: const Duration(milliseconds: 450),
-          reverseTransitionDuration: const Duration(milliseconds: 300),
+          transitionDuration: pixelCardHeroExpandDuration,
+          reverseTransitionDuration: pixelCardHeroCollapseDuration,
           pageBuilder: (context, animation, secondaryAnimation) {
             return CardDetailPage(
               heroTag: heroTag,
@@ -1934,13 +1978,24 @@ class _PixelCard extends StatefulWidget {
   State<_PixelCard> createState() => _PixelCardState();
 }
 
-class _PixelCardState extends State<_PixelCard> {
-  bool _showText = true;
+class _PixelCardState extends State<_PixelCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _textOpacityController;
+  late final Animation<double> _textOpacity;
   Uint8List? _imageBytes;
 
   @override
   void initState() {
     super.initState();
+    _textOpacityController = AnimationController(
+      vsync: this,
+      duration: pixelCardThumbnailTextFadeDuration,
+      value: 1,
+    );
+    _textOpacity = CurvedAnimation(
+      parent: _textOpacityController,
+      curve: Curves.easeInOut,
+    );
     _imageBytes = _decodeImageBytes(widget.imageBase64);
   }
 
@@ -1953,43 +2008,54 @@ class _PixelCardState extends State<_PixelCard> {
   }
 
   Future<void> _handleTap() async {
-    setState(() {
-      _showText = false;
-    });
+    _textOpacityController.value = 0;
     await widget.onTap();
     if (!mounted) {
       return;
     }
-    Future<void>.delayed(const Duration(milliseconds: 300), () {
-      if (mounted) {
-        setState(() {
-          _showText = true;
-        });
-      }
-    });
+    await Future<void>.delayed(pixelCardHeroCollapseDuration);
+    if (!mounted) {
+      return;
+    }
+    _textOpacityController.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _textOpacityController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final Widget image = _cardImage();
-    final Widget cardBody = PixelCardFace(
-      title: widget.title,
-      attributeEmoji: widget.attributeEmoji,
-      attributeLabel: widget.attributeLabel,
-      cardColor: widget.cardColor,
-      showText: _showText,
-      titleFontSize: 11,
-      titleFontWeight: FontWeight.w900,
-      attributeMaxLines: 3,
-      stackAttributePairs: true,
-      watermarkScale: 1.6,
-      verticalHitconWatermark: true,
-      verticalHitconScale: ExpandedPixelCardStyle.thumbnailHitconScale,
-      verticalHitconRightInsetFactor:
-          ExpandedPixelCardStyle.thumbnailHitconRightInsetFactor,
-      verticalHitconBottomInsetFactor:
-          ExpandedPixelCardStyle.thumbnailHitconBottomInsetFactor,
-      image: image,
+    final Widget cardBody = AnimatedBuilder(
+      animation: _textOpacity,
+      builder: (BuildContext context, Widget? child) {
+        return PixelCardFace(
+          title: widget.title,
+          attributeEmoji: widget.attributeEmoji,
+          attributeLabel: widget.attributeLabel,
+          cardColor: widget.cardColor,
+          showText: true,
+          textOpacity: _textOpacity.value,
+          textOpacityKey: const ValueKey<String>(
+            'collection-thumbnail-text-opacity',
+          ),
+          titleFontSize: 11,
+          titleFontWeight: FontWeight.w900,
+          attributeMaxLines: 3,
+          stackAttributePairs: true,
+          watermarkScale: 1.6,
+          verticalHitconWatermark: true,
+          verticalHitconScale: ExpandedPixelCardStyle.thumbnailHitconScale,
+          verticalHitconRightInsetFactor:
+              ExpandedPixelCardStyle.thumbnailHitconRightInsetFactor,
+          verticalHitconBottomInsetFactor:
+              ExpandedPixelCardStyle.thumbnailHitconBottomInsetFactor,
+          image: image,
+        );
+      },
     );
 
     return GestureDetector(

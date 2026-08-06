@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -17,6 +18,13 @@ class ApiException implements Exception {
     final String prefix = code == null ? 'API' : 'API $code';
     return '$prefix ($statusCode): $message';
   }
+}
+
+bool isNetworkConnectionError(Object error) {
+  return error is SocketException ||
+      error is TimeoutException ||
+      error is HandshakeException ||
+      error is HttpException;
 }
 
 class NfcBattleApiClient {

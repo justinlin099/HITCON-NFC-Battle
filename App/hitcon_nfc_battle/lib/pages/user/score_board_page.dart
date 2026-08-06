@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
+import '../../services/local_scoreboard_store.dart';
+import '../../services/nfc_battle_api_client.dart';
+import '../../services/scoreboard_data.dart';
+import 'offline_retry_banner.dart';
 import 'pixel_theme.dart';
 import 'user_collection_page.dart';
 
@@ -16,14 +20,25 @@ class ScoreBoardPage extends StatefulWidget {
 }
 
 class _ScoreBoardPageState extends State<ScoreBoardPage> {
+  static const int _pageSize = 50;
+
   final ValueNotifier<RefreshIndicatorStatus?> _refreshStatus =
       ValueNotifier<RefreshIndicatorStatus?>(null);
   final ValueNotifier<double> _refreshPullDistance = ValueNotifier<double>(0);
   final AuthService _authService = AuthService();
+  final LocalScoreboardStore _localStore = LocalScoreboardStore();
 
   bool _isLoading = false;
-  List<Map<String, Object>> _remoteRanks = <Map<String, Object>>[];
+  bool _isRefreshing = false;
+  bool _isPageLoading = false;
+  bool _isOffline = false;
+  List<ScoreboardEntry> _pageEntries = <ScoreboardEntry>[];
+  ScoreboardEntry? _myRank;
   int _rankThreshold = 0;
+  int _topScore = 0;
+  int _currentPage = 0;
+  int? _totalCount;
+  bool _hasMore = false;
   bool _frozen = false;
 
   @override
@@ -39,49 +54,309 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
     super.dispose();
   }
 
-  Future<void> _loadBoard() async {
+  Future<void> _loadBoard({int? page, bool refreshMe = true}) async {
+    if (_isRefreshing) {
+      return;
+    }
+    final int targetPage = page ?? _currentPage;
+    final int targetOffset = targetPage * _pageSize;
+    _isRefreshing = true;
     setState(() {
       _isLoading = true;
+      _isPageLoading = targetPage != _currentPage;
     });
-    final Map<String, dynamic>? board = await _authService.fetchScoreboard();
+    Object? boardError;
+    Object? meError;
+    try {
+      final String? userId = _authService.currentUserId;
+      if (userId != null) {
+        final Future<Map<String, dynamic>?> cachedPageFuture = _localStore
+            .loadPage(userId, offset: targetOffset, limit: _pageSize);
+        final Future<Map<String, dynamic>?> cachedMeFuture = refreshMe
+            ? _localStore.loadMyRank(userId)
+            : Future<Map<String, dynamic>?>.value(null);
+        final List<Map<String, dynamic>?> cached =
+            await Future.wait<Map<String, dynamic>?>(
+              <Future<Map<String, dynamic>?>>[cachedPageFuture, cachedMeFuture],
+            );
+        if (!mounted) {
+          return;
+        }
+        if (cached[0] != null &&
+            (_pageEntries.isEmpty || targetPage != _currentPage)) {
+          setState(() {
+            _applyBoard(
+              cached[0]!,
+              requestedOffset: targetOffset,
+              requestedLimit: _pageSize,
+            );
+            _currentPage = targetPage;
+          });
+        }
+        if (cached[1] != null && _myRank == null) {
+          setState(() {
+            _applyMyRank(
+              cached[1]!,
+              fallbackUserId: userId,
+              allowUnmatched: true,
+            );
+          });
+        }
+      }
+
+      final Future<Map<String, dynamic>?> boardFuture = _authService
+          .fetchScoreboard(
+            offset: targetOffset,
+            limit: _pageSize,
+            onError: (Object error) {
+              boardError = error;
+            },
+          );
+      final Future<Map<String, dynamic>?> meFuture = refreshMe
+          ? _authService.fetchMyScoreboardRank(
+              onError: (Object error) {
+                meError = error;
+              },
+            )
+          : Future<Map<String, dynamic>?>.value(null);
+      final List<Map<String, dynamic>?> results =
+          await Future.wait<Map<String, dynamic>?>(
+            <Future<Map<String, dynamic>?>>[boardFuture, meFuture],
+          );
+      final Map<String, dynamic>? board = results[0];
+      final Map<String, dynamic>? me = results[1];
+      if (board != null && userId != null) {
+        await _localStore.savePage(
+          userId,
+          board,
+          offset: targetOffset,
+          limit: _pageSize,
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      ScoreboardEntry? myRankMarker;
+      setState(() {
+        if (board != null) {
+          _applyBoard(
+            board,
+            requestedOffset: targetOffset,
+            requestedLimit: _pageSize,
+          );
+          _currentPage = targetPage;
+        }
+        if (me != null) {
+          myRankMarker = _applyMyRank(me, fallbackUserId: userId ?? '');
+        }
+        _isOffline = <Object?>[
+          boardError,
+          meError,
+        ].whereType<Object>().any(isNetworkConnectionError);
+      });
+      if (myRankMarker != null && userId != null) {
+        await _resolveMyRankFromScoreboard(
+          marker: myRankMarker!,
+          currentBoard: board,
+          currentOffset: targetOffset,
+          userId: userId,
+        );
+      }
+    } finally {
+      _isRefreshing = false;
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isPageLoading = false;
+        });
+      }
+    }
+  }
+
+  void _applyBoard(
+    Map<String, dynamic> board, {
+    required int requestedOffset,
+    required int requestedLimit,
+  }) {
+    final ScoreboardPageData page = ScoreboardPageData.fromJson(
+      board,
+      requestedOffset: requestedOffset,
+      requestedLimit: requestedLimit,
+    );
+    _rankThreshold = page.rankThreshold;
+    _frozen = page.frozen;
+    _hasMore = page.hasMore;
+    if (page.totalCount != null || requestedOffset == 0) {
+      _totalCount = page.totalCount;
+    }
+    _pageEntries = page.entries;
+    if (requestedOffset == 0) {
+      _topScore = page.entries.isEmpty ? 0 : page.entries.first.score;
+    }
+  }
+
+  ScoreboardEntry? _applyMyRank(
+    Map<String, dynamic> payload, {
+    required String fallbackUserId,
+    bool allowUnmatched = false,
+  }) {
+    final ScoreboardEntry? entry = ScoreboardEntry.fromMyRankPayload(
+      payload,
+      fallbackUserId: fallbackUserId,
+    );
+    if (entry != null && entry.rank > 0) {
+      final ScoreboardEntry? pageEntry = _findCurrentUserEntry(
+        _pageEntries,
+        entry,
+      );
+      if (pageEntry != null) {
+        _myRank = pageEntry;
+      } else if (allowUnmatched) {
+        _myRank = entry;
+      } else if (_myRank?.rank != entry.rank) {
+        _myRank = null;
+      }
+      return entry;
+    }
+    _myRank = null;
+    return null;
+  }
+
+  Future<void> _resolveMyRankFromScoreboard({
+    required ScoreboardEntry marker,
+    required Map<String, dynamic>? currentBoard,
+    required int currentOffset,
+    required String userId,
+  }) async {
+    ScoreboardEntry? resolved;
+    if (currentBoard != null) {
+      final ScoreboardPageData currentPage = ScoreboardPageData.fromJson(
+        currentBoard,
+        requestedOffset: currentOffset,
+        requestedLimit: _pageSize,
+      );
+      resolved = _findCurrentUserEntry(currentPage.entries, marker);
+    } else {
+      resolved = _findCurrentUserEntry(_pageEntries, marker);
+    }
+    if (resolved != null) {
+      await _storeResolvedMyRank(userId, resolved);
+      return;
+    }
+
+    final int ownPageOffset = scoreboardPageOffsetForRank(
+      marker.rank,
+      _pageSize,
+    );
+    final Map<String, dynamic>? cachedOwnPage = await _localStore.loadPage(
+      userId,
+      offset: ownPageOffset,
+      limit: _pageSize,
+    );
+    if (cachedOwnPage != null) {
+      final ScoreboardPageData cachedPage = ScoreboardPageData.fromJson(
+        cachedOwnPage,
+        requestedOffset: ownPageOffset,
+        requestedLimit: _pageSize,
+      );
+      resolved = _findCurrentUserEntry(cachedPage.entries, marker);
+      if (resolved != null && mounted) {
+        setState(() {
+          _myRank = resolved;
+        });
+      }
+    }
+
+    Object? exactRankError;
+    final Map<String, dynamic>? ownPage = await _authService.fetchScoreboard(
+      offset: ownPageOffset,
+      limit: _pageSize,
+      onError: (Object error) {
+        exactRankError = error;
+      },
+    );
+    if (ownPage != null) {
+      await _localStore.savePage(
+        userId,
+        ownPage,
+        offset: ownPageOffset,
+        limit: _pageSize,
+      );
+      final ScoreboardPageData exactPage = ScoreboardPageData.fromJson(
+        ownPage,
+        requestedOffset: ownPageOffset,
+        requestedLimit: _pageSize,
+      );
+      resolved = _findCurrentUserEntry(exactPage.entries, marker) ?? resolved;
+    }
+    if (exactRankError != null &&
+        isNetworkConnectionError(exactRankError!) &&
+        mounted) {
+      setState(() {
+        _isOffline = true;
+      });
+    }
+    if (resolved != null) {
+      await _storeResolvedMyRank(userId, resolved);
+    }
+  }
+
+  Future<void> _storeResolvedMyRank(
+    String userId,
+    ScoreboardEntry resolved,
+  ) async {
+    await _localStore.saveMyRank(userId, resolved.toJson());
     if (!mounted) {
       return;
     }
     setState(() {
-      if (board != null) {
-        _rankThreshold = board['rank_threshold'] as int? ?? 0;
-        _frozen = board['frozen'] as bool? ?? false;
-        final List<dynamic> rankings =
-            board['rankings'] as List<dynamic>? ?? <dynamic>[];
-        _remoteRanks = rankings
-            .whereType<Map>()
-            .map((Map row) {
-              final Map<String, dynamic> item = row.map((
-                Object? key,
-                Object? value,
-              ) {
-                return MapEntry<String, dynamic>(key.toString(), value);
-              });
-              final int rank = item['rank'] as int? ?? 0;
-              return <String, Object>{
-                'userId': item['user_id'] as String? ?? '',
-                'name':
-                    item['display_name'] as String? ?? item['user_id'] ?? '',
-                'score': item['score'] as int? ?? 0,
-                'rank': rank,
-                'badge': rank <= 0 ? '-' : '#$rank',
-                'emoji': item['emoji_icon'] as String? ?? '',
-                'color': _rankColor(rank),
-              };
-            })
-            .toList(growable: false);
-      }
-      _isLoading = false;
+      _myRank = resolved;
     });
   }
 
+  ScoreboardEntry? _findCurrentUserEntry(
+    List<ScoreboardEntry> entries,
+    ScoreboardEntry marker,
+  ) {
+    if (marker.userId.isNotEmpty) {
+      for (final ScoreboardEntry entry in entries) {
+        if (entry.userId == marker.userId) {
+          return entry;
+        }
+      }
+    }
+    for (final ScoreboardEntry entry in entries) {
+      if (entry.rank == marker.rank) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  Map<String, Object> _rankRow(ScoreboardEntry entry) {
+    return <String, Object>{
+      'userId': entry.userId,
+      'name': entry.displayName,
+      'score': entry.score,
+      'rank': entry.rank,
+      'badge': entry.rank <= 0 ? '-' : '#${entry.rank}',
+      'emoji': entry.emojiIcon,
+      'color': _rankColor(entry.rank),
+    };
+  }
+
   List<Map<String, Object>> get _ranks {
-    return _remoteRanks;
+    final ScoreboardEntry? myRank = _myRank;
+    return mergeScoreboardPageWithCurrentUser(_pageEntries, myRank)
+        .map((ScoreboardEntry entry) {
+          return <String, Object>{
+            ..._rankRow(entry),
+            'isMe':
+                myRank != null &&
+                scoreboardEntriesIdentifySameUser(entry, myRank),
+          };
+        })
+        .toList(growable: false);
   }
 
   Color _rankColor(int rank) {
@@ -95,6 +370,28 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
       return PixelTheme.success;
     }
     return PixelTheme.textGray;
+  }
+
+  int? get _totalPages {
+    final int? totalCount = _totalCount;
+    if (totalCount == null) {
+      return null;
+    }
+    return totalCount <= 0 ? 1 : (totalCount + _pageSize - 1) ~/ _pageSize;
+  }
+
+  Future<void> _showPreviousPage() async {
+    if (_currentPage <= 0 || _isRefreshing) {
+      return;
+    }
+    await _loadBoard(page: _currentPage - 1, refreshMe: false);
+  }
+
+  Future<void> _showNextPage() async {
+    if (!_hasMore || _isRefreshing) {
+      return;
+    }
+    await _loadBoard(page: _currentPage + 1, refreshMe: false);
   }
 
   @override
@@ -123,17 +420,31 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
                   children: [
+                    if (_isOffline) ...<Widget>[
+                      OfflineRetryBanner(
+                        onRetry: _loadBoard,
+                        isRetrying: _isRefreshing,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     _BoardHeader(isLoading: _isLoading, frozen: _frozen),
                     const SizedBox(height: 12),
                     _StatRow(
-                      shownRanks: _ranks.length,
-                      topScore: _ranks.isEmpty
-                          ? 0
-                          : _ranks.first['score'] as int? ?? 0,
+                      shownRanks: _pageEntries.length,
+                      topScore: _topScore,
                       rankThreshold: _rankThreshold,
                     ),
                     const SizedBox(height: 12),
-                    _RankPanel(ranks: _ranks, onOpenUser: _openUser),
+                    _RankPanel(
+                      ranks: _ranks,
+                      currentPage: _currentPage,
+                      totalPages: _totalPages,
+                      hasNextPage: _hasMore,
+                      isPageLoading: _isPageLoading,
+                      onPreviousPage: _showPreviousPage,
+                      onNextPage: _showNextPage,
+                      onOpenUser: _openUser,
+                    ),
                   ],
                 ),
               ),
@@ -350,10 +661,28 @@ class _StatCard extends StatelessWidget {
 }
 
 class _RankPanel extends StatelessWidget {
-  const _RankPanel({required this.ranks, required this.onOpenUser});
+  const _RankPanel({
+    required this.ranks,
+    required this.currentPage,
+    required this.totalPages,
+    required this.hasNextPage,
+    required this.isPageLoading,
+    required this.onPreviousPage,
+    required this.onNextPage,
+    required this.onOpenUser,
+  });
 
   final List<Map<String, Object>> ranks;
+  final int currentPage;
+  final int? totalPages;
+  final bool hasNextPage;
+  final bool isPageLoading;
+  final VoidCallback onPreviousPage;
+  final VoidCallback onNextPage;
   final ValueChanged<Map<String, Object>> onOpenUser;
+
+  bool get _showPagination =>
+      currentPage > 0 || hasNextPage || (totalPages ?? 1) > 1;
 
   @override
   Widget build(BuildContext context) {
@@ -362,20 +691,35 @@ class _RankPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: PixelTheme.bgMid,
         border: Border.all(color: PixelTheme.border, width: 2),
-        boxShadow: const [
+        boxShadow: const <BoxShadow>[
           BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            context.l10n.tr('ranking'),
-            style: TextStyle(
-              color: PixelTheme.accent,
-              fontSize: 14,
-              fontWeight: FontWeight.w900,
-            ),
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  context.l10n.tr('ranking'),
+                  style: TextStyle(
+                    color: PixelTheme.accent,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (isPageLoading)
+                Text(
+                  context.l10n.tr('sync'),
+                  style: TextStyle(
+                    color: PixelTheme.accentBlue,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 10),
           if (ranks.isEmpty)
@@ -398,78 +742,283 @@ class _RankPanel extends StatelessWidget {
                   const SizedBox(height: 8),
               itemBuilder: (BuildContext context, int index) {
                 final Map<String, Object> row = ranks[index];
-                final Color color = row['color'] as Color;
-                return GestureDetector(
+                return _RankTile(
+                  row: row,
+                  highlighted: row['isMe'] == true,
                   onTap: () => onOpenUser(row),
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: PixelTheme.bgDark,
-                      border: Border.all(color: color, width: 2),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: color,
-                            border: Border.all(
-                              color: PixelTheme.bgDark,
-                              width: 2,
-                            ),
-                          ),
-                          child: Text(
-                            '${row['badge']}',
-                            style: TextStyle(
-                              color: PixelTheme.bgDark,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${row['name']}',
-                                style: TextStyle(
-                                  color: PixelTheme.textWhite,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: <Widget>[
-                            Text(
-                              '${row['score']}',
-                              style: TextStyle(
-                                color: color,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Icon(
-                              Icons.chevron_right_rounded,
-                              color: PixelTheme.textGray,
-                              size: 18,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
                 );
               },
             ),
+          if (_showPagination) ...<Widget>[
+            const SizedBox(height: 14),
+            _ScoreboardPagination(
+              currentPage: currentPage,
+              totalPages: totalPages,
+              previousEnabled: currentPage > 0 && !isPageLoading,
+              nextEnabled: hasNextPage && !isPageLoading,
+              onPrevious: onPreviousPage,
+              onNext: onNextPage,
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _RankTile extends StatelessWidget {
+  const _RankTile({
+    required this.row,
+    required this.onTap,
+    this.highlighted = false,
+  });
+
+  final Map<String, Object> row;
+  final VoidCallback onTap;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = highlighted
+        ? PixelTheme.accentBlue
+        : row['color'] as Color;
+    return Semantics(
+      button: true,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: PixelTheme.bgDark,
+            border: Border.all(color: color, width: 2),
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 42,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: color,
+                  border: Border.all(color: PixelTheme.bgDark, width: 2),
+                ),
+                child: Text(
+                  '${row['badge']}',
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: PixelTheme.bgDark,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        '${row['name']}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: PixelTheme.textWhite,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    if (highlighted) ...<Widget>[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: PixelTheme.accentBlue,
+                          border: Border.all(color: PixelTheme.bgDark),
+                        ),
+                        child: Text(
+                          context.l10n.tr('scoreboardYou'),
+                          style: TextStyle(
+                            color: PixelTheme.bgDark,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Text(
+                    '${row['score']}',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: PixelTheme.textGray,
+                    size: 18,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScoreboardPagination extends StatelessWidget {
+  const _ScoreboardPagination({
+    required this.currentPage,
+    required this.totalPages,
+    required this.previousEnabled,
+    required this.nextEnabled,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final int currentPage;
+  final int? totalPages;
+  final bool previousEnabled;
+  final bool nextEnabled;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final int pageNumber = currentPage + 1;
+    final String pageLabel = totalPages == null
+        ? context.l10n.tr('scoreboardPage', <String, Object?>{
+            'current': pageNumber,
+          })
+        : context.l10n.tr('scoreboardPageOf', <String, Object?>{
+            'current': pageNumber,
+            'total': totalPages,
+          });
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: _PixelPageButton(
+            key: const Key('scoreboard-previous-page'),
+            label: context.l10n.tr('previousPage'),
+            leading: true,
+            enabled: previousEnabled,
+            onTap: onPrevious,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          key: const Key('scoreboard-page-label'),
+          constraints: const BoxConstraints(minWidth: 76),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: PixelTheme.bgDark,
+            border: Border.all(color: PixelTheme.border, width: 2),
+          ),
+          child: Text(
+            pageLabel,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: PixelTheme.textWhite,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _PixelPageButton(
+            key: const Key('scoreboard-next-page'),
+            label: context.l10n.tr('nextPage'),
+            leading: false,
+            enabled: nextEnabled,
+            onTap: onNext,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PixelPageButton extends StatelessWidget {
+  const _PixelPageButton({
+    super.key,
+    required this.label,
+    required this.leading,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool leading;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = enabled ? PixelTheme.accent : PixelTheme.textGray;
+    final Widget arrow = Text(
+      leading ? '<' : '>',
+      style: TextStyle(color: color, fontWeight: FontWeight.w900),
+    );
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      child: GestureDetector(
+        onTap: enabled ? onTap : null,
+        child: Opacity(
+          opacity: enabled ? 1 : 0.45,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              color: PixelTheme.bgDark,
+              border: Border.all(color: color, width: 2),
+              boxShadow: enabled
+                  ? const <BoxShadow>[
+                      BoxShadow(
+                        color: Colors.black,
+                        blurRadius: 0,
+                        offset: Offset(3, 3),
+                      ),
+                    ]
+                  : const <BoxShadow>[],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                if (leading) ...<Widget>[arrow, const SizedBox(width: 5)],
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                if (!leading) ...<Widget>[const SizedBox(width: 5), arrow],
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

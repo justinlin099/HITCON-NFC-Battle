@@ -9,6 +9,10 @@ import 'pixel_card_face.dart';
 import 'pixel_link_icon.dart';
 import 'pixel_theme.dart';
 
+const Duration pixelCardHeroExpandDuration = Duration(milliseconds: 450);
+const Duration pixelCardHeroCollapseDuration = Duration(milliseconds: 300);
+const Duration pixelCardThumbnailTextFadeDuration = Duration(milliseconds: 240);
+
 HeroFlightShuttleBuilder pixelCardFlightShuttleBuilder({
   required String title,
   required String attributeEmoji,

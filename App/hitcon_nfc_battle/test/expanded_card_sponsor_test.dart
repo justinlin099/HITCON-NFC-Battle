@@ -65,4 +65,49 @@ void main() {
     final Text hitconText = tester.widget<Text>(hitcon);
     expect(hitconText.style?.fontSize, greaterThan(30));
   });
+
+  testWidgets('expanded card matches my-card bio height and bottom fade', (
+    WidgetTester tester,
+  ) async {
+    PixelTheme.active = PixelTheme.getPalette(PixelTheme.defaultScheme);
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        locale: Locale('en'),
+        localizationsDelegates: <LocalizationsDelegate<dynamic>>[
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: CardDetailPage(
+          heroTag: 'bio-layout-test-card',
+          title: 'BIO TEST',
+          attributeEmoji: '',
+          attributeLabel: 'COMMUNITY',
+          link: 'https://hitcon.org',
+          description:
+              'Line one of the introduction. Line two stays visible. '
+              'Line three stays visible. Line four fades near the bottom. '
+              'More content remains scrollable after that.',
+          uid: '',
+          collectedAt: '',
+          cardColor: Color(0xFFFFD700),
+          showCollectionInfo: false,
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+
+    final Finder fade = find.byKey(
+      const ValueKey<String>('my-card-description-fade'),
+    );
+    expect(fade, findsOneWidget);
+    expect(tester.getSize(fade).height, greaterThan(60));
+  });
 }

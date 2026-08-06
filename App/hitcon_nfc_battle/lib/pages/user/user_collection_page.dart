@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
+import '../../services/nfc_battle_api_client.dart';
 import 'card_detail_page.dart';
 import 'emoji_catalog.dart';
+import 'offline_retry_banner.dart';
 import 'pixel_card_face.dart';
 import 'pixel_card_hero.dart';
+import 'pixel_refresh_overlay.dart';
 import 'pixel_theme.dart';
 
 class UserCollectionPage extends StatefulWidget {
@@ -35,8 +38,13 @@ class UserCollectionPage extends StatefulWidget {
 
 class _UserCollectionPageState extends State<UserCollectionPage> {
   final AuthService _authService = AuthService();
+  final ValueNotifier<RefreshIndicatorStatus?> _refreshStatus =
+      ValueNotifier<RefreshIndicatorStatus?>(null);
+  final ValueNotifier<double> _refreshPullDistance = ValueNotifier<double>(0);
 
   bool _isLoading = true;
+  bool _loadInFlight = false;
+  bool _isOffline = false;
   Map<String, dynamic>? _profile;
   Map<String, dynamic>? _collection;
 
@@ -46,25 +54,56 @@ class _UserCollectionPageState extends State<UserCollectionPage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _refreshStatus.dispose();
+    _refreshPullDistance.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
-    setState(() {
-      _isLoading = true;
-    });
-    final List<Map<String, dynamic>?> results =
-        await Future.wait<Map<String, dynamic>?>(
-          <Future<Map<String, dynamic>?>>[
-            _authService.fetchPublicUserProfile(widget.userId),
-            _authService.fetchUserCollection(widget.userId),
-          ],
-        );
-    if (!mounted) {
+    if (_loadInFlight) {
       return;
     }
     setState(() {
-      _profile = results[0];
-      _collection = results[1];
-      _isLoading = false;
+      _loadInFlight = true;
+      _isLoading = true;
     });
+    bool networkFailed = false;
+    void recordError(Object error) {
+      networkFailed = networkFailed || isNetworkConnectionError(error);
+    }
+
+    try {
+      final List<Map<String, dynamic>?> results =
+          await Future.wait<Map<String, dynamic>?>(
+            <Future<Map<String, dynamic>?>>[
+              _authService.fetchPublicUserProfile(
+                widget.userId,
+                onError: recordError,
+              ),
+              _authService.fetchUserCollection(
+                widget.userId,
+                onError: recordError,
+              ),
+            ],
+          );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _profile = results[0] ?? _profile;
+        _collection = results[1] ?? _collection;
+        _isOffline = networkFailed;
+      });
+    } finally {
+      _loadInFlight = false;
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -94,45 +133,63 @@ class _UserCollectionPageState extends State<UserCollectionPage> {
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        body: RefreshIndicator(
-          onRefresh: _load,
-          color: PixelTheme.accent,
-          backgroundColor: PixelTheme.bgMid,
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
-            children: <Widget>[
-              _PlayerHeader(
-                name: name,
-                userId: widget.userId,
-                avatarBase64: _profile?['pixel_avatar_base64'] as String?,
-                rank: widget.rank,
-                score: widget.score,
-                bio: _profile?['bio'] as String? ?? '',
+        body: Stack(
+          children: <Widget>[
+            RefreshIndicator.noSpinner(
+              onRefresh: _load,
+              onStatusChange: _handleRefreshStatusChange,
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _handleRefreshScrollNotification,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
+                  children: <Widget>[
+                    if (_isOffline) ...<Widget>[
+                      OfflineRetryBanner(
+                        onRetry: _load,
+                        isRetrying: _loadInFlight,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    _PlayerHeader(
+                      name: name,
+                      userId: widget.userId,
+                      avatarBase64: _profile?['pixel_avatar_base64'] as String?,
+                      rank: widget.rank,
+                      score: widget.score,
+                      bio: _profile?['bio'] as String? ?? '',
+                    ),
+                    const SizedBox(height: 12),
+                    if (_isLoading)
+                      _MessagePanel(
+                        icon: Icons.hourglass_top_rounded,
+                        title: context.l10n.tr('loading'),
+                      )
+                    else if (_profile == null ||
+                        (_collection == null && _isOffline))
+                      _MessagePanel(
+                        icon: Icons.wifi_off_rounded,
+                        title: context.l10n.tr('profileUnavailable'),
+                        actionLabel: context.l10n.tr('retry'),
+                        onAction: _load,
+                      )
+                    else if (_collection == null)
+                      _MessagePanel(
+                        icon: Icons.lock_rounded,
+                        title: context.l10n.tr('collectionUnavailable'),
+                        body: context.l10n.tr('collectionUnavailableBody'),
+                      )
+                    else
+                      _buildCollection(context),
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              if (_isLoading)
-                _MessagePanel(
-                  icon: Icons.hourglass_top_rounded,
-                  title: context.l10n.tr('loading'),
-                )
-              else if (_profile == null)
-                _MessagePanel(
-                  icon: Icons.wifi_off_rounded,
-                  title: context.l10n.tr('profileUnavailable'),
-                  actionLabel: context.l10n.tr('retry'),
-                  onAction: _load,
-                )
-              else if (_collection == null)
-                _MessagePanel(
-                  icon: Icons.lock_rounded,
-                  title: context.l10n.tr('collectionUnavailable'),
-                  body: context.l10n.tr('collectionUnavailableBody'),
-                )
-              else
-                _buildCollection(context),
-            ],
-          ),
+            ),
+            PixelRefreshOverlay(
+              statusListenable: _refreshStatus,
+              pullDistanceListenable: _refreshPullDistance,
+            ),
+          ],
         ),
       ),
     );
@@ -193,8 +250,8 @@ class _UserCollectionPageState extends State<UserCollectionPage> {
       PageRouteBuilder<void>(
         opaque: false,
         barrierColor: Colors.transparent,
-        transitionDuration: const Duration(milliseconds: 450),
-        reverseTransitionDuration: const Duration(milliseconds: 300),
+        transitionDuration: pixelCardHeroExpandDuration,
+        reverseTransitionDuration: pixelCardHeroCollapseDuration,
         pageBuilder: (BuildContext context, _, _) => CardDetailPage(
           heroTag: 'user-${widget.userId}-card-$index',
           title: _cardTitle(card),
@@ -224,6 +281,47 @@ class _UserCollectionPageState extends State<UserCollectionPage> {
     return (_profile?['display_name'] as String?)?.trim().isNotEmpty == true
         ? _profile!['display_name'] as String
         : widget.displayName;
+  }
+
+  void _handleRefreshStatusChange(RefreshIndicatorStatus? status) {
+    if (_refreshStatus.value == status) {
+      return;
+    }
+    _refreshStatus.value = status;
+    if (status == null || status == RefreshIndicatorStatus.canceled) {
+      _refreshPullDistance.value = 0;
+    }
+    if (status == RefreshIndicatorStatus.done) {
+      Future<void>.delayed(const Duration(milliseconds: 650), () {
+        if (!mounted || _refreshStatus.value != RefreshIndicatorStatus.done) {
+          return;
+        }
+        _refreshStatus.value = null;
+        _refreshPullDistance.value = 0;
+      });
+    }
+  }
+
+  bool _handleRefreshScrollNotification(ScrollNotification notification) {
+    if (notification is OverscrollNotification &&
+        notification.metrics.pixels <= notification.metrics.minScrollExtent &&
+        notification.overscroll < 0) {
+      _refreshPullDistance.value =
+          (_refreshPullDistance.value - notification.overscroll)
+              .clamp(0, 96)
+              .toDouble();
+    } else if (notification is ScrollUpdateNotification &&
+        notification.metrics.pixels <= notification.metrics.minScrollExtent &&
+        notification.dragDetails != null) {
+      _refreshPullDistance.value = (-notification.metrics.pixels)
+          .clamp(0, 96)
+          .toDouble();
+    } else if (notification is ScrollEndNotification &&
+        _refreshStatus.value != RefreshIndicatorStatus.refresh &&
+        _refreshStatus.value != RefreshIndicatorStatus.snap) {
+      _refreshPullDistance.value = 0;
+    }
+    return false;
   }
 }
 
@@ -365,13 +463,24 @@ class _UserCollectionCard extends StatefulWidget {
   State<_UserCollectionCard> createState() => _UserCollectionCardState();
 }
 
-class _UserCollectionCardState extends State<_UserCollectionCard> {
+class _UserCollectionCardState extends State<_UserCollectionCard>
+    with SingleTickerProviderStateMixin {
   Uint8List? _imageBytes;
-  bool _showText = true;
+  late final AnimationController _textOpacityController;
+  late final Animation<double> _textOpacity;
 
   @override
   void initState() {
     super.initState();
+    _textOpacityController = AnimationController(
+      vsync: this,
+      duration: pixelCardThumbnailTextFadeDuration,
+      value: 1,
+    );
+    _textOpacity = CurvedAnimation(
+      parent: _textOpacityController,
+      curve: Curves.easeInOut,
+    );
     _imageBytes = _decodeImage(widget.card['pixel_avatar_base64'] as String?);
   }
 
@@ -385,19 +494,22 @@ class _UserCollectionCardState extends State<_UserCollectionCard> {
   }
 
   Future<void> _handleTap() async {
-    setState(() {
-      _showText = false;
-    });
+    _textOpacityController.value = 0;
     await widget.onOpen();
     if (!mounted) {
       return;
     }
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    if (mounted) {
-      setState(() {
-        _showText = true;
-      });
+    await Future<void>.delayed(pixelCardHeroCollapseDuration);
+    if (!mounted) {
+      return;
     }
+    _textOpacityController.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _textOpacityController.dispose();
+    super.dispose();
   }
 
   @override
@@ -427,24 +539,34 @@ class _UserCollectionCardState extends State<_UserCollectionCard> {
             : null,
         child: Material(
           color: Colors.transparent,
-          child: PixelCardFace(
-            title: title,
-            attributeEmoji: attributeEmoji,
-            attributeLabel: attributeLabel,
-            cardColor: cardColor,
-            showText: _showText,
-            titleFontSize: 11,
-            titleFontWeight: FontWeight.w900,
-            attributeMaxLines: 3,
-            stackAttributePairs: true,
-            watermarkScale: 1.6,
-            verticalHitconWatermark: true,
-            verticalHitconScale: ExpandedPixelCardStyle.thumbnailHitconScale,
-            verticalHitconRightInsetFactor:
-                ExpandedPixelCardStyle.thumbnailHitconRightInsetFactor,
-            verticalHitconBottomInsetFactor:
-                ExpandedPixelCardStyle.thumbnailHitconBottomInsetFactor,
-            image: _cardImage(unlocked),
+          child: AnimatedBuilder(
+            animation: _textOpacity,
+            builder: (BuildContext context, Widget? child) {
+              return PixelCardFace(
+                title: title,
+                attributeEmoji: attributeEmoji,
+                attributeLabel: attributeLabel,
+                cardColor: cardColor,
+                showText: true,
+                textOpacity: _textOpacity.value,
+                textOpacityKey: const ValueKey<String>(
+                  'user-collection-thumbnail-text-opacity',
+                ),
+                titleFontSize: 11,
+                titleFontWeight: FontWeight.w900,
+                attributeMaxLines: 3,
+                stackAttributePairs: true,
+                watermarkScale: 1.6,
+                verticalHitconWatermark: true,
+                verticalHitconScale:
+                    ExpandedPixelCardStyle.thumbnailHitconScale,
+                verticalHitconRightInsetFactor:
+                    ExpandedPixelCardStyle.thumbnailHitconRightInsetFactor,
+                verticalHitconBottomInsetFactor:
+                    ExpandedPixelCardStyle.thumbnailHitconBottomInsetFactor,
+                image: _cardImage(unlocked),
+              );
+            },
           ),
         ),
       ),
@@ -599,15 +721,21 @@ class _MessagePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final Color accent = icon == Icons.wifi_off_rounded
+        ? PixelTheme.warning
+        : PixelTheme.accent;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: PixelTheme.bgMid,
-        border: Border.all(color: PixelTheme.border, width: 2),
+        border: Border.all(color: accent, width: 2),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
+        ],
       ),
       child: Column(
         children: <Widget>[
-          Icon(icon, color: PixelTheme.accent, size: 36),
+          _PixelMessageGlyph(icon: icon, color: accent),
           const SizedBox(height: 12),
           Text(
             title,
@@ -627,11 +755,133 @@ class _MessagePanel extends StatelessWidget {
           ],
           if (onAction != null && actionLabel != null) ...<Widget>[
             const SizedBox(height: 14),
-            OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
+            Semantics(
+              button: true,
+              label: actionLabel,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  key: const Key('user-collection-pixel-retry'),
+                  onTap: onAction,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: PixelTheme.bgDark,
+                      border: Border.all(color: accent, width: 2),
+                      boxShadow: const <BoxShadow>[
+                        BoxShadow(
+                          color: Colors.black,
+                          blurRadius: 0,
+                          offset: Offset(3, 3),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      actionLabel!,
+                      style: TextStyle(
+                        color: accent,
+                        fontFamily: 'Unifont',
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ],
         ],
       ),
     );
+  }
+}
+
+class _PixelMessageGlyph extends StatelessWidget {
+  const _PixelMessageGlyph({required this.icon, required this.color});
+
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 40,
+      child: CustomPaint(painter: _PixelMessageGlyphPainter(icon, color)),
+    );
+  }
+}
+
+class _PixelMessageGlyphPainter extends CustomPainter {
+  const _PixelMessageGlyphPainter(this.icon, this.color);
+
+  final IconData icon;
+  final Color color;
+
+  static const List<String> _offline = <String>[
+    '01111110',
+    '11000011',
+    '00111100',
+    '01100110',
+    '00011000',
+    '00100100',
+    '01000010',
+    '10000001',
+  ];
+
+  static const List<String> _lock = <String>[
+    '00111100',
+    '01100110',
+    '01100110',
+    '11111111',
+    '11011011',
+    '11011011',
+    '11111111',
+    '00000000',
+  ];
+
+  static const List<String> _hourglass = <String>[
+    '11111111',
+    '01111110',
+    '00111100',
+    '00011000',
+    '00100100',
+    '01000010',
+    '11111111',
+    '00000000',
+  ];
+
+  List<String> get _pattern {
+    if (icon == Icons.wifi_off_rounded) {
+      return _offline;
+    }
+    if (icon == Icons.lock_rounded) {
+      return _lock;
+    }
+    return _hourglass;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double cell = size.shortestSide / 8;
+    final Paint shadow = Paint()..color = Colors.black;
+    final Paint foreground = Paint()..color = color;
+    for (int y = 0; y < _pattern.length; y += 1) {
+      for (int x = 0; x < _pattern[y].length; x += 1) {
+        if (_pattern[y][x] != '1') {
+          continue;
+        }
+        final Rect pixel = Rect.fromLTWH(x * cell, y * cell, cell, cell);
+        canvas.drawRect(pixel.shift(const Offset(1.5, 1.5)), shadow);
+        canvas.drawRect(pixel, foreground);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PixelMessageGlyphPainter oldDelegate) {
+    return oldDelegate.icon != icon || oldDelegate.color != color;
   }
 }
 

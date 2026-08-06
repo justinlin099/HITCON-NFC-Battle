@@ -1,4 +1,7 @@
 const Map<String, String> appStringsZhTw = <String, String>{
+  'offlineTapToRefresh':
+      '\u672a\u9023\u4e0a\u7db2\u8def\uff0c\u9ede\u4e00\u4e0b\u91cd\u65b0\u6574\u7406\u3002',
+  'reconnecting': '\u6b63\u5728\u91cd\u65b0\u9023\u7dda...',
   'appTitle': 'HITCON NFC Battle',
   'switchToAdminTools': '切換到管理者寫卡工具',
   'switchToGameplay': '切換到遊玩畫面',
@@ -76,6 +79,11 @@ const Map<String, String> appStringsZhTw = <String, String>{
   'scoreboardHint': '下拉即可更新最新排行榜。',
   'scoreboardTitle': '排行榜',
   'ranking': '排名',
+  'scoreboardYou': '你',
+  'scoreboardPage': '第 {current} 頁',
+  'scoreboardPageOf': '第 {current} / {total} 頁',
+  'previousPage': '上一頁',
+  'nextPage': '下一頁',
   'chooseCardColor': '選擇卡片顏色',
   'pairNtag': '配對 NTAG Badge',
   'repairNtag': '重新配對 NTAG',

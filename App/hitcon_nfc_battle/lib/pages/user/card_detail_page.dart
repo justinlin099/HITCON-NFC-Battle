@@ -166,10 +166,11 @@ class _CardDetailPageState extends State<CardDetailPage> {
                                       watermarkScale: 1.6,
                                       watermarkFooterHeight: showPanasonicLogo
                                           ? ExpandedPixelCardStyle
-                                                    .watermarkFooterHeight *
+                                                    .myCardWatermarkFooterHeight *
                                                 expandedCardScale
                                           : 0,
                                       verticalHitconWatermark: true,
+                                      fadeExtraContentAtBottom: true,
                                       imageToTitleSpacing: s(8),
                                       extraContentSpacing: s(8),
                                       bottomLeftWatermark: showPanasonicLogo

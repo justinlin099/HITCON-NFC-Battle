@@ -1,4 +1,6 @@
 const Map<String, String> appStringsEn = <String, String>{
+  'offlineTapToRefresh': 'No internet connection. Tap to refresh.',
+  'reconnecting': 'Reconnecting...',
   'appTitle': 'HITCON NFC Battle',
   'switchToAdminTools': 'Switch to admin tag tools',
   'switchToGameplay': 'Switch to gameplay',
@@ -88,6 +90,11 @@ const Map<String, String> appStringsEn = <String, String>{
   'scoreboardHint': 'Pull down to refresh the latest battle ranking.',
   'scoreboardTitle': 'SCORE BOARD',
   'ranking': 'RANKING',
+  'scoreboardYou': 'YOU',
+  'scoreboardPage': 'PAGE {current}',
+  'scoreboardPageOf': 'PAGE {current} / {total}',
+  'previousPage': 'PREV',
+  'nextPage': 'NEXT',
   'chooseCardColor': 'Choose card color',
   'pairNtag': 'Pair NTAG Badge',
   'repairNtag': 'Pair another NTAG',
