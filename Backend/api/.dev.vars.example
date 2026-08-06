@@ -1,0 +1,16 @@
+# Copy to `.dev.vars` (gitignored) and fill in real values for `wrangler dev`.
+# In production these are set with `wrangler secret put <NAME>`.
+
+SSO_JWKS_URL="https://sso.hitcon2026.online/.well-known/jwks.json"
+SSO_ISSUER="https://sso.hitcon2026.online"
+SSO_AUDIENCE="hitcon-nfc-tag-game-api"
+
+# --- Dev-only auth bypass ----------------------------------------------------
+# Skips JWT verification and injects a fake claim set so you can exercise
+# /v1/* without a real SSO. Activates only when ENVIRONMENT=development (set
+# in wrangler.toml [vars]) AND DEV_BYPASS_AUTH=1.
+#
+# Leave DEV_BYPASS_AUTH unset (or =0) to use real JWT verification.
+DEV_BYPASS_AUTH="1"
+DEV_BYPASS_SUB="dev_user_001"
+DEV_BYPASS_ROLE="ATTENDEE"   # or "STAFF" to test /v1/staff/*
