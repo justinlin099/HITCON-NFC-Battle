@@ -7,6 +7,11 @@ import {
 import { newId, nowIso } from "./ids";
 
 export interface PrizeResultRow {
+  final_score: number;
+  num_of_collection: number;
+  num_of_phishing: number;
+  score_per_collection: number;
+  phishing_penalty: number;
   stamp_prize: number;
   rank_prize: number;
   rank: number | null;
@@ -136,6 +141,8 @@ export async function writePrizeSnapshot(
       scored AS (
         SELECT
           users.user_id,
+          COALESCE(collection_counts.num_of_collection, 0) AS num_of_collection,
+          COALESCE(phishing_counts.num_of_phishing, 0) AS num_of_phishing,
           (COALESCE(collection_counts.num_of_collection, 0) * ?2)
             - (COALESCE(phishing_counts.num_of_phishing, 0) * ?3) AS final_score,
           COALESCE(stamp_counts.sponsor_count, 0) AS sponsor_count,
@@ -150,6 +157,8 @@ export async function writePrizeSnapshot(
           ROW_NUMBER() OVER (ORDER BY final_score DESC, user_id ASC) AS rank,
           user_id,
           final_score,
+          num_of_collection,
+          num_of_phishing,
           sponsor_count,
           community_count
         FROM scored
@@ -158,6 +167,10 @@ export async function writePrizeSnapshot(
         freeze_id,
         user_id,
         final_score,
+        num_of_collection,
+        num_of_phishing,
+        score_per_collection,
+        phishing_penalty,
         rank,
         stamp_prize,
         rank_prize,
@@ -167,6 +180,10 @@ export async function writePrizeSnapshot(
         ?1,
         user_id,
         final_score,
+        num_of_collection,
+        num_of_phishing,
+        ?2,
+        ?3,
         rank,
         CASE WHEN sponsor_count + community_count >= ?4 THEN 1 ELSE 0 END,
         CASE WHEN rank <= ?5 THEN 1 ELSE 0 END,
@@ -228,6 +245,11 @@ export async function getPrizeResult(db: D1Database, freezeId: string, userId: s
     .prepare(
       `
       SELECT
+        final_score,
+        num_of_collection,
+        num_of_phishing,
+        score_per_collection,
+        phishing_penalty,
         stamp_prize,
         rank_prize,
         rank

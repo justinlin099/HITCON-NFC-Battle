@@ -1,21 +1,29 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
-import { getLiveCollectionScoreRows, getLiveUserRanks } from "./collection-store";
+import {
+  getLiveCollectionScoreRows,
+  getLiveUserScores,
+  type LiveUserScore,
+  type LiveUserScores,
+} from "./collection-store";
 import {
   getFrozenScoreboardRows,
   getPrizeClaimsVersion,
   getPrizeResult,
 } from "./freeze-snapshot-store";
-import { RANK_THRESHOLD } from "./game-config";
+import {
+  PHISHING_PENALTY,
+  RANK_THRESHOLD,
+  SCORE_PER_COLLECTION,
+} from "./game-config";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { calculateScore } from "./scoring";
 import { errorResponse, success } from "./responses";
 import {
-  getCachedLiveUserRanks,
+  getCachedLiveUserScores,
   getCachedScoreboardRankings,
-  putCachedLiveUserRanks,
+  putCachedLiveUserScores,
   putCachedScoreboardRankings,
-  type LiveUserRanks,
   type ScoreboardRanking,
 } from "./scoreboard-cache";
 import type { AppEnv } from "./types";
@@ -101,17 +109,31 @@ scoreboard.get("/me", async (c) => {
       return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
     }
 
-    let cachedLiveRanks: LiveUserRanks | null = null;
-    let liveRanks: LiveUserRanks | null = null;
-    let rank: number | null;
+    let cachedLiveScores: LiveUserScores | null = null;
+    let liveScores: LiveUserScores | null = null;
+    let scoreDetails: (Omit<LiveUserScore, "rank"> & { rank: number | null }) | null;
+    let scorePerCollection = SCORE_PER_COLLECTION;
+    let phishingPenalty = PHISHING_PENALTY;
     if (state.state === "FROZEN" && state.freeze_id) {
-      rank = (await getPrizeResult(c.env.DB, state.freeze_id, authUser.userId))?.rank ?? null;
-    } else {
-      cachedLiveRanks = state.state === "OPEN"
-        ? await getCachedLiveUserRanks(c.req.url)
+      const result = await getPrizeResult(c.env.DB, state.freeze_id, authUser.userId);
+      scorePerCollection = result?.score_per_collection ?? SCORE_PER_COLLECTION;
+      phishingPenalty = result?.phishing_penalty ?? PHISHING_PENALTY;
+      scoreDetails = result
+        ? {
+            rank: result.rank,
+            score: result.final_score,
+            num_of_collection: result.num_of_collection,
+            num_of_phishing: result.num_of_phishing,
+          }
         : null;
-      liveRanks = cachedLiveRanks ?? await getLiveUserRanks(c.env.DB);
-      rank = liveRanks[authUser.userId] ?? null;
+    } else {
+      cachedLiveScores = state.state === "OPEN"
+        ? await getCachedLiveUserScores(c.req.url)
+        : null;
+      liveScores = cachedLiveScores ?? await getLiveUserScores(c.env.DB);
+      scoreDetails = Object.prototype.hasOwnProperty.call(liveScores, authUser.userId)
+        ? liveScores[authUser.userId]
+        : null;
     }
 
     const latestState = await getGameState(c.env.DB);
@@ -119,12 +141,17 @@ scoreboard.get("/me", async (c) => {
       continue;
     }
 
-    if (state.state === "OPEN" && cachedLiveRanks === null && liveRanks !== null) {
-      c.executionCtx.waitUntil(putCachedLiveUserRanks(c.req.url, liveRanks));
+    if (state.state === "OPEN" && cachedLiveScores === null && liveScores !== null) {
+      c.executionCtx.waitUntil(putCachedLiveUserScores(c.req.url, liveScores));
     }
 
     return success(c, {
-      rank,
+      rank: scoreDetails?.rank ?? null,
+      score: scoreDetails?.score ?? null,
+      num_of_collection: scoreDetails?.num_of_collection ?? null,
+      num_of_phishing: scoreDetails?.num_of_phishing ?? null,
+      score_per_collection: scorePerCollection,
+      phishing_penalty: phishingPenalty,
       frozen: state.state === "FROZEN",
       freeze_id: state.state === "FROZEN" ? state.freeze_id : null,
       scoring_cutoff_at: state.state === "FROZEN" ? state.scoring_cutoff_at : null,

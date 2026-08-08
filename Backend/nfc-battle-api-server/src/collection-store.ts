@@ -107,6 +107,15 @@ export interface CollectionCountRow {
   external_prize: number;
 }
 
+export interface LiveUserScore {
+  rank: number;
+  score: number;
+  num_of_collection: number;
+  num_of_phishing: number;
+}
+
+export type LiveUserScores = Record<string, LiveUserScore>;
+
 export async function getLiveCollectionScoreRows(db: D1Database, offset: number, limit: number) {
   const { results } = await db
     .prepare(
@@ -176,7 +185,7 @@ export async function getLiveCollectionScoreRows(db: D1Database, offset: number,
   return results;
 }
 
-export async function getLiveUserRanks(db: D1Database) {
+export async function getLiveUserScores(db: D1Database) {
   const { results } = await db
     .prepare(
       `
@@ -193,6 +202,8 @@ export async function getLiveUserRanks(db: D1Database) {
       scores AS (
         SELECT
           users.user_id,
+          COALESCE(collection_counts.num_of_collection, 0) AS num_of_collection,
+          COALESCE(phishing_counts.num_of_phishing, 0) AS num_of_phishing,
           (COALESCE(collection_counts.num_of_collection, 0) * ?1)
             - (COALESCE(phishing_counts.num_of_phishing, 0) * ?2) AS score
         FROM users
@@ -200,19 +211,29 @@ export async function getLiveUserRanks(db: D1Database) {
         LEFT JOIN phishing_counts ON phishing_counts.user_id = users.user_id
       ),
       ranked AS (
-        SELECT ROW_NUMBER() OVER (ORDER BY score DESC, user_id ASC) AS rank, user_id
+        SELECT
+          ROW_NUMBER() OVER (ORDER BY score DESC, user_id ASC) AS rank,
+          user_id,
+          score,
+          num_of_collection,
+          num_of_phishing
         FROM scores
       )
-      SELECT rank, user_id
+      SELECT rank, user_id, score, num_of_collection, num_of_phishing
       FROM ranked
       `,
     )
     .bind(SCORE_PER_COLLECTION, PHISHING_PENALTY)
-    .all<{ rank: number; user_id: string }>();
+    .all<LiveUserScore & { user_id: string }>();
 
-  const ranks: Record<string, number> = Object.create(null);
+  const scores: LiveUserScores = Object.create(null);
   for (const row of results) {
-    ranks[row.user_id] = row.rank;
+    scores[row.user_id] = {
+      rank: row.rank,
+      score: row.score,
+      num_of_collection: row.num_of_collection,
+      num_of_phishing: row.num_of_phishing,
+    };
   }
-  return ranks;
+  return scores;
 }

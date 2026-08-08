@@ -124,6 +124,11 @@ describe("mission and scoreboard edge cases", () => {
     await expect(readJson(aliceResponse)).resolves.toMatchObject({
       data: {
         rank: 2,
+        score: 0,
+        num_of_collection: 0,
+        num_of_phishing: 0,
+        score_per_collection: 10,
+        phishing_penalty: 10,
         frozen: false,
         freeze_id: null,
         scoring_cutoff_at: null,
@@ -133,6 +138,11 @@ describe("mission and scoreboard edge cases", () => {
     await expect(readJson(bobResponse)).resolves.toMatchObject({
       data: {
         rank: 1,
+        score: 10,
+        num_of_collection: 1,
+        num_of_phishing: 0,
+        score_per_collection: 10,
+        phishing_penalty: 10,
         frozen: false,
         freeze_id: null,
         scoring_cutoff_at: null,
@@ -185,6 +195,20 @@ describe("mission and scoreboard edge cases", () => {
       { rank: 1, user_id: "bob", score: 10 },
       { rank: 2, user_id: "alice", score: 0 },
     ]);
+
+    const myScore = await server.request("/scoreboard/me", { headers: aliceAuth });
+    expect(myScore.status).toBe(200);
+    await expect(readJson(myScore)).resolves.toMatchObject({
+      data: {
+        rank: 2,
+        score: 0,
+        num_of_collection: 1,
+        num_of_phishing: 1,
+        score_per_collection: 10,
+        phishing_penalty: 10,
+        frozen: false,
+      },
+    });
   });
 
   it("caches live rankings by page while continuing to check scoreboard state", async () => {
@@ -378,6 +402,22 @@ describe("mission and scoreboard edge cases", () => {
             score: 0,
           },
         ],
+      },
+    });
+
+    const myFrozenScore = await server.request("/scoreboard/me", { headers: aliceAuth });
+    expect(myFrozenScore.status).toBe(200);
+    await expect(readJson(myFrozenScore)).resolves.toMatchObject({
+      data: {
+        rank: 1,
+        score: 0,
+        num_of_collection: 1,
+        num_of_phishing: 1,
+        score_per_collection: 10,
+        phishing_penalty: 10,
+        frozen: true,
+        freeze_id: freezeBody.data.freeze_id,
+        scoring_cutoff_at: cutoff,
       },
     });
 

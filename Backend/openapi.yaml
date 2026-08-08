@@ -112,9 +112,15 @@ info:
     in `FREEZING`:
     - `GET /scoreboard`; returns live scores in `OPEN`, returns the stored
       freeze snapshot in `FROZEN`, and is rejected in `FREEZING` with
-      `SCOREBOARD_FREEZING` error. If the scoreboard state changes during a
-      consistent read, it is rejected with `SCOREBOARD_READ_INCONSISTENT` and
-      clients should retry.
+      `SCOREBOARD_FREEZING` error.
+    - `GET /scoreboard/me`; returns the authenticated user's live rank and
+      score breakdown in `OPEN`, returns their rank and score breakdown from
+      the stored freeze snapshot in `FROZEN`, and is rejected in `FREEZING`
+      with `SCOREBOARD_FREEZING` error.
+
+    If the scoreboard state changes during a consistent read by either
+    endpoint, it is rejected with `SCOREBOARD_READ_INCONSISTENT` and clients
+    should retry.
 
     The following endpoints are state transition operations:
     - `POST /staff/freeze_scoreboard`: accepted only in `OPEN`; rejected in
@@ -632,8 +638,10 @@ paths:
       tags: [Scoreboard]
       summary: Get my current rank
       description: |
-        Returns the authenticated user's global rank. In `OPEN`, the rank uses
-        live scores; in `FROZEN`, it uses the stored scoreboard snapshot. This
+        Returns the authenticated user's global rank, score, collection count,
+        phishing count, and scoring constants. In `OPEN`, these values use live
+        data; in `FROZEN`, they use the stored scoreboard snapshot. Score fields
+        are null when the authenticated subject has no scoreboard entry. This
         endpoint is rejected while the scoreboard is `FREEZING` or if its state
         changes during the read.
       responses:
@@ -1874,13 +1882,49 @@ components:
           enum: [success]
         data:
           type: object
-          required: [rank, frozen, freeze_id, scoring_cutoff_at]
+          required:
+            - rank
+            - score
+            - num_of_collection
+            - num_of_phishing
+            - score_per_collection
+            - phishing_penalty
+            - frozen
+            - freeze_id
+            - scoring_cutoff_at
           properties:
             rank:
               type: integer
               nullable: true
               description: Authenticated user's global rank, or null if the user has no scoreboard entry.
               example: 7
+            score:
+              type: integer
+              nullable: true
+              description: Calculated live or frozen score, or null if the user has no scoreboard entry.
+              example: 230
+            num_of_collection:
+              type: integer
+              minimum: 0
+              nullable: true
+              description: Collection count used to calculate the returned score.
+              example: 25
+            num_of_phishing:
+              type: integer
+              minimum: 0
+              nullable: true
+              description: Phishing count used to calculate the returned score.
+              example: 2
+            score_per_collection:
+              type: integer
+              minimum: 0
+              description: Score awarded for each collected user.
+              example: 10
+            phishing_penalty:
+              type: integer
+              minimum: 0
+              description: Score deducted for each phishing event affecting the user.
+              example: 10
             frozen:
               type: boolean
               example: false
@@ -2249,6 +2293,11 @@ components:
         status: success
         data:
           rank: 7
+          score: 230
+          num_of_collection: 25
+          num_of_phishing: 2
+          score_per_collection: 10
+          phishing_penalty: 10
           frozen: false
           freeze_id: null
           scoring_cutoff_at: null

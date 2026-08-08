@@ -1,4 +1,5 @@
 import type { GameStateRow } from "./game-state";
+import type { LiveUserScores } from "./collection-store";
 
 const CACHE_VERSION = "2";
 const OPEN_TTL_SECONDS = 2;
@@ -12,8 +13,6 @@ export interface ScoreboardRanking {
   score: number;
   external_prize: boolean;
 }
-
-export type LiveUserRanks = Record<string, number>;
 
 export async function getCachedScoreboardRankings(
   requestUrl: string,
@@ -73,37 +72,37 @@ export async function putCachedScoreboardRankings(
   }
 }
 
-export async function getCachedLiveUserRanks(requestUrl: string) {
+export async function getCachedLiveUserScores(requestUrl: string) {
   const cache = getDefaultCache();
   if (!cache) {
     return null;
   }
 
   try {
-    const response = await cache.match(liveUserRanksCacheKey(requestUrl));
+    const response = await cache.match(liveUserScoresCacheKey(requestUrl));
     if (!response) {
       return null;
     }
 
-    const ranks: unknown = await response.json();
-    return ranks !== null && typeof ranks === "object" && !Array.isArray(ranks)
-      ? ranks as LiveUserRanks
+    const scores: unknown = await response.json();
+    return scores !== null && typeof scores === "object" && !Array.isArray(scores)
+      ? scores as LiveUserScores
       : null;
   } catch {
     return null;
   }
 }
 
-export async function putCachedLiveUserRanks(
+export async function putCachedLiveUserScores(
   requestUrl: string,
-  ranks: LiveUserRanks,
+  scores: LiveUserScores,
 ) {
   const cache = getDefaultCache();
   if (!cache) {
     return;
   }
 
-  const response = new Response(JSON.stringify(ranks), {
+  const response = new Response(JSON.stringify(scores), {
     headers: {
       "Cache-Control": `max-age=${OPEN_TTL_SECONDS}`,
       "Content-Type": "application/json",
@@ -111,7 +110,7 @@ export async function putCachedLiveUserRanks(
   });
 
   try {
-    await cache.put(liveUserRanksCacheKey(requestUrl), response);
+    await cache.put(liveUserScoresCacheKey(requestUrl), response);
   } catch {
     // Cache availability must not affect the scoreboard endpoint.
   }
@@ -138,9 +137,9 @@ function scoreboardCacheKey(
   return new Request(url.toString());
 }
 
-function liveUserRanksCacheKey(requestUrl: string) {
+function liveUserScoresCacheKey(requestUrl: string) {
   const url = new URL(requestUrl);
-  url.pathname = "/__internal/cache/scoreboard/user-ranks";
+  url.pathname = "/__internal/cache/scoreboard/user-scores";
   url.search = "";
   url.searchParams.set("v", CACHE_VERSION);
   url.searchParams.set("state", "OPEN");
