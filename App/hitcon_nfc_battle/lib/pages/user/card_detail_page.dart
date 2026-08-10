@@ -10,6 +10,7 @@ import 'pixel_card_face.dart';
 import 'pixel_link_dialog.dart';
 import 'pixel_link_icon.dart';
 import 'panasonic_support_mark.dart';
+import 'social_share_dialog.dart';
 
 class CardDetailPage extends StatefulWidget {
   const CardDetailPage({
@@ -229,6 +230,21 @@ class _CardDetailPageState extends State<CardDetailPage> {
                 },
               ),
             ),
+            if (widget.showCollectionInfo)
+              Positioned.fill(
+                child: SafeArea(
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: _CardShareButton(
+                        key: const Key('card-detail-share'),
+                        onTap: _showSharePreview,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             if (widget.playRevealEffect)
               Positioned.fill(
                 child: IgnorePointer(
@@ -250,6 +266,58 @@ class _CardDetailPageState extends State<CardDetailPage> {
     if (!popped && mounted) {
       _isDismissing = false;
     }
+  }
+
+  Future<void> _showSharePreview() {
+    final String headline = context.l10n.tr(
+      'socialShareCardHeadline',
+      <String, Object?>{'card': widget.title},
+    );
+    final String shareText = context.l10n.tr(
+      'socialShareCardText',
+      <String, Object?>{'card': widget.title},
+    );
+    return showSocialSharePreview(
+      context: context,
+      payload: SocialSharePayload(
+        accentColor: widget.cardColor,
+        fileName: 'hitcon-collected-card.png',
+        text: shareText,
+        poster: SocialSharePoster(
+          eyebrow: context.l10n.tr('socialShareCardLabel'),
+          headline: headline,
+          detail: '${widget.attributeEmoji} ${widget.attributeLabel}',
+          accentColor: widget.cardColor,
+          visual: Transform.rotate(
+            angle: -0.035,
+            child: SizedBox(
+              width: 136,
+              height: 216,
+              child: PixelCardFace(
+                title: widget.title,
+                attributeEmoji: widget.attributeEmoji,
+                attributeLabel: widget.attributeLabel,
+                cardColor: widget.cardColor,
+                showText: true,
+                image: _cardImage(),
+                titleFontSize: 10,
+                titleFontWeight: FontWeight.w900,
+                attributeFontSize: 8,
+                emojiFontSize: 10,
+                titleMaxLines: 2,
+                watermarkScale: 1.1,
+                verticalHitconWatermark: true,
+                verticalHitconScale: 0.9,
+                verticalHitconRightInsetFactor:
+                    ExpandedPixelCardStyle.thumbnailHitconRightInsetFactor,
+                verticalHitconBottomInsetFactor:
+                    ExpandedPixelCardStyle.thumbnailHitconBottomInsetFactor,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _handleRouteAnimationStatus(AnimationStatus status) {
@@ -309,6 +377,44 @@ class _CardDetailPageState extends State<CardDetailPage> {
     } catch (_) {
       return null;
     }
+  }
+}
+
+class _CardShareButton extends StatelessWidget {
+  const _CardShareButton({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: context.l10n.tr('share'),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: PixelTheme.bgMid,
+            border: Border.all(color: PixelTheme.accent, width: 2),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Colors.black,
+                blurRadius: 0,
+                offset: Offset(3, 3),
+              ),
+            ],
+          ),
+          child: Icon(
+            Icons.ios_share_rounded,
+            color: PixelTheme.accent,
+            size: 22,
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -33,6 +33,22 @@ extension AchievementKindPresentation on AchievementKind {
     AchievementKind.solderMaster => 'achievementSolderMaster',
   };
 
+  String get requirementKey => switch (this) {
+    AchievementKind.helloWorld => 'achievementRequirementHelloWorld',
+    AchievementKind.nfcOnline => 'achievementRequirementNfcOnline',
+    AchievementKind.firstContact => 'achievementRequirementFirstContact',
+    AchievementKind.packetCollector => 'achievementRequirementPacketCollector',
+    AchievementKind.sponsorScout => 'achievementRequirementSponsorScout',
+    AchievementKind.communityExplorer =>
+      'achievementRequirementCommunityExplorer',
+    AchievementKind.fullStackSocial => 'achievementRequirementFullStackSocial',
+    AchievementKind.stampMaster => 'achievementRequirementStampMaster',
+    AchievementKind.topRank => 'achievementRequirementTopRank',
+    AchievementKind.prizeUnlocked => 'achievementRequirementPrizeUnlocked',
+    AchievementKind.phishing => 'achievementRequirementPhishing',
+    AchievementKind.solderMaster => 'achievementRequirementSolderMaster',
+  };
+
   String get assetPath => switch (this) {
     AchievementKind.helloWorld =>
       'assets/images/achievement_badges/hello_world_avatar_style_v1.png',

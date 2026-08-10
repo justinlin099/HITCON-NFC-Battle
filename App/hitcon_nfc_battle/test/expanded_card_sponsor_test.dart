@@ -110,4 +110,47 @@ void main() {
     expect(fade, findsOneWidget);
     expect(tester.getSize(fade).height, greaterThan(60));
   });
+
+  testWidgets('collected card opens a social share image preview', (
+    WidgetTester tester,
+  ) async {
+    PixelTheme.active = PixelTheme.getPalette(PixelTheme.defaultScheme);
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        locale: Locale('en'),
+        localizationsDelegates: <LocalizationsDelegate<dynamic>>[
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: CardDetailPage(
+          heroTag: 'share-test-card',
+          title: 'SHARE TEST',
+          attributeEmoji: '✨',
+          attributeLabel: 'COMMUNITY',
+          link: 'https://hitcon.org',
+          description: 'A collected card ready to share.',
+          uid: '04:A1',
+          collectedAt: '2026-08-11',
+          cardColor: Color(0xFF00D9FF),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await tester.tap(find.byKey(const Key('card-detail-share')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('social-share-dialog')), findsOneWidget);
+    expect(find.text('Collected SHARE TEST'), findsOneWidget);
+    expect(find.text('#HITCON  #NFCBATTLE'), findsOneWidget);
+    expect(find.byKey(const Key('social-share-submit')), findsOneWidget);
+  });
 }

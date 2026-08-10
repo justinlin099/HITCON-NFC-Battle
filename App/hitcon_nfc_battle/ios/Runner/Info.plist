@@ -6,6 +6,8 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleAllowMixedLocalizations</key>
+	<true/>
 	<key>CFBundleDisplayName</key>
 	<string>HITCON NFC Battle</string>
 	<key>CFBundleExecutable</key>

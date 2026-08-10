@@ -16,6 +16,7 @@ import 'pixel_card_face.dart';
 import 'pixel_card_hero.dart';
 import 'pixel_theme.dart';
 import 'score_board_page.dart';
+import 'social_share_dialog.dart';
 
 import '../../services/auth_service.dart';
 import '../../services/local_collection_store.dart';
@@ -729,12 +730,16 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                   ),
                 SliverToBoxAdapter(
                   child: _HeroHeader(
+                    cardCount: _cards.length,
                     totalCollected: _stampProgress,
                     sponsorCollected: _sponsorStampCount,
                     communityCollected: _communityStampCount,
                     prizeRequirement: _stampThreshold,
                     isComplete: _isComplete,
                     onRedeem: _isComplete ? _handleRedeem : null,
+                    onShareCollection: _cards.isEmpty
+                        ? null
+                        : _showCollectionSharePreview,
                   ),
                 ),
                 SliverPadding(
@@ -842,6 +847,32 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         'rankPrize': rankPrize ? context.l10n.tr('yes') : context.l10n.tr('no'),
         'rank': rank?.toString() ?? '-',
       }),
+    );
+  }
+
+  Future<void> _showCollectionSharePreview() {
+    final int count = _cards.length;
+    final String headline = context.l10n.tr(
+      'socialShareCollectionHeadline',
+      <String, Object?>{'count': count},
+    );
+    final String shareText = context.l10n.tr(
+      'socialShareCollectionText',
+      <String, Object?>{'count': count},
+    );
+    return showSocialSharePreview(
+      context: context,
+      payload: SocialSharePayload(
+        accentColor: PixelTheme.accent,
+        fileName: 'hitcon-card-collection.png',
+        text: shareText,
+        poster: SocialSharePoster(
+          eyebrow: context.l10n.tr('socialShareCollectionLabel'),
+          headline: headline,
+          accentColor: PixelTheme.accent,
+          visual: _CollectionShareVisual(count: count),
+        ),
+      ),
     );
   }
 
@@ -1808,20 +1839,24 @@ class _PixelNavIconPainter extends CustomPainter {
 
 class _HeroHeader extends StatelessWidget {
   const _HeroHeader({
+    required this.cardCount,
     required this.totalCollected,
     required this.sponsorCollected,
     required this.communityCollected,
     required this.prizeRequirement,
     required this.isComplete,
     required this.onRedeem,
+    required this.onShareCollection,
   });
 
+  final int cardCount;
   final int totalCollected;
   final int sponsorCollected;
   final int communityCollected;
   final int prizeRequirement;
   final bool isComplete;
   final VoidCallback? onRedeem;
+  final VoidCallback? onShareCollection;
 
   @override
   Widget build(BuildContext context) {
@@ -1873,6 +1908,8 @@ class _HeroHeader extends StatelessWidget {
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
+              _HeroShareButton(count: cardCount, onPressed: onShareCollection),
               const SizedBox(width: 8),
               _PixelButton(
                 onPressed: onRedeem,
@@ -1936,6 +1973,162 @@ class _HeroHeader extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _HeroShareButton extends StatelessWidget {
+  const _HeroShareButton({required this.count, required this.onPressed});
+
+  final int count;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = onPressed == null
+        ? PixelTheme.textGray.withValues(alpha: 0.48)
+        : PixelTheme.accentBlue;
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      label: context.l10n.tr('socialShareCollectionHeadline', <String, Object?>{
+        'count': count,
+      }),
+      child: GestureDetector(
+        key: const Key('collection-share'),
+        behavior: HitTestBehavior.opaque,
+        onTap: onPressed,
+        child: Container(
+          width: 42,
+          height: 38,
+          decoration: BoxDecoration(
+            color: PixelTheme.bgDark,
+            border: Border.all(color: color, width: 2),
+            boxShadow: onPressed == null
+                ? const <BoxShadow>[]
+                : const <BoxShadow>[
+                    BoxShadow(
+                      color: Colors.black,
+                      blurRadius: 0,
+                      offset: Offset(3, 3),
+                    ),
+                  ],
+          ),
+          child: Icon(Icons.ios_share_rounded, size: 19, color: color),
+        ),
+      ),
+    );
+  }
+}
+
+class _CollectionShareVisual extends StatelessWidget {
+  const _CollectionShareVisual({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 220,
+      height: 205,
+      child: Stack(
+        alignment: Alignment.center,
+        children: <Widget>[
+          Transform.translate(
+            offset: const Offset(-45, 2),
+            child: Transform.rotate(
+              angle: -0.18,
+              child: const _CollectionShareCardBack(color: Color(0xFF00D9FF)),
+            ),
+          ),
+          Transform.translate(
+            offset: const Offset(45, 2),
+            child: Transform.rotate(
+              angle: 0.18,
+              child: const _CollectionShareCardBack(color: Color(0xFFFF4DFF)),
+            ),
+          ),
+          _CollectionShareCardBack(
+            color: PixelTheme.accent,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Text(
+                  '$count',
+                  style: TextStyle(
+                    color: PixelTheme.textWhite,
+                    fontFamily: 'Unifont',
+                    fontSize: 44,
+                    height: 1,
+                    fontWeight: FontWeight.w900,
+                    shadows: const <Shadow>[
+                      Shadow(color: Colors.black, offset: Offset(3, 3)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'CARDS',
+                  style: TextStyle(
+                    color: PixelTheme.accent,
+                    fontFamily: 'Unifont',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CollectionShareCardBack extends StatelessWidget {
+  const _CollectionShareCardBack({required this.color, this.child});
+
+  final Color color;
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 112,
+      height: 178,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[
+            PixelTheme.bgDark,
+            Color.lerp(PixelTheme.bgDark, color, 0.5) ?? color,
+          ],
+        ),
+        border: Border.all(color: color, width: 3),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(5, 5)),
+        ],
+      ),
+      child:
+          child ??
+          Center(
+            child: RotatedBox(
+              quarterTurns: 3,
+              child: Text(
+                'HITCON',
+                style: TextStyle(
+                  color: color,
+                  fontFamily: 'Unifont',
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2,
+                ),
+              ),
+            ),
+          ),
     );
   }
 }

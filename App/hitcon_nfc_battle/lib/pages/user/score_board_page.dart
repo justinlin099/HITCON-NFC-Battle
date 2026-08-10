@@ -11,6 +11,7 @@ import '../../services/nfc_battle_api_client.dart';
 import '../../services/scoreboard_data.dart';
 import 'offline_retry_banner.dart';
 import 'pixel_theme.dart';
+import 'social_share_dialog.dart';
 import 'user_collection_page.dart';
 
 class ScoreBoardPage extends StatefulWidget {
@@ -48,8 +49,6 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
   bool _isOffline = false;
   List<ScoreboardEntry> _pageEntries = <ScoreboardEntry>[];
   ScoreboardEntry? _myRank;
-  int _rankThreshold = 0;
-  int _topScore = 0;
   int _currentPage = 0;
   int? _totalCount;
   bool _hasMore = false;
@@ -291,16 +290,12 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
       requestedOffset: requestedOffset,
       requestedLimit: requestedLimit,
     );
-    _rankThreshold = page.rankThreshold;
     _frozen = page.frozen;
     _hasMore = page.hasMore;
     if (page.totalCount != null || requestedOffset == 0) {
       _totalCount = page.totalCount;
     }
     _pageEntries = page.entries;
-    if (requestedOffset == 0) {
-      _topScore = page.entries.isEmpty ? 0 : page.entries.first.score;
-    }
   }
 
   ScoreboardEntry? _applyMyRank(
@@ -565,12 +560,6 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
                     ),
                     _BoardHeader(isLoading: _isLoading, frozen: _frozen),
                     const SizedBox(height: 12),
-                    _StatRow(
-                      shownRanks: _pageEntries.length,
-                      topScore: _topScore,
-                      rankThreshold: _rankThreshold,
-                    ),
-                    const SizedBox(height: 12),
                     _RankPanel(
                       ranks: _ranks,
                       currentPage: _currentPage,
@@ -678,7 +667,7 @@ class _ScoreboardAchievementPanel extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const _PixelAchievementHeaderGlyph(),
+              const _PixelAchievementTrophy(),
               const SizedBox(width: 7),
               Text(
                 context.l10n.tr('achievements'),
@@ -755,58 +744,118 @@ class _ScoreboardAchievementBadge extends StatelessWidget {
     final String semanticTitle = level.isEmpty ? title : '$title $level';
 
     return Semantics(
+      button: true,
       label: '$semanticTitle, $status${detail.isEmpty ? '' : ', $detail'}',
-      child: SizedBox(
-        width: 118,
-        child: Column(
-          children: <Widget>[
-            _AchievementBadgeImage(
-              achievement: achievement,
-              level: level,
-              color: color,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: color,
-                fontFamily: 'Unifont',
-                fontSize: 9.5,
-                height: 1.05,
-                fontWeight: FontWeight.w900,
+      hint: context.l10n.tr('achievementTapForDetails'),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _showDetails(
+          context,
+          title: title,
+          status: status,
+          level: level,
+          color: color,
+        ),
+        child: SizedBox(
+          width: 118,
+          child: Column(
+            children: <Widget>[
+              Hero(
+                tag: 'achievement-badge-${achievement.kind.name}',
+                child: _AchievementBadgeImage(
+                  achievement: achievement,
+                  level: level,
+                  color: color,
+                ),
               ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              status,
-              style: TextStyle(
-                color: color,
-                fontFamily: 'Unifont',
-                fontSize: 8.5,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            if (detail.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 2),
+              const SizedBox(height: 4),
               Text(
-                detail,
+                title,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: available ? color : PixelTheme.textGray,
+                  color: color,
                   fontFamily: 'Unifont',
-                  fontSize: 8,
+                  fontSize: 9.5,
                   height: 1.05,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
+              Text(
+                status,
+                style: TextStyle(
+                  color: color,
+                  fontFamily: 'Unifont',
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              if (detail.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 2),
+                Text(
+                  detail,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: available ? color : PixelTheme.textGray,
+                    fontFamily: 'Unifont',
+                    fontSize: 8,
+                    height: 1.05,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _showDetails(
+    BuildContext context, {
+    required String title,
+    required String status,
+    required String level,
+    required Color color,
+  }) {
+    return Navigator.of(context).push<void>(
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierDismissible: true,
+        barrierColor: Colors.black.withValues(alpha: 0.82),
+        barrierLabel: MaterialLocalizations.of(
+          context,
+        ).modalBarrierDismissLabel,
+        transitionDuration: const Duration(milliseconds: 340),
+        reverseTransitionDuration: const Duration(milliseconds: 280),
+        pageBuilder:
+            (
+              BuildContext context,
+              Animation<double> animation,
+              Animation<double> secondaryAnimation,
+            ) => _AchievementDetailsDialog(
+              achievement: achievement,
+              title: title,
+              status: status,
+              level: level,
+              color: color,
+            ),
+        transitionsBuilder:
+            (
+              BuildContext context,
+              Animation<double> animation,
+              Animation<double> secondaryAnimation,
+              Widget child,
+            ) => FadeTransition(
+              opacity: CurvedAnimation(
+                parent: animation,
+                curve: const Interval(0.16, 1, curve: Curves.easeOut),
+              ),
+              child: child,
+            ),
       ),
     );
   }
@@ -825,11 +874,495 @@ class _ScoreboardAchievementBadge extends StatelessWidget {
   }
 }
 
+class _AchievementDetailsDialog extends StatelessWidget {
+  const _AchievementDetailsDialog({
+    required this.achievement,
+    required this.title,
+    required this.status,
+    required this.level,
+    required this.color,
+  });
+
+  final AchievementBadgeProgress achievement;
+  final String title;
+  final String status;
+  final String level;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final String requirement = context.l10n.tr(
+      achievement.kind.requirementKey,
+      <String, Object?>{'tiers': _tierRequirements(context)},
+    );
+    final double badgeSize = (MediaQuery.sizeOf(context).shortestSide * 0.58)
+        .clamp(180.0, 280.0);
+
+    return Dialog(
+      key: const Key('achievement-detail-dialog'),
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 420),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(color: color, width: 3),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Center(
+                child: Hero(
+                  tag: 'achievement-badge-${achievement.kind.name}',
+                  child: _TiltableHolographicBadge(
+                    achievement: achievement,
+                    level: level,
+                    color: color,
+                    dimension: badgeSize,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: color,
+                  fontFamily: 'Unifont',
+                  fontSize: 16,
+                  height: 1.15,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                status,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: color,
+                  fontFamily: 'Unifont',
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: PixelTheme.bgDark,
+                  border: Border.all(color: PixelTheme.border, width: 2),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      context.l10n.tr('achievementHowToUnlock'),
+                      style: TextStyle(
+                        color: PixelTheme.accentBlue,
+                        fontFamily: 'Unifont',
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      requirement,
+                      style: TextStyle(
+                        color: PixelTheme.textWhite,
+                        fontFamily: 'Unifont',
+                        fontSize: 12,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: <Widget>[
+                  if (achievement.isUnlocked) ...<Widget>[
+                    Expanded(
+                      child: _AchievementDetailActionButton(
+                        key: const Key('achievement-detail-share'),
+                        label: context.l10n.tr('share'),
+                        color: PixelTheme.accentBlue,
+                        icon: Icons.ios_share_rounded,
+                        onTap: () => _showSharePreview(context),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: _AchievementDetailActionButton(
+                      key: const Key('achievement-detail-close'),
+                      label: context.l10n.tr('confirm'),
+                      color: PixelTheme.accent,
+                      onTap: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showSharePreview(BuildContext context) {
+    final bool isRankAchievement = achievement.kind == AchievementKind.topRank;
+    final String achievementName = level.isEmpty ? title : '$title $level';
+    final String headline = context.l10n.tr(
+      isRankAchievement
+          ? 'socialShareRankHeadline'
+          : 'socialShareAchievementHeadline',
+      <String, Object?>{
+        'achievement': achievementName,
+        'rank': achievement.current,
+      },
+    );
+    final String shareText = context.l10n.tr(
+      isRankAchievement ? 'socialShareRankText' : 'socialShareAchievementText',
+      <String, Object?>{
+        'achievement': achievementName,
+        'rank': achievement.current,
+      },
+    );
+    return showSocialSharePreview(
+      context: context,
+      payload: SocialSharePayload(
+        accentColor: color,
+        fileName: 'hitcon-achievement-${achievement.kind.name}.png',
+        text: shareText,
+        poster: SocialSharePoster(
+          eyebrow: context.l10n.tr('socialShareAchievementLabel'),
+          headline: headline,
+          detail: isRankAchievement ? title : status,
+          accentColor: color,
+          visual: _AchievementBadgeImage(
+            achievement: achievement,
+            level: level,
+            color: color,
+            dimension: 190,
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _tierRequirements(BuildContext context) {
+    final String? tierKey = switch (achievement.kind) {
+      AchievementKind.packetCollector => 'achievementTierPlayerCards',
+      AchievementKind.sponsorScout => 'achievementTierSponsorStamps',
+      AchievementKind.communityExplorer => 'achievementTierCommunityStamps',
+      AchievementKind.topRank => 'achievementTierRanking',
+      _ => null,
+    };
+    if (tierKey == null) {
+      return '';
+    }
+    return List<String>.generate(achievement.thresholds.length, (int index) {
+      final int target = achievement.thresholds[index];
+      return context.l10n.tr(tierKey, <String, Object?>{
+        'level': achievementRomanLevel(index + 1),
+        'target': target,
+      });
+    }).join('\n');
+  }
+}
+
+class _AchievementDetailActionButton extends StatelessWidget {
+  const _AchievementDetailActionButton({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.onTap,
+    this.icon,
+  });
+
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: PixelTheme.bgDark,
+          border: Border.all(color: color, width: 2),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(3, 3)),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            if (icon != null) ...<Widget>[
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+            ],
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontFamily: 'Unifont',
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TiltableHolographicBadge extends StatefulWidget {
+  const _TiltableHolographicBadge({
+    required this.achievement,
+    required this.level,
+    required this.color,
+    required this.dimension,
+  });
+
+  final AchievementBadgeProgress achievement;
+  final String level;
+  final Color color;
+  final double dimension;
+
+  @override
+  State<_TiltableHolographicBadge> createState() =>
+      _TiltableHolographicBadgeState();
+}
+
+class _TiltableHolographicBadgeState extends State<_TiltableHolographicBadge>
+    with SingleTickerProviderStateMixin {
+  double _tiltX = 0;
+  double _tiltY = 0;
+  Offset? _dragStart;
+  double _startTiltX = 0;
+  double _startTiltY = 0;
+  late final AnimationController _returnController;
+  late Animation<double> _returnX;
+  late Animation<double> _returnY;
+
+  @override
+  void initState() {
+    super.initState();
+    _returnController =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 480),
+        )..addListener(() {
+          setState(() {
+            _tiltX = _returnX.value;
+            _tiltY = _returnY.value;
+          });
+        });
+    _returnX = const AlwaysStoppedAnimation<double>(0);
+    _returnY = const AlwaysStoppedAnimation<double>(0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double foilStrength = ((_tiltX.abs() + _tiltY.abs()) / 0.72).clamp(
+      0.0,
+      1.0,
+    );
+
+    return GestureDetector(
+      key: const Key('achievement-holographic-badge'),
+      behavior: HitTestBehavior.opaque,
+      onPanDown: (DragDownDetails details) =>
+          _startTilt(details.globalPosition),
+      onPanUpdate: (DragUpdateDetails details) =>
+          _updateTilt(details.globalPosition),
+      onPanEnd: (_) => _resetTilt(),
+      onPanCancel: _resetTilt,
+      child: Transform(
+        key: const Key('achievement-badge-transform'),
+        alignment: Alignment.center,
+        transform: Matrix4.identity()
+          ..setEntry(3, 2, 0.0018)
+          ..rotateX(_tiltX)
+          ..rotateY(_tiltY),
+        child: SizedBox.square(
+          dimension: widget.dimension,
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              _AchievementBadgeImage(
+                achievement: widget.achievement,
+                level: widget.level,
+                color: widget.color,
+                dimension: widget.dimension,
+                showProgressMark: false,
+              ),
+              _HolographicBadgeFoil(
+                assetPath: widget.achievement.kind.assetPath,
+                dimension: widget.dimension,
+                tiltX: _tiltX,
+                tiltY: _tiltY,
+                strength: foilStrength,
+              ),
+              _AchievementBadgeProgressMark(
+                achievement: widget.achievement,
+                level: widget.level,
+                color: widget.color,
+                dimension: widget.dimension,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _startTilt(Offset globalPosition) {
+    _returnController.stop();
+    setState(() {
+      _dragStart = globalPosition;
+      _startTiltX = _tiltX;
+      _startTiltY = _tiltY;
+    });
+  }
+
+  void _updateTilt(Offset globalPosition) {
+    final Offset start = _dragStart ?? globalPosition;
+    final Offset delta = globalPosition - start;
+    final double dx = (delta.dx / widget.dimension).clamp(-1.0, 1.0);
+    final double dy = (delta.dy / widget.dimension).clamp(-1.0, 1.0);
+
+    setState(() {
+      _tiltY = (_startTiltY - dx * 0.58).clamp(-0.36, 0.36);
+      _tiltX = (_startTiltX + dy * 0.58).clamp(-0.36, 0.36);
+    });
+  }
+
+  void _resetTilt() {
+    setState(() {
+      _dragStart = null;
+    });
+    _returnX = Tween<double>(begin: _tiltX, end: 0).animate(
+      CurvedAnimation(parent: _returnController, curve: Curves.easeOutCubic),
+    );
+    _returnY = Tween<double>(begin: _tiltY, end: 0).animate(
+      CurvedAnimation(parent: _returnController, curve: Curves.easeOutCubic),
+    );
+    _returnController.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _returnController.dispose();
+    super.dispose();
+  }
+}
+
+class _HolographicBadgeFoil extends StatelessWidget {
+  const _HolographicBadgeFoil({
+    required this.assetPath,
+    required this.dimension,
+    required this.tiltX,
+    required this.tiltY,
+    required this.strength,
+  });
+
+  final String assetPath;
+  final double dimension;
+  final double tiltX;
+  final double tiltY;
+  final double strength;
+
+  @override
+  Widget build(BuildContext context) {
+    final double shift = ((tiltY - tiltX) / 0.72).clamp(-1.0, 1.0);
+    return IgnorePointer(
+      child: Stack(
+        key: const Key('achievement-holographic-foil'),
+        fit: StackFit.expand,
+        children: <Widget>[
+          Opacity(
+            opacity: 0.12 + strength * 0.34,
+            child: _maskedGradient(
+              LinearGradient(
+                begin: Alignment(-1.2 + shift * 0.75, -1),
+                end: Alignment(1.2 + shift * 0.75, 1),
+                colors: const <Color>[
+                  Color(0xFFFF2BD6),
+                  Color(0xFF35E7FF),
+                  Color(0xFFFFF36A),
+                  Color(0xFF69FF97),
+                  Color(0xFF7C5CFF),
+                  Color(0xFFFF2BD6),
+                ],
+              ),
+            ),
+          ),
+          Opacity(
+            opacity: 0.05 + strength * 0.34,
+            child: _maskedGradient(
+              LinearGradient(
+                begin: Alignment(-1.8 + shift * 1.4, -1),
+                end: Alignment(-0.2 + shift * 1.4, 1),
+                colors: const <Color>[
+                  Colors.transparent,
+                  Color(0x99FFFFFF),
+                  Colors.white,
+                  Color(0x99FFFFFF),
+                  Colors.transparent,
+                ],
+                stops: const <double>[0, 0.42, 0.5, 0.58, 1],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _maskedGradient(Gradient gradient) {
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: gradient.createShader,
+      child: Image.asset(
+        assetPath,
+        width: dimension,
+        height: dimension,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.none,
+        cacheWidth: (dimension * 2).round(),
+        cacheHeight: (dimension * 2).round(),
+        color: Colors.white,
+        colorBlendMode: BlendMode.srcIn,
+      ),
+    );
+  }
+}
+
 class _AchievementBadgeImage extends StatelessWidget {
   const _AchievementBadgeImage({
     required this.achievement,
     required this.level,
     required this.color,
+    this.dimension = 92,
+    this.showProgressMark = true,
   });
 
   static const ColorFilter _lockedFilter = ColorFilter.matrix(<double>[
@@ -858,32 +1391,35 @@ class _AchievementBadgeImage extends StatelessWidget {
   final AchievementBadgeProgress achievement;
   final String level;
   final Color color;
+  final double dimension;
+  final bool showProgressMark;
 
   @override
   Widget build(BuildContext context) {
+    final double scale = dimension / 92;
     Widget image = Image.asset(
       achievement.kind.assetPath,
-      width: 92,
-      height: 92,
+      width: dimension,
+      height: dimension,
       fit: BoxFit.contain,
       filterQuality: FilterQuality.none,
-      cacheWidth: 184,
-      cacheHeight: 184,
+      cacheWidth: (dimension * 2).round(),
+      cacheHeight: (dimension * 2).round(),
       errorBuilder: (BuildContext context, Object error, StackTrace? trace) {
         return Container(
-          width: 92,
-          height: 92,
+          width: dimension,
+          height: dimension,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: PixelTheme.bgDark,
-            border: Border.all(color: PixelTheme.textGray, width: 2),
+            border: Border.all(color: PixelTheme.textGray, width: 2 * scale),
           ),
           child: Text(
             '?',
             style: TextStyle(
               color: PixelTheme.textGray,
               fontFamily: 'Unifont',
-              fontSize: 24,
+              fontSize: 24 * scale,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -898,31 +1434,17 @@ class _AchievementBadgeImage extends StatelessWidget {
     }
 
     return SizedBox.square(
-      dimension: 92,
+      dimension: dimension,
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
           image,
-          if (level.isNotEmpty)
-            Positioned(
-              left: 18,
-              right: 18,
-              bottom: 7,
-              child: Text(
-                level,
-                maxLines: 1,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: color,
-                  fontFamily: 'Unifont',
-                  fontSize: 14,
-                  height: 1,
-                  fontWeight: FontWeight.w900,
-                  shadows: const <Shadow>[
-                    Shadow(color: Colors.black, offset: Offset(2, 2)),
-                  ],
-                ),
-              ),
+          if (showProgressMark)
+            _AchievementBadgeProgressMark(
+              achievement: achievement,
+              level: level,
+              color: color,
+              dimension: dimension,
             ),
         ],
       ),
@@ -930,20 +1452,88 @@ class _AchievementBadgeImage extends StatelessWidget {
   }
 }
 
-class _PixelAchievementHeaderGlyph extends StatelessWidget {
-  const _PixelAchievementHeaderGlyph();
+class _AchievementBadgeProgressMark extends StatelessWidget {
+  const _AchievementBadgeProgressMark({
+    required this.achievement,
+    required this.level,
+    required this.color,
+    required this.dimension,
+  });
+
+  final AchievementBadgeProgress achievement;
+  final String level;
+  final Color color;
+  final double dimension;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox.square(
-      dimension: 14,
-      child: CustomPaint(painter: const _PixelAchievementHeaderGlyphPainter()),
+    final double scale = dimension / 92;
+    if (level.isNotEmpty) {
+      return Positioned(
+        left: 18 * scale,
+        right: 18 * scale,
+        bottom: 10 * scale,
+        child: Text(
+          key: ValueKey<String>('achievement-level-${achievement.kind.name}'),
+          level,
+          maxLines: 1,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: color,
+            fontFamily: 'Unifont',
+            fontSize: 14 * scale,
+            height: 1,
+            fontWeight: FontWeight.w900,
+            shadows: <Shadow>[
+              Shadow(color: Colors.black, offset: Offset(2 * scale, 2 * scale)),
+            ],
+          ),
+        ),
+      );
+    }
+    if (!achievement.isUnlocked) {
+      return const SizedBox.shrink();
+    }
+    return Positioned(
+      left: 18 * scale,
+      right: 18 * scale,
+      bottom: 8 * scale,
+      child: Center(
+        child: _PixelAchievementTrophy(
+          key: ValueKey<String>(
+            'achievement-complete-${achievement.kind.name}',
+          ),
+          dimension: 16 * scale,
+          color: color,
+        ),
+      ),
     );
   }
 }
 
-class _PixelAchievementHeaderGlyphPainter extends CustomPainter {
-  const _PixelAchievementHeaderGlyphPainter();
+class _PixelAchievementTrophy extends StatelessWidget {
+  const _PixelAchievementTrophy({super.key, this.dimension = 14, this.color});
+
+  final double dimension;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: dimension,
+      child: CustomPaint(
+        painter: _PixelAchievementTrophyPainter(
+          color: color ?? PixelTheme.accent,
+        ),
+      ),
+    );
+  }
+}
+
+class _PixelAchievementTrophyPainter extends CustomPainter {
+  const _PixelAchievementTrophyPainter({required this.color});
+
+  final Color color;
 
   static const List<String> _pattern = <String>[
     '01111110',
@@ -960,7 +1550,7 @@ class _PixelAchievementHeaderGlyphPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final Paint paint = Paint()
       ..isAntiAlias = false
-      ..color = PixelTheme.accent
+      ..color = color
       ..style = PaintingStyle.fill;
     final double cell = size.shortestSide / 8;
     for (int y = 0; y < _pattern.length; y += 1) {
@@ -973,7 +1563,9 @@ class _PixelAchievementHeaderGlyphPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_PixelAchievementHeaderGlyphPainter oldDelegate) => false;
+  bool shouldRepaint(_PixelAchievementTrophyPainter oldDelegate) {
+    return oldDelegate.color != color;
+  }
 }
 
 class _BoardHeader extends StatelessWidget {
@@ -1033,82 +1625,6 @@ class _BoardHeader extends StatelessWidget {
           Text(
             context.l10n.tr('scoreboardHint'),
             style: TextStyle(color: PixelTheme.textWhite),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatRow extends StatelessWidget {
-  const _StatRow({
-    required this.shownRanks,
-    required this.topScore,
-    required this.rankThreshold,
-  });
-
-  final int shownRanks;
-  final int topScore;
-  final int rankThreshold;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _StatCard(
-            label: context.l10n.tr('shownRanks'),
-            value: '$shownRanks',
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _StatCard(
-            label: context.l10n.tr('prize'),
-            value: rankThreshold <= 0 ? '-' : '$rankThreshold',
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _StatCard(label: context.l10n.tr('top'), value: '$topScore'),
-        ),
-      ],
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  const _StatCard({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: PixelTheme.bgMid,
-        border: Border.all(color: PixelTheme.border, width: 2),
-      ),
-      child: Column(
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: PixelTheme.textGray,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              color: PixelTheme.accent,
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
           ),
         ],
       ),
@@ -1178,6 +1694,10 @@ class _RankPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
+          if (_showPagination) ...<Widget>[
+            _pagination(keyPrefix: 'scoreboard-top'),
+            const SizedBox(height: 14),
+          ],
           if (ranks.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 24),
@@ -1207,17 +1727,22 @@ class _RankPanel extends StatelessWidget {
             ),
           if (_showPagination) ...<Widget>[
             const SizedBox(height: 14),
-            _ScoreboardPagination(
-              currentPage: currentPage,
-              totalPages: totalPages,
-              previousEnabled: currentPage > 0 && !isPageLoading,
-              nextEnabled: hasNextPage && !isPageLoading,
-              onPrevious: onPreviousPage,
-              onNext: onNextPage,
-            ),
+            _pagination(),
           ],
         ],
       ),
+    );
+  }
+
+  Widget _pagination({String keyPrefix = 'scoreboard'}) {
+    return _ScoreboardPagination(
+      keyPrefix: keyPrefix,
+      currentPage: currentPage,
+      totalPages: totalPages,
+      previousEnabled: currentPage > 0 && !isPageLoading,
+      nextEnabled: hasNextPage && !isPageLoading,
+      onPrevious: onPreviousPage,
+      onNext: onNextPage,
     );
   }
 }
@@ -1338,6 +1863,7 @@ class _RankTile extends StatelessWidget {
 
 class _ScoreboardPagination extends StatelessWidget {
   const _ScoreboardPagination({
+    this.keyPrefix = 'scoreboard',
     required this.currentPage,
     required this.totalPages,
     required this.previousEnabled,
@@ -1346,6 +1872,7 @@ class _ScoreboardPagination extends StatelessWidget {
     required this.onNext,
   });
 
+  final String keyPrefix;
   final int currentPage;
   final int? totalPages;
   final bool previousEnabled;
@@ -1368,7 +1895,7 @@ class _ScoreboardPagination extends StatelessWidget {
       children: <Widget>[
         Expanded(
           child: _PixelPageButton(
-            key: const Key('scoreboard-previous-page'),
+            key: ValueKey<String>('$keyPrefix-previous-page'),
             label: context.l10n.tr('previousPage'),
             leading: true,
             enabled: previousEnabled,
@@ -1377,7 +1904,7 @@ class _ScoreboardPagination extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Container(
-          key: const Key('scoreboard-page-label'),
+          key: ValueKey<String>('$keyPrefix-page-label'),
           constraints: const BoxConstraints(minWidth: 76),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           alignment: Alignment.center,
@@ -1398,7 +1925,7 @@ class _ScoreboardPagination extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: _PixelPageButton(
-            key: const Key('scoreboard-next-page'),
+            key: ValueKey<String>('$keyPrefix-next-page'),
             label: context.l10n.tr('nextPage'),
             leading: false,
             enabled: nextEnabled,

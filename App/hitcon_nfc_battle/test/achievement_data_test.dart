@@ -1,9 +1,58 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 
 import 'package:hitcon_nfc_battle/config/achievement_config.dart';
+import 'package:hitcon_nfc_battle/l10n/strings_en.dart';
+import 'package:hitcon_nfc_battle/l10n/strings_zh_tw.dart';
 import 'package:hitcon_nfc_battle/services/achievement_data.dart';
 
 void main() {
+  test('every achievement has localized unlock requirements', () {
+    for (final AchievementKind kind in AchievementKind.values) {
+      expect(appStringsEn, contains(kind.requirementKey));
+      expect(appStringsZhTw, contains(kind.requirementKey));
+    }
+  });
+
+  test('tier requirements explain every level with an explicit unit', () {
+    const List<String> tierKeys = <String>[
+      'achievementTierPlayerCards',
+      'achievementTierSponsorStamps',
+      'achievementTierCommunityStamps',
+      'achievementTierRanking',
+    ];
+    for (final String key in tierKeys) {
+      expect(appStringsEn[key], contains('{level}'));
+      expect(appStringsEn[key], contains('{target}'));
+      expect(appStringsZhTw[key], contains('等級 {level}'));
+      expect(appStringsZhTw[key], contains('{target}'));
+    }
+    expect(
+      appStringsZhTw['achievementRequirementSponsorScout'],
+      isNot(contains('等級門檻')),
+    );
+  });
+
+  test('every displayed achievement badge has a transparent exterior', () {
+    for (final AchievementKind kind in AchievementKind.values) {
+      final img.Image? badge = img.decodePng(
+        File(kind.assetPath).readAsBytesSync(),
+      );
+      expect(badge, isNotNull, reason: kind.assetPath);
+
+      final img.Image decoded = badge!;
+      expect(decoded.numChannels, 4, reason: kind.assetPath);
+      expect(decoded.getPixel(0, 0).a, 0, reason: kind.assetPath);
+      expect(
+        decoded.getPixel(decoded.width ~/ 2, decoded.height ~/ 2).a,
+        255,
+        reason: kind.assetPath,
+      );
+    }
+  });
+
   test('evaluates every achievement from the available app data', () {
     final List<AchievementBadgeProgress> achievements = evaluateAchievements(
       AchievementSnapshot(

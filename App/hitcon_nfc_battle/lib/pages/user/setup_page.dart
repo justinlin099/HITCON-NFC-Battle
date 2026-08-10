@@ -16,6 +16,7 @@ import 'emoji_catalog.dart';
 import 'https_link_input.dart';
 import 'my_card_editor_page.dart';
 import 'ntag_pairing_page.dart';
+import 'panasonic_support_mark.dart';
 import 'pixel_card_face.dart';
 import 'pixel_theme.dart';
 
@@ -788,30 +789,45 @@ class _SetupPageState extends State<SetupPage> {
 
     final double width = large ? 280 : 240;
     final double height = width / (53.98 / 85.60);
-    final Widget card = PixelCardFace(
-      title: title,
-      attributeEmoji: _attributeEmoji,
-      attributeLabel: _attributeLabel,
-      cardColor: _cardColor,
-      showText: true,
-      titleFontSize: large ? 20 : 17,
-      titleFontWeight: FontWeight.w900,
-      attributeFontSize: large ? 11 : 10,
-      emojiFontSize: large ? 15 : 13,
-      titleMaxLines: 2,
-      attributeMaxLines: 3,
-      stackAttributePairs: true,
-      watermarkScale: 1.6,
-      imageToTitleSpacing: 10,
-      extraContentSpacing: 10,
-      image: _avatarImage(),
-      extraContent: Text(
-        bio,
-        style: TextStyle(
-          color: PixelTheme.textWhite,
-          fontFamily: 'Unifont',
-          fontSize: large ? 11 : 10,
-          height: 1.35,
+    final double expandedCardScale =
+        width / ExpandedPixelCardStyle.referenceCardWidth;
+    final Widget card = PanasonicBrandingBuilder(
+      builder: (context, showPanasonicLogo) => PixelCardFace(
+        title: title,
+        attributeEmoji: _attributeEmoji,
+        attributeLabel: _attributeLabel,
+        cardColor: _cardColor,
+        showText: true,
+        titleFontSize: large ? 20 : 17,
+        titleFontWeight: FontWeight.w900,
+        attributeFontSize: large ? 11 : 10,
+        emojiFontSize: large ? 15 : 13,
+        titleMaxLines: 2,
+        attributeMaxLines: 3,
+        stackAttributePairs: true,
+        watermarkScale: 1.6,
+        watermarkFooterHeight: showPanasonicLogo
+            ? ExpandedPixelCardStyle.myCardWatermarkFooterHeight *
+                  expandedCardScale
+            : 0,
+        imageToTitleSpacing: 10,
+        extraContentSpacing: 10,
+        image: _avatarImage(),
+        bottomLeftWatermark: showPanasonicLogo
+            ? ExpandedCardPanasonicMark(
+                cardWidth: width,
+                scale: expandedCardScale,
+                color: PixelTheme.textWhite.withValues(alpha: 0.18),
+              )
+            : null,
+        extraContent: Text(
+          bio,
+          style: TextStyle(
+            color: PixelTheme.textWhite,
+            fontFamily: 'Unifont',
+            fontSize: large ? 11 : 10,
+            height: 1.35,
+          ),
         ),
       ),
     );

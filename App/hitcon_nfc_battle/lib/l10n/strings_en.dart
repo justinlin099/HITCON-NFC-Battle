@@ -15,6 +15,39 @@ const Map<String, String> appStringsEn = <String, String>{
   'achievementPrizeUnlocked': 'PRIZE UNLOCKED',
   'achievementPhishing': 'PHISHING',
   'achievementSolderMaster': 'SOLDER MASTER',
+  'achievementHowToUnlock': 'HOW TO UNLOCK',
+  'achievementTapForDetails': 'Tap for unlock requirements.',
+  'achievementTierPlayerCards':
+      'Level {level}: total player cards required — {target}',
+  'achievementTierSponsorStamps':
+      'Level {level}: total sponsor stamps required — {target}',
+  'achievementTierCommunityStamps':
+      'Level {level}: total community stamps required — {target}',
+  'achievementTierRanking': 'Level {level}: final rank required — top {target}',
+  'achievementRequirementHelloWorld':
+      'Complete your display name, pixel avatar, and bio.',
+  'achievementRequirementNfcOnline':
+      'Pair a physical NFC badge with your profile.',
+  'achievementRequirementFirstContact':
+      'Collect your first player card by scanning their NFC badge.',
+  'achievementRequirementPacketCollector':
+      'Player-card requirements by level:\n{tiers}',
+  'achievementRequirementSponsorScout':
+      'Sponsor-stamp requirements by level:\n{tiers}',
+  'achievementRequirementCommunityExplorer':
+      'Community-stamp requirements by level:\n{tiers}',
+  'achievementRequirementFullStackSocial':
+      'Collect at least one ATTENDEE, STAFF, SPONSOR, and COMMUNITY card.',
+  'achievementRequirementStampMaster':
+      'Complete the stamp mission and qualify for the stamp prize.',
+  'achievementRequirementTopRank':
+      'Required final ranking for each level:\n{tiers}',
+  'achievementRequirementPrizeUnlocked':
+      'Qualify for either a stamp prize or a ranking prize.',
+  'achievementRequirementPhishing':
+      'Open a player card through its link instead of scanning its physical NFC tag.',
+  'achievementRequirementSolderMaster':
+      'Complete the event soldering challenge.',
   'achievementUnlocked': 'UNLOCKED',
   'achievementLocked': 'LOCKED',
   'achievementPendingData': 'WAITING FOR DATA',
@@ -36,6 +69,26 @@ const Map<String, String> appStringsEn = <String, String>{
   'unknown': 'Unknown',
   'cancel': 'Cancel',
   'confirm': 'Confirm',
+  'share': 'SHARE',
+  'socialSharePreviewTitle': 'SHARE YOUR WIN',
+  'socialSharePreviewHint': 'Preview of the 4:5 social image',
+  'socialShareGenerating': 'CREATING...',
+  'socialShareFailed': 'Could not create the share image. Please try again.',
+  'socialShareAchievementLabel': 'ACHIEVEMENT UNLOCKED',
+  'socialShareAchievementHeadline': 'Unlocked {achievement}',
+  'socialShareAchievementText':
+      'I unlocked “{achievement}” in HITCON NFC Battle! #HITCON #NFCBattle',
+  'socialShareRankHeadline': 'Scoreboard rank #{rank}',
+  'socialShareRankText':
+      'I reached rank #{rank} in HITCON NFC Battle! #HITCON #NFCBattle',
+  'socialShareCardLabel': 'CARD COLLECTED',
+  'socialShareCardHeadline': 'Collected {card}',
+  'socialShareCardText':
+      'I collected the “{card}” card in HITCON NFC Battle! #HITCON #NFCBattle',
+  'socialShareCollectionLabel': 'COLLECTION PROGRESS',
+  'socialShareCollectionHeadline': '{count} cards collected',
+  'socialShareCollectionText':
+      'I have collected {count} cards in HITCON NFC Battle! #HITCON #NFCBattle',
   'startScan': 'Start scan',
   'stopScan': 'Stop scan',
   'scanAgain': 'Scan again',
@@ -102,9 +155,6 @@ const Map<String, String> appStringsEn = <String, String>{
   'redeem': 'REDEEM',
   'locked': 'LOCKED',
   'players': 'PLAYERS',
-  'shownRanks': 'SHOWN',
-  'prize': 'PRIZE',
-  'top': 'TOP',
   'sync': 'SYNC',
   'frozen': 'FROZEN',
   'scoreboardHint': 'Pull down to refresh the latest battle ranking.',
