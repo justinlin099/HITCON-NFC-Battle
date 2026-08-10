@@ -10,6 +10,7 @@ import 'local_collection_store.dart';
 import 'local_profile_store.dart';
 import 'nfc_battle_api_client.dart';
 import 'ntag_security_service.dart';
+import 'user_profile_fields.dart';
 
 enum UserRole { admin, user, eventStaff, unknown }
 
@@ -542,7 +543,9 @@ class AuthService {
     }
   }
 
-  Future<Map<String, dynamic>?> fetchMyPrize() async {
+  Future<Map<String, dynamic>?> fetchMyPrize({
+    void Function(Object error)? onError,
+  }) async {
     if (!_ensureSession()) {
       return null;
     }
@@ -555,6 +558,7 @@ class AuthService {
       );
       return _jsonMap(result['data']);
     } catch (e) {
+      onError?.call(e);
       _lastApiErrorCode = e is ApiException ? e.code : null;
       _log('Error fetching prize result: $e');
       return null;
@@ -1038,6 +1042,7 @@ class AuthService {
 
   Map<String, dynamic> _normalizeProfile(Object? raw) {
     final Map<String, dynamic> profile = _jsonMap(raw);
+    final int? phishingCount = readPhishingCount(profile);
     final CardBioData cardBio = _cardBioCodec.decode(profile['bio']);
     final String emoji =
         profile['attribute_emoji'] as String? ??
@@ -1064,6 +1069,11 @@ class AuthService {
     if (physicalId != null) {
       normalized['physical_id'] = physicalId;
       normalized['paired_ntag_uid'] = physicalId;
+    }
+    if (phishingCount == null) {
+      normalized.remove('phishing_count');
+    } else {
+      normalized['phishing_count'] = phishingCount;
     }
     return normalized;
   }
@@ -1270,6 +1280,7 @@ class AuthService {
   UserRole get currentRole => _currentRole;
   String? get jwtToken => _jwtToken;
   Map<String, dynamic>? get userProfile => _userProfile;
+  int? get phishingCount => readPhishingCount(_userProfile);
   String? get lastAuthError => _lastAuthError;
   String? get lastApiErrorCode => _lastApiErrorCode;
   String? get lastNtagSecretError => _lastNtagSecretError;

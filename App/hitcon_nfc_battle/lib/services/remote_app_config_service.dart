@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/achievement_config.dart';
 import '../config/app_config.dart';
 
 typedef RemoteConfigLoader = Future<String> Function(Uri uri);
@@ -26,6 +27,9 @@ class RemoteAppConfigService {
       'remote_show_panasonic_logo_v1';
   static const String _cachedShowPanasonicLogoOnPrintKey =
       'remote_show_panasonic_logo_on_print_v1';
+  static const String _cachedManualUrlKey = 'remote_manual_url_v1';
+  static const String _cachedAchievementRulesKey =
+      'remote_achievement_rules_v1';
   static const Duration _timeout = Duration(seconds: 4);
   static const int _maxConfigBytes = 16 * 1024;
 
@@ -86,18 +90,43 @@ class RemoteAppConfigService {
     AppConfig.applyRemoteShowPanasonicLogoOnPrint(
       cachedShowPanasonicLogoOnPrint ?? cachedShowPanasonicLogo ?? true,
     );
+    final String? cachedManualUrl = prefs.getString(_cachedManualUrlKey);
+    if (!AppConfig.tryApplyRemoteManualUrl(cachedManualUrl)) {
+      AppConfig.tryApplyRemoteManualUrl(null);
+      await prefs.remove(_cachedManualUrlKey);
+    }
+    final String? cachedAchievementRules = prefs.getString(
+      _cachedAchievementRulesKey,
+    );
+    if (cachedAchievementRules == null) {
+      AppConfig.applyRemoteAchievementRules(null);
+    } else {
+      try {
+        AppConfig.applyRemoteAchievementRules(
+          _parseAchievementRules(jsonDecode(cachedAchievementRules)),
+        );
+      } catch (_) {
+        AppConfig.applyRemoteAchievementRules(null);
+        await prefs.remove(_cachedAchievementRulesKey);
+      }
+    }
 
     try {
       final String document = await _loader(configUri).timeout(_timeout);
       final _RemoteAppConfig config = _parseConfig(document);
+      if (!AppConfig.isTrustedRemoteManualUrl(config.manualUrl)) {
+        throw const FormatException('Remote manual URL is not trusted.');
+      }
       if (!AppConfig.tryApplyRemoteApiBaseUrl(config.apiBaseUrl)) {
         throw const FormatException('Remote API URL is not trusted.');
       }
+      AppConfig.tryApplyRemoteManualUrl(config.manualUrl);
       AppConfig.applyRemoteAllowUserTagUnlock(config.allowUserTagUnlock);
       AppConfig.applyRemoteShowPanasonicLogo(config.showPanasonicLogo);
       AppConfig.applyRemoteShowPanasonicLogoOnPrint(
         config.showPanasonicLogoOnPrint,
       );
+      AppConfig.applyRemoteAchievementRules(config.achievementRules);
       await prefs.setString(_cachedApiBaseUrlKey, AppConfig.apiBaseUrl);
       await prefs.setBool(
         _cachedAllowUserTagUnlockKey,
@@ -111,6 +140,21 @@ class RemoteAppConfigService {
         _cachedShowPanasonicLogoOnPrintKey,
         AppConfig.showPanasonicLogoOnPrint,
       );
+      final String? manualUrl = AppConfig.manualUrl;
+      if (manualUrl == null) {
+        await prefs.remove(_cachedManualUrlKey);
+      } else {
+        await prefs.setString(_cachedManualUrlKey, manualUrl);
+      }
+      final AchievementRules? achievementRules = config.achievementRules;
+      if (achievementRules == null) {
+        await prefs.remove(_cachedAchievementRulesKey);
+      } else {
+        await prefs.setString(
+          _cachedAchievementRulesKey,
+          jsonEncode(achievementRules.toJson()),
+        );
+      }
       _log('Remote API config updated: ${AppConfig.apiBaseUrl}');
       return true;
     } catch (error) {
@@ -143,6 +187,11 @@ class RemoteAppConfigService {
     if (showPanasonicLogoOnPrint != null && showPanasonicLogoOnPrint is! bool) {
       throw const FormatException('Invalid print Panasonic logo setting.');
     }
+    final Object? manualUrl = decoded['manual_url'];
+    if (manualUrl != null &&
+        (manualUrl is! String || manualUrl.trim().isEmpty)) {
+      throw const FormatException('Invalid manual URL setting.');
+    }
     final bool appPanasonicLogo = showPanasonicLogo as bool? ?? true;
     return _RemoteAppConfig(
       apiBaseUrl: value.trim(),
@@ -150,6 +199,62 @@ class RemoteAppConfigService {
       showPanasonicLogo: appPanasonicLogo,
       showPanasonicLogoOnPrint:
           showPanasonicLogoOnPrint as bool? ?? appPanasonicLogo,
+      manualUrl: (manualUrl as String?)?.trim(),
+      achievementRules: _parseAchievementRules(decoded['achievement_rules']),
+    );
+  }
+
+  AchievementRules? _parseAchievementRules(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is! Map) {
+      throw const FormatException('Invalid achievement rules.');
+    }
+
+    return AchievementRules(
+      sponsorScout: _parseAchievementRule(
+        value['sponsor_scout'],
+        'sponsor_scout',
+      ),
+      communityExplorer: _parseAchievementRule(
+        value['community_explorer'],
+        'community_explorer',
+      ),
+    );
+  }
+
+  AchievementRule _parseAchievementRule(Object? value, String name) {
+    if (value == null) {
+      return AchievementRule.disabled();
+    }
+    if (value is! Map || value['enabled'] is! bool) {
+      throw FormatException('Invalid $name achievement rule.');
+    }
+
+    final Object? rawThresholds = value['thresholds'];
+    if (rawThresholds is! List || rawThresholds.length > 10) {
+      throw FormatException('Invalid $name achievement thresholds.');
+    }
+
+    final List<int> thresholds = <int>[];
+    for (final Object? rawThreshold in rawThresholds) {
+      if (rawThreshold is! num ||
+          !rawThreshold.isFinite ||
+          rawThreshold <= 0 ||
+          rawThreshold != rawThreshold.toInt()) {
+        throw FormatException('Invalid $name achievement threshold.');
+      }
+      thresholds.add(rawThreshold.toInt());
+    }
+    if (thresholds.toSet().length != thresholds.length) {
+      throw FormatException('Duplicate $name achievement thresholds.');
+    }
+    thresholds.sort();
+
+    return AchievementRule(
+      enabled: value['enabled'] as bool,
+      thresholds: thresholds,
     );
   }
 
@@ -212,10 +317,14 @@ class _RemoteAppConfig {
     required this.allowUserTagUnlock,
     required this.showPanasonicLogo,
     required this.showPanasonicLogoOnPrint,
+    required this.manualUrl,
+    required this.achievementRules,
   });
 
   final String apiBaseUrl;
   final bool allowUserTagUnlock;
   final bool showPanasonicLogo;
   final bool showPanasonicLogoOnPrint;
+  final String? manualUrl;
+  final AchievementRules? achievementRules;
 }

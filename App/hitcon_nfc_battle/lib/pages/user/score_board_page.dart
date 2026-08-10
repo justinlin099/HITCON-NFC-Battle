@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../config/achievement_config.dart';
+import '../../config/app_config.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
+import '../../services/achievement_data.dart';
 import '../../services/local_scoreboard_store.dart';
 import '../../services/nfc_battle_api_client.dart';
 import '../../services/scoreboard_data.dart';
@@ -11,9 +14,20 @@ import 'pixel_theme.dart';
 import 'user_collection_page.dart';
 
 class ScoreBoardPage extends StatefulWidget {
-  const ScoreBoardPage({super.key, this.scheme});
+  const ScoreBoardPage({
+    super.key,
+    this.scheme,
+    this.stampMission,
+    this.profile,
+    this.collectionCards,
+    this.prizeResult,
+  });
 
   final PixelScheme? scheme;
+  final Map<String, dynamic>? stampMission;
+  final Map<String, dynamic>? profile;
+  final List<Map<String, dynamic>>? collectionCards;
+  final Map<String, dynamic>? prizeResult;
 
   @override
   State<ScoreBoardPage> createState() => _ScoreBoardPageState();
@@ -40,11 +54,60 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
   int? _totalCount;
   bool _hasMore = false;
   bool _frozen = false;
+  Map<String, dynamic>? _stampMission;
+  Map<String, dynamic>? _profile;
+  List<Map<String, dynamic>>? _collectionCards;
+  Map<String, dynamic>? _prizeResult;
 
   @override
   void initState() {
     super.initState();
+    final Map<String, dynamic>? initialMission = widget.stampMission;
+    if (initialMission != null) {
+      _stampMission = Map<String, dynamic>.from(initialMission);
+    }
+    final Map<String, dynamic>? initialProfile = widget.profile;
+    if (initialProfile != null) {
+      _profile = Map<String, dynamic>.from(initialProfile);
+    }
+    final List<Map<String, dynamic>>? initialCards = widget.collectionCards;
+    if (initialCards != null) {
+      _collectionCards = initialCards
+          .map(Map<String, dynamic>.from)
+          .toList(growable: false);
+    }
+    final Map<String, dynamic>? initialPrize = widget.prizeResult;
+    if (initialPrize != null) {
+      _prizeResult = Map<String, dynamic>.from(initialPrize);
+    }
     _loadBoard();
+  }
+
+  @override
+  void didUpdateWidget(covariant ScoreBoardPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final Map<String, dynamic>? updatedMission = widget.stampMission;
+    if (updatedMission != null &&
+        !identical(updatedMission, oldWidget.stampMission)) {
+      _stampMission = Map<String, dynamic>.from(updatedMission);
+    }
+    final Map<String, dynamic>? updatedProfile = widget.profile;
+    if (updatedProfile != null &&
+        !identical(updatedProfile, oldWidget.profile)) {
+      _profile = Map<String, dynamic>.from(updatedProfile);
+    }
+    final List<Map<String, dynamic>>? updatedCards = widget.collectionCards;
+    if (updatedCards != null &&
+        !identical(updatedCards, oldWidget.collectionCards)) {
+      _collectionCards = updatedCards
+          .map(Map<String, dynamic>.from)
+          .toList(growable: false);
+    }
+    final Map<String, dynamic>? updatedPrize = widget.prizeResult;
+    if (updatedPrize != null &&
+        !identical(updatedPrize, oldWidget.prizeResult)) {
+      _prizeResult = Map<String, dynamic>.from(updatedPrize);
+    }
   }
 
   @override
@@ -67,6 +130,9 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
     });
     Object? boardError;
     Object? meError;
+    Object? missionError;
+    Object? profileError;
+    Object? prizeError;
     try {
       final String? userId = _authService.currentUserId;
       if (userId != null) {
@@ -119,12 +185,42 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
               },
             )
           : Future<Map<String, dynamic>?>.value(null);
+      final Future<Map<String, dynamic>?> missionFuture = refreshMe
+          ? _authService.fetchStampMission(
+              onError: (Object error) {
+                missionError = error;
+              },
+            )
+          : Future<Map<String, dynamic>?>.value(null);
+      final Future<Map<String, dynamic>?> profileFuture = refreshMe
+          ? _authService.fetchUserProfile(
+              onError: (Object error) {
+                profileError = error;
+              },
+            )
+          : Future<Map<String, dynamic>?>.value(null);
+      final Future<Map<String, dynamic>?> prizeFuture = refreshMe
+          ? _authService.fetchMyPrize(
+              onError: (Object error) {
+                prizeError = error;
+              },
+            )
+          : Future<Map<String, dynamic>?>.value(null);
       final List<Map<String, dynamic>?> results =
           await Future.wait<Map<String, dynamic>?>(
-            <Future<Map<String, dynamic>?>>[boardFuture, meFuture],
+            <Future<Map<String, dynamic>?>>[
+              boardFuture,
+              meFuture,
+              missionFuture,
+              profileFuture,
+              prizeFuture,
+            ],
           );
       final Map<String, dynamic>? board = results[0];
       final Map<String, dynamic>? me = results[1];
+      final Map<String, dynamic>? stampMission = results[2];
+      final Map<String, dynamic>? profile = results[3];
+      final Map<String, dynamic>? prizeResult = results[4];
       if (board != null && userId != null) {
         await _localStore.savePage(
           userId,
@@ -149,9 +245,21 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
         if (me != null) {
           myRankMarker = _applyMyRank(me, fallbackUserId: userId ?? '');
         }
+        if (stampMission != null) {
+          _stampMission = stampMission;
+        }
+        if (profile != null) {
+          _profile = profile;
+        }
+        if (prizeResult != null) {
+          _prizeResult = prizeResult;
+        }
         _isOffline = <Object?>[
           boardError,
           meError,
+          missionError,
+          profileError,
+          prizeError,
         ].whereType<Object>().any(isNetworkConnectionError);
       });
       if (myRankMarker != null && userId != null) {
@@ -427,6 +535,34 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
                       ),
                       const SizedBox(height: 12),
                     ],
+                    ValueListenableBuilder<AchievementRules?>(
+                      valueListenable: AppConfig.achievementRulesListenable,
+                      builder:
+                          (
+                            BuildContext context,
+                            AchievementRules? rules,
+                            Widget? child,
+                          ) {
+                            final List<AchievementBadgeProgress> achievements =
+                                evaluateAchievements(
+                                  AchievementSnapshot(
+                                    profile: _profile,
+                                    collectionCards: _collectionCards,
+                                    stampMission: _stampMission,
+                                    prizeResult: _prizeResult,
+                                    rank: _myRank?.rank,
+                                    scoreboardFrozen: _frozen,
+                                    remoteRules: rules,
+                                  ),
+                                );
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _ScoreboardAchievementPanel(
+                                achievements: achievements,
+                              ),
+                            );
+                          },
+                    ),
                     _BoardHeader(isLoading: _isLoading, frozen: _frozen),
                     const SizedBox(height: 12),
                     _StatRow(
@@ -518,6 +654,326 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
     }
     return false;
   }
+}
+
+class _ScoreboardAchievementPanel extends StatelessWidget {
+  const _ScoreboardAchievementPanel({required this.achievements});
+
+  final List<AchievementBadgeProgress> achievements;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('scoreboard-achievements'),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: PixelTheme.bgMid,
+        border: Border.all(color: PixelTheme.accentBlue, width: 2),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(4, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const _PixelAchievementHeaderGlyph(),
+              const SizedBox(width: 7),
+              Text(
+                context.l10n.tr('achievements'),
+                style: TextStyle(
+                  color: PixelTheme.accent,
+                  fontFamily: 'Unifont',
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: achievements
+                  .map(
+                    (AchievementBadgeProgress achievement) => Padding(
+                      padding: const EdgeInsets.only(right: 9),
+                      child: _ScoreboardAchievementBadge(
+                        key: ValueKey<String>(
+                          'scoreboard-achievement-${achievement.kind.name}',
+                        ),
+                        achievement: achievement,
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ScoreboardAchievementBadge extends StatelessWidget {
+  const _ScoreboardAchievementBadge({super.key, required this.achievement});
+
+  final AchievementBadgeProgress achievement;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool unlocked = achievement.isUnlocked;
+    final bool available = achievement.dataAvailable;
+    final Color color = unlocked
+        ? PixelTheme.accent
+        : available
+        ? PixelTheme.textGray
+        : PixelTheme.textGray.withValues(alpha: 0.65);
+    final String title = context.l10n.tr(achievement.kind.titleKey);
+    final String status = !available
+        ? context.l10n.tr('achievementPendingData')
+        : context.l10n.tr(
+            unlocked ? 'achievementUnlocked' : 'achievementLocked',
+          );
+    final int? target = achievement.activeTarget;
+    final String progress = _progressLabel(context, target);
+    final String level = achievement.isTiered
+        ? achievementRomanLevel(achievement.displayedLevel)
+        : '';
+    final int? nextLevel = achievement.nextLevel;
+    final String detail = achievement.isTiered
+        ? achievement.isMaxLevel
+              ? context.l10n.tr('achievementMaxLevel')
+              : achievement.unlockedLevel == 0
+              ? progress
+              : '${context.l10n.tr('achievementNextLevel')} '
+                    '${achievementRomanLevel(nextLevel!)}  $progress'
+        : progress;
+    final String semanticTitle = level.isEmpty ? title : '$title $level';
+
+    return Semantics(
+      label: '$semanticTitle, $status${detail.isEmpty ? '' : ', $detail'}',
+      child: SizedBox(
+        width: 118,
+        child: Column(
+          children: <Widget>[
+            _AchievementBadgeImage(
+              achievement: achievement,
+              level: level,
+              color: color,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: color,
+                fontFamily: 'Unifont',
+                fontSize: 9.5,
+                height: 1.05,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              status,
+              style: TextStyle(
+                color: color,
+                fontFamily: 'Unifont',
+                fontSize: 8.5,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            if (detail.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                detail,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: available ? color : PixelTheme.textGray,
+                  fontFamily: 'Unifont',
+                  fontSize: 8,
+                  height: 1.05,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _progressLabel(BuildContext context, int? target) {
+    if (!achievement.dataAvailable || target == null) {
+      return '';
+    }
+    if (achievement.direction == AchievementProgressDirection.rank) {
+      return context.l10n.tr('achievementRankProgress', <String, Object?>{
+        'rank': achievement.current,
+        'target': target,
+      });
+    }
+    return '${achievement.current}/$target';
+  }
+}
+
+class _AchievementBadgeImage extends StatelessWidget {
+  const _AchievementBadgeImage({
+    required this.achievement,
+    required this.level,
+    required this.color,
+  });
+
+  static const ColorFilter _lockedFilter = ColorFilter.matrix(<double>[
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ]);
+
+  final AchievementBadgeProgress achievement;
+  final String level;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget image = Image.asset(
+      achievement.kind.assetPath,
+      width: 92,
+      height: 92,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.none,
+      cacheWidth: 184,
+      cacheHeight: 184,
+      errorBuilder: (BuildContext context, Object error, StackTrace? trace) {
+        return Container(
+          width: 92,
+          height: 92,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: PixelTheme.bgDark,
+            border: Border.all(color: PixelTheme.textGray, width: 2),
+          ),
+          child: Text(
+            '?',
+            style: TextStyle(
+              color: PixelTheme.textGray,
+              fontFamily: 'Unifont',
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        );
+      },
+    );
+    if (!achievement.isUnlocked) {
+      image = Opacity(
+        opacity: achievement.dataAvailable ? 0.52 : 0.32,
+        child: ColorFiltered(colorFilter: _lockedFilter, child: image),
+      );
+    }
+
+    return SizedBox.square(
+      dimension: 92,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          image,
+          if (level.isNotEmpty)
+            Positioned(
+              left: 18,
+              right: 18,
+              bottom: 7,
+              child: Text(
+                level,
+                maxLines: 1,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: color,
+                  fontFamily: 'Unifont',
+                  fontSize: 14,
+                  height: 1,
+                  fontWeight: FontWeight.w900,
+                  shadows: const <Shadow>[
+                    Shadow(color: Colors.black, offset: Offset(2, 2)),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PixelAchievementHeaderGlyph extends StatelessWidget {
+  const _PixelAchievementHeaderGlyph();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 14,
+      child: CustomPaint(painter: const _PixelAchievementHeaderGlyphPainter()),
+    );
+  }
+}
+
+class _PixelAchievementHeaderGlyphPainter extends CustomPainter {
+  const _PixelAchievementHeaderGlyphPainter();
+
+  static const List<String> _pattern = <String>[
+    '01111110',
+    '11011011',
+    '11011011',
+    '01111110',
+    '00111100',
+    '00011000',
+    '00111100',
+    '01111110',
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint paint = Paint()
+      ..isAntiAlias = false
+      ..color = PixelTheme.accent
+      ..style = PaintingStyle.fill;
+    final double cell = size.shortestSide / 8;
+    for (int y = 0; y < _pattern.length; y += 1) {
+      for (int x = 0; x < _pattern[y].length; x += 1) {
+        if (_pattern[y][x] == '1') {
+          canvas.drawRect(Rect.fromLTWH(x * cell, y * cell, cell, cell), paint);
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PixelAchievementHeaderGlyphPainter oldDelegate) => false;
 }
 
 class _BoardHeader extends StatelessWidget {

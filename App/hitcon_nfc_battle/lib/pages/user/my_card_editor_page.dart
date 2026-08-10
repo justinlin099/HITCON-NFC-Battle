@@ -2335,6 +2335,7 @@ class _PrintResubmitConfirmDialog extends StatelessWidget {
 
 class _PixelDialogButton extends StatelessWidget {
   const _PixelDialogButton({
+    super.key,
     required this.label,
     required this.color,
     required this.onTap,
@@ -3489,302 +3490,310 @@ class _PixelEditorScreenState extends State<_PixelEditorScreen> {
             return Column(
               children: [
                 Expanded(
-                  child: SingleChildScrollView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(12),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minHeight: constraints.maxHeight - 24,
-                      ),
-                      child: Column(
-                        children: [
-                          Center(
-                            child: SizedBox(
-                              width: size,
-                              height: size,
-                              child: RawGestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                gestures:
-                                    <
-                                      Type,
-                                      GestureRecognizerFactory<
-                                        GestureRecognizer
-                                      >
-                                    >{
-                                      EagerGestureRecognizer:
-                                          GestureRecognizerFactoryWithHandlers<
-                                            EagerGestureRecognizer
-                                          >(
-                                            EagerGestureRecognizer.new,
-                                            (
-                                              EagerGestureRecognizer instance,
-                                            ) {},
-                                          ),
-                                    },
-                                child: Listener(
-                                  behavior: HitTestBehavior.opaque,
-                                  onPointerDown: (PointerDownEvent details) {
-                                    _handleCanvasTouch(
-                                      details.localPosition,
-                                      Size(size, size),
-                                      beginStroke: true,
-                                    );
-                                  },
-                                  onPointerMove: (PointerMoveEvent details) =>
-                                      _handleCanvasTouch(
-                                        details.localPosition,
-                                        Size(size, size),
-                                        beginStroke: false,
+                  child: LayoutBuilder(
+                    builder: (BuildContext context, BoxConstraints editorConstraints) {
+                      final double minimumContentHeight =
+                          editorConstraints.maxHeight > 24
+                          ? editorConstraints.maxHeight - 24
+                          : 0;
+                      return SingleChildScrollView(
+                        key: const Key('pixel-editor-scroll-view'),
+                        controller: _scrollController,
+                        physics: const ClampingScrollPhysics(),
+                        padding: const EdgeInsets.all(12),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: minimumContentHeight,
+                          ),
+                          child: Column(
+                            children: [
+                              Center(
+                                child: SizedBox(
+                                  width: size,
+                                  height: size,
+                                  child: RawGestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    gestures:
+                                        <
+                                          Type,
+                                          GestureRecognizerFactory<
+                                            GestureRecognizer
+                                          >
+                                        >{
+                                          EagerGestureRecognizer:
+                                              GestureRecognizerFactoryWithHandlers<
+                                                EagerGestureRecognizer
+                                              >(
+                                                EagerGestureRecognizer.new,
+                                                (
+                                                  EagerGestureRecognizer
+                                                  instance,
+                                                ) {},
+                                              ),
+                                        },
+                                    child: Listener(
+                                      behavior: HitTestBehavior.opaque,
+                                      onPointerDown:
+                                          (PointerDownEvent details) {
+                                            _handleCanvasTouch(
+                                              details.localPosition,
+                                              Size(size, size),
+                                              beginStroke: true,
+                                            );
+                                          },
+                                      onPointerMove:
+                                          (PointerMoveEvent details) =>
+                                              _handleCanvasTouch(
+                                                details.localPosition,
+                                                Size(size, size),
+                                                beginStroke: false,
+                                              ),
+                                      onPointerUp: (_) =>
+                                          _finishCanvasPointer(),
+                                      onPointerCancel: (_) =>
+                                          _finishCanvasPointer(),
+                                      child: CustomPaint(
+                                        painter: _PixelCanvasPainter(
+                                          pixels: _pixels,
+                                          showGrid: _showGrid,
+                                        ),
+                                        child: const SizedBox.expand(),
                                       ),
-                                  onPointerUp: (_) => _finishCanvasPointer(),
-                                  onPointerCancel: (_) =>
-                                      _finishCanvasPointer(),
-                                  child: CustomPaint(
-                                    painter: _PixelCanvasPainter(
-                                      pixels: _pixels,
-                                      showGrid: _showGrid,
                                     ),
-                                    child: const SizedBox.expand(),
                                   ),
                                 ),
                               ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            context.l10n.tr('editorStatus', <String, Object?>{
-                              'status': _status,
-                              'tool': context.l10n.tr(_tool.labelKey),
-                              'size': _brushSize,
-                            }),
-                            style: TextStyle(color: PixelTheme.accentBlue),
-                          ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            height: 86,
-                            child: ListView(
-                              scrollDirection: Axis.horizontal,
-                              children: [
-                                _PixelToolButton(
-                                  iconPattern: _iconImport,
-                                  label: context.l10n.tr('import'),
-                                  onPressed: _importImage,
+                              const SizedBox(height: 10),
+                              Text(
+                                context.l10n
+                                    .tr('editorStatus', <String, Object?>{
+                                      'status': _status,
+                                      'tool': context.l10n.tr(_tool.labelKey),
+                                      'size': _brushSize,
+                                    }),
+                                style: TextStyle(color: PixelTheme.accentBlue),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                height: 74,
+                                child: ListView(
+                                  scrollDirection: Axis.horizontal,
+                                  children: [
+                                    _PixelToolButton(
+                                      iconAsset: _iconImport,
+                                      label: context.l10n.tr('import'),
+                                      onPressed: _importImage,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _PixelToolButton(
+                                      iconAsset: _iconClear,
+                                      label: context.l10n.tr('clear'),
+                                      onPressed: _clearCanvas,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _PixelToolButton(
+                                      iconAsset: _iconBrush,
+                                      label: _tool == _EditorTool.brush
+                                          ? '${context.l10n.tr('brush')} ON'
+                                          : context.l10n.tr('brush'),
+                                      selected: _tool == _EditorTool.brush,
+                                      onPressed: () {
+                                        setState(() {
+                                          _tool = _EditorTool.brush;
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _PixelToolButton(
+                                      iconAsset: _iconEraser,
+                                      label: _tool == _EditorTool.eraser
+                                          ? '${context.l10n.tr('eraser')} ON'
+                                          : context.l10n.tr('eraser'),
+                                      selected: _tool == _EditorTool.eraser,
+                                      onPressed: () {
+                                        setState(() {
+                                          _tool = _EditorTool.eraser;
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _PixelToolButton(
+                                      iconAsset: _iconBucket,
+                                      label: _tool == _EditorTool.bucket
+                                          ? '${context.l10n.tr('fill')} ON'
+                                          : context.l10n.tr('fill'),
+                                      selected: _tool == _EditorTool.bucket,
+                                      onPressed: () {
+                                        setState(() {
+                                          _tool = _EditorTool.bucket;
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _PixelToolButton(
+                                      iconAsset: _iconPicker,
+                                      label: _tool == _EditorTool.picker
+                                          ? '${context.l10n.tr('pickColor')} ON'
+                                          : context.l10n.tr('pickColor'),
+                                      selected: _tool == _EditorTool.picker,
+                                      onPressed: () {
+                                        setState(() {
+                                          _tool = _EditorTool.picker;
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _PixelToolButton(
+                                      iconAsset: _iconUndo,
+                                      label: context.l10n.tr('undo'),
+                                      onPressed: _undo,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _PixelToolButton(
+                                      iconAsset: _iconRedo,
+                                      label: context.l10n.tr('redo'),
+                                      onPressed: _redo,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _PixelToolButton(
+                                      iconAsset: _iconGrid,
+                                      label: _showGrid
+                                          ? context.l10n.tr('gridOn')
+                                          : context.l10n.tr('gridOff'),
+                                      selected: _showGrid,
+                                      onPressed: () {
+                                        setState(() {
+                                          _showGrid = !_showGrid;
+                                        });
+                                      },
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconClear,
-                                  label: context.l10n.tr('clear'),
-                                  onPressed: _clearCanvas,
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconBrush,
-                                  label: _tool == _EditorTool.brush
-                                      ? '${context.l10n.tr('brush')} ON'
-                                      : context.l10n.tr('brush'),
-                                  selected: _tool == _EditorTool.brush,
-                                  onPressed: () {
-                                    setState(() {
-                                      _tool = _EditorTool.brush;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconEraser,
-                                  label: _tool == _EditorTool.eraser
-                                      ? '${context.l10n.tr('eraser')} ON'
-                                      : context.l10n.tr('eraser'),
-                                  selected: _tool == _EditorTool.eraser,
-                                  onPressed: () {
-                                    setState(() {
-                                      _tool = _EditorTool.eraser;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconBucket,
-                                  label: _tool == _EditorTool.bucket
-                                      ? '${context.l10n.tr('fill')} ON'
-                                      : context.l10n.tr('fill'),
-                                  selected: _tool == _EditorTool.bucket,
-                                  onPressed: () {
-                                    setState(() {
-                                      _tool = _EditorTool.bucket;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconPicker,
-                                  label: _tool == _EditorTool.picker
-                                      ? '${context.l10n.tr('pickColor')} ON'
-                                      : context.l10n.tr('pickColor'),
-                                  selected: _tool == _EditorTool.picker,
-                                  onPressed: () {
-                                    setState(() {
-                                      _tool = _EditorTool.picker;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconUndo,
-                                  label: context.l10n.tr('undo'),
-                                  onPressed: _undo,
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconRedo,
-                                  label: context.l10n.tr('redo'),
-                                  onPressed: _redo,
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconGrid,
-                                  label: _showGrid
-                                      ? context.l10n.tr('gridOn')
-                                      : context.l10n.tr('gridOff'),
-                                  selected: _showGrid,
-                                  onPressed: () {
-                                    setState(() {
-                                      _showGrid = !_showGrid;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconMinus,
-                                  label: context.l10n.tr('brushSmaller'),
-                                  onPressed: () {
-                                    setState(() {
-                                      if (_brushSize > 1) {
-                                        _brushSize--;
-                                      }
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _PixelToolButton(
-                                  iconPattern: _iconPlus,
-                                  label: context.l10n.tr('brushLarger'),
-                                  onPressed: () {
-                                    setState(() {
-                                      if (_brushSize < 3) {
-                                        _brushSize++;
-                                      }
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            height: 48,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: _swatches.length + 1,
-                              separatorBuilder:
-                                  (BuildContext context, int index) =>
-                                      const SizedBox(width: 8),
-                              itemBuilder: (BuildContext context, int index) {
-                                if (index == _swatches.length) {
-                                  return GestureDetector(
-                                    onTap: () async {
-                                      final Color? custom =
-                                          await _showCustomColorDialog(
-                                            context,
-                                            initialColor: _brushColor,
-                                            title: context.l10n.tr(
-                                              'customBrushColor',
+                              ),
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                height: 48,
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: _swatches.length + 1,
+                                  separatorBuilder:
+                                      (BuildContext context, int index) =>
+                                          const SizedBox(width: 8),
+                                  itemBuilder:
+                                      (BuildContext context, int index) {
+                                        if (index == _swatches.length) {
+                                          return GestureDetector(
+                                            onTap: () async {
+                                              final Color? custom =
+                                                  await _showCustomColorDialog(
+                                                    context,
+                                                    initialColor: _brushColor,
+                                                    title: context.l10n.tr(
+                                                      'customBrushColor',
+                                                    ),
+                                                  );
+                                              if (custom == null) {
+                                                return;
+                                              }
+                                              setState(() {
+                                                _brushColor = custom;
+                                                if (_tool ==
+                                                        _EditorTool.eraser ||
+                                                    _tool ==
+                                                        _EditorTool.picker) {
+                                                  _tool = _EditorTool.brush;
+                                                }
+                                                _status = context.l10n.tr(
+                                                  'colorSelected',
+                                                );
+                                              });
+                                            },
+                                            child: Container(
+                                              width: 48,
+                                              height: 48,
+                                              decoration: BoxDecoration(
+                                                color: PixelTheme.bgMid,
+                                                border: Border.all(
+                                                  color: PixelTheme.accent,
+                                                  width: 2,
+                                                ),
+                                              ),
+                                              child: Icon(
+                                                Icons.add_rounded,
+                                                color: PixelTheme.accent,
+                                              ),
                                             ),
                                           );
-                                      if (custom == null) {
-                                        return;
-                                      }
-                                      setState(() {
-                                        _brushColor = custom;
-                                        if (_tool == _EditorTool.eraser ||
-                                            _tool == _EditorTool.picker) {
-                                          _tool = _EditorTool.brush;
                                         }
-                                        _status = context.l10n.tr(
-                                          'colorSelected',
+                                        final Color color = _swatches[index];
+                                        return GestureDetector(
+                                          onTap: () {
+                                            setState(() {
+                                              _brushColor = color;
+                                              if (_tool == _EditorTool.eraser ||
+                                                  _tool == _EditorTool.picker) {
+                                                _tool = _EditorTool.brush;
+                                              }
+                                            });
+                                          },
+                                          child: Container(
+                                            width: 48,
+                                            height: 48,
+                                            decoration: BoxDecoration(
+                                              color: color,
+                                              border: Border.all(
+                                                color:
+                                                    _brushColor == color &&
+                                                        _tool !=
+                                                            _EditorTool.eraser
+                                                    ? PixelTheme.textWhite
+                                                    : PixelTheme.border,
+                                                width:
+                                                    _brushColor == color &&
+                                                        _tool !=
+                                                            _EditorTool.eraser
+                                                    ? 3
+                                                    : 1,
+                                              ),
+                                            ),
+                                          ),
                                         );
-                                      });
-                                    },
-                                    child: Container(
-                                      width: 48,
-                                      height: 48,
-                                      decoration: BoxDecoration(
-                                        color: PixelTheme.bgMid,
-                                        border: Border.all(
-                                          color: PixelTheme.accent,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      child: Icon(
-                                        Icons.add_rounded,
-                                        color: PixelTheme.accent,
-                                      ),
-                                    ),
-                                  );
-                                }
-                                final Color color = _swatches[index];
-                                return GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      _brushColor = color;
-                                      if (_tool == _EditorTool.eraser ||
-                                          _tool == _EditorTool.picker) {
-                                        _tool = _EditorTool.brush;
-                                      }
-                                    });
-                                  },
-                                  child: Container(
-                                    width: 48,
-                                    height: 48,
-                                    decoration: BoxDecoration(
-                                      color: color,
-                                      border: Border.all(
-                                        color:
-                                            _brushColor == color &&
-                                                _tool != _EditorTool.eraser
-                                            ? PixelTheme.textWhite
-                                            : PixelTheme.border,
-                                        width:
-                                            _brushColor == color &&
-                                                _tool != _EditorTool.eraser
-                                            ? 3
-                                            : 1,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
+                                      },
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                           ),
-                          const SizedBox(height: 12),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 SafeArea(
                   top: false,
                   minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: _confirmAndApply,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: PixelTheme.accent,
-                        foregroundColor: PixelTheme.bgDark,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _PixelBrushSizeControl(
+                        value: _brushSize,
+                        onChanged: (int value) {
+                          setState(() {
+                            _brushSize = value;
+                          });
+                        },
                       ),
-                      child: Text(context.l10n.tr('applyPixelArt')),
-                    ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: _PixelDialogButton(
+                          key: const Key('pixel-editor-apply-button'),
+                          label: context.l10n.tr('applyPixelArt'),
+                          color: PixelTheme.accent,
+                          onTap: _confirmAndApply,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -4203,13 +4212,13 @@ class _PlacedRectPx {
 
 class _PixelToolButton extends StatelessWidget {
   const _PixelToolButton({
-    required this.iconPattern,
+    required this.iconAsset,
     required this.label,
     required this.onPressed,
     this.selected = false,
   });
 
-  final List<String> iconPattern;
+  final String iconAsset;
   final String label;
   final VoidCallback onPressed;
   final bool selected;
@@ -4219,8 +4228,8 @@ class _PixelToolButton extends StatelessWidget {
     return GestureDetector(
       onTap: onPressed,
       child: Container(
-        width: 90,
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        width: 78,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
         decoration: BoxDecoration(
           color: selected ? PixelTheme.accent : PixelTheme.bgMid,
           border: Border.all(
@@ -4237,20 +4246,24 @@ class _PixelToolButton extends StatelessWidget {
             SizedBox(
               width: 28,
               height: 28,
-              child: CustomPaint(
-                painter: _PixelPatternPainter(
-                  pattern: iconPattern,
-                  color: selected ? PixelTheme.bgDark : PixelTheme.accent,
-                ),
+              child: Image.asset(
+                iconAsset,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                color: selected ? PixelTheme.bgDark : PixelTheme.accent,
+                colorBlendMode: BlendMode.srcIn,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 3),
             Text(
               label,
               textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.clip,
+              softWrap: false,
               style: TextStyle(
                 color: selected ? PixelTheme.bgDark : PixelTheme.textWhite,
-                fontSize: 9,
+                fontSize: 11,
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -4261,36 +4274,124 @@ class _PixelToolButton extends StatelessWidget {
   }
 }
 
-class _PixelPatternPainter extends CustomPainter {
-  _PixelPatternPainter({required this.pattern, required this.color});
+class _PixelBrushSizeControl extends StatelessWidget {
+  const _PixelBrushSizeControl({required this.value, required this.onChanged});
 
-  final List<String> pattern;
-  final Color color;
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final String status = context.l10n.tr('brushStatus', <String, Object?>{
+      'size': value,
+    });
+
+    return Container(
+      key: const Key('pixel-editor-brush-size-control'),
+      padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: PixelTheme.bgMid,
+        border: Border.all(color: PixelTheme.accent, width: 2),
+        boxShadow: const [
+          BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(2, 2)),
+        ],
+      ),
+      child: Row(
+        children: [
+          SizedBox.square(
+            key: const Key('pixel-editor-brush-size-preview'),
+            dimension: 42,
+            child: CustomPaint(
+              painter: _BrushSizePreviewPainter(brushSize: value),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  status,
+                  key: const Key('pixel-editor-brush-size-value'),
+                  style: TextStyle(
+                    color: PixelTheme.textWhite,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 8,
+                    trackShape: const RectangularSliderTrackShape(),
+                    thumbShape: const _PixelSliderThumbShape(size: 18),
+                    overlayShape: SliderComponentShape.noOverlay,
+                    activeTrackColor: PixelTheme.accent,
+                    inactiveTrackColor: PixelTheme.textWhite.withValues(
+                      alpha: 0.6,
+                    ),
+                    thumbColor: PixelTheme.accent,
+                    activeTickMarkColor: PixelTheme.bgDark,
+                    inactiveTickMarkColor: PixelTheme.textWhite,
+                  ),
+                  child: Slider(
+                    key: const Key('pixel-editor-brush-size-slider'),
+                    value: value.toDouble(),
+                    min: 1,
+                    max: 3,
+                    divisions: 2,
+                    onChanged: (double nextValue) {
+                      onChanged(nextValue.round());
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BrushSizePreviewPainter extends CustomPainter {
+  const _BrushSizePreviewPainter({required this.brushSize});
+
+  final int brushSize;
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (pattern.isEmpty) {
-      return;
-    }
-    final int rows = pattern.length;
-    final int cols = pattern.first.length;
-    final double cellW = size.width / cols;
-    final double cellH = size.height / rows;
-    final Paint p = Paint()..color = color;
+    const int gridSize = 5;
+    const double gap = 1;
+    final double cellSize =
+        (size.shortestSide - (gap * (gridSize - 1))) / gridSize;
+    final double gridWidth = (cellSize * gridSize) + (gap * (gridSize - 1));
+    final Offset origin = Offset(
+      (size.width - gridWidth) / 2,
+      (size.height - gridWidth) / 2,
+    );
+    final Paint emptyPaint = Paint()
+      ..color = PixelTheme.bgLight.withValues(alpha: 0.55);
+    final Paint brushPaint = Paint()..color = PixelTheme.accent;
+    final int radius = brushSize - 1;
 
-    for (int y = 0; y < rows; y++) {
-      final String row = pattern[y];
-      for (int x = 0; x < cols && x < row.length; x++) {
-        if (row.codeUnitAt(x) == 49) {
-          canvas.drawRect(Rect.fromLTWH(x * cellW, y * cellH, cellW, cellH), p);
-        }
+    for (int y = 0; y < gridSize; y++) {
+      for (int x = 0; x < gridSize; x++) {
+        final Rect cell = Rect.fromLTWH(
+          origin.dx + (x * (cellSize + gap)),
+          origin.dy + (y * (cellSize + gap)),
+          cellSize,
+          cellSize,
+        );
+        final bool isBrushPixel = (x - 2).abs() + (y - 2).abs() <= radius;
+        canvas.drawRect(cell, isBrushPixel ? brushPaint : emptyPaint);
       }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _PixelPatternPainter oldDelegate) {
-    return oldDelegate.pattern != pattern || oldDelegate.color != color;
+  bool shouldRepaint(_BrushSizePreviewPainter oldDelegate) {
+    return oldDelegate.brushSize != brushSize;
   }
 }
 
@@ -4435,7 +4536,13 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
     return _withUnifont(
       context,
       AlertDialog(
+        key: const Key('custom-color-dialog'),
         backgroundColor: PixelTheme.bgMid,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.zero,
+          side: BorderSide(color: PixelTheme.accent, width: 2),
+        ),
         title: Text(
           widget.title,
           style: TextStyle(color: PixelTheme.textWhite),
@@ -4558,14 +4665,27 @@ class _RgbColorDialogState extends State<_RgbColorDialog> {
         ),
         actions: [
           TextButton(
+            key: const Key('custom-color-cancel-button'),
             onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom(
+              foregroundColor: PixelTheme.textWhite,
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.zero,
+              ),
+              side: BorderSide(color: PixelTheme.textWhite, width: 2),
+            ),
             child: Text(context.l10n.tr('cancel')),
           ),
           FilledButton(
+            key: const Key('custom-color-confirm-button'),
             onPressed: () => Navigator.of(context).pop(_preview),
             style: FilledButton.styleFrom(
               backgroundColor: PixelTheme.accent,
               foregroundColor: PixelTheme.bgDark,
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.zero,
+              ),
+              side: BorderSide(color: PixelTheme.textWhite, width: 2),
             ),
             child: Text(context.l10n.tr('confirm')),
           ),
@@ -5050,167 +5170,13 @@ String _detectImageFormat(Uint8List bytes) {
   return 'unknown';
 }
 
-const List<String> _iconImport = <String>[
-  '111111111111',
-  '100000000001',
-  '100011000001',
-  '100011000001',
-  '100000011001',
-  '100000111101',
-  '100001110111',
-  '100011100011',
-  '101111111111',
-  '100000000001',
-  '100000000001',
-  '111111111111',
-];
-
-const List<String> _iconClear = <String>[
-  '000000000000',
-  '000001100000',
-  '001111111100',
-  '000000000000',
-  '001111111100',
-  '001101101100',
-  '001101101100',
-  '001101101100',
-  '001101101100',
-  '001111111100',
-  '000111111000',
-  '000000000000',
-];
-
-const List<String> _iconBrush = <String>[
-  '000000000111',
-  '000000001111',
-  '000000011110',
-  '000000111100',
-  '000001111000',
-  '000011110000',
-  '000111100000',
-  '001111000000',
-  '011110000000',
-  '111100000000',
-  '011000000000',
-  '000000000000',
-];
-
-const List<String> _iconEraser = <String>[
-  '000000111100',
-  '000001111110',
-  '000011111111',
-  '000111111110',
-  '001111111100',
-  '011111111000',
-  '111111110000',
-  '111111100000',
-  '011111000000',
-  '001110000000',
-  '000100000000',
-  '000000000000',
-];
-
-const List<String> _iconBucket = <String>[
-  '000000110000',
-  '000001111000',
-  '000011111100',
-  '000111111110',
-  '001111111111',
-  '001111111111',
-  '000111111110',
-  '000011111100',
-  '000001111000',
-  '000000110000',
-  '000000011000',
-  '000000001100',
-];
-
-const List<String> _iconPicker = <String>[
-  '110000000000',
-  '111000000000',
-  '011100000000',
-  '001110000000',
-  '000111111111',
-  '000011111110',
-  '000001111100',
-  '000000111000',
-  '000000011000',
-  '000000011000',
-  '000000001000',
-  '000000000000',
-];
-
-const List<String> _iconUndo = <String>[
-  '000000000000',
-  '000011111000',
-  '000000011000',
-  '000000011000',
-  '000000011000',
-  '000000011000',
-  '000000011000',
-  '001111111100',
-  '011000000000',
-  '111000000000',
-  '011000000000',
-  '001100000000',
-];
-
-const List<String> _iconRedo = <String>[
-  '000000000000',
-  '000111110000',
-  '000110000000',
-  '000110000000',
-  '000110000000',
-  '000110000000',
-  '000110000000',
-  '001111111100',
-  '000000000110',
-  '000000000111',
-  '000000000110',
-  '000000001100',
-];
-
-const List<String> _iconGrid = <String>[
-  '000000000000',
-  '011111111110',
-  '010010010010',
-  '010010010010',
-  '011111111110',
-  '010010010010',
-  '010010010010',
-  '011111111110',
-  '010010010010',
-  '010010010010',
-  '011111111110',
-  '000000000000',
-];
-
-const List<String> _iconMinus = <String>[
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '001111111100',
-  '001111111100',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-];
-
-const List<String> _iconPlus = <String>[
-  '000000000000',
-  '000000110000',
-  '000000110000',
-  '000000110000',
-  '001111111100',
-  '001111111100',
-  '000000110000',
-  '000000110000',
-  '000000110000',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-];
+const String _editorIconRoot = 'assets/images/editor_icons';
+const String _iconImport = '$_editorIconRoot/import.png';
+const String _iconClear = '$_editorIconRoot/clear.png';
+const String _iconBrush = '$_editorIconRoot/brush.png';
+const String _iconEraser = '$_editorIconRoot/eraser.png';
+const String _iconBucket = '$_editorIconRoot/bucket.png';
+const String _iconPicker = '$_editorIconRoot/picker.png';
+const String _iconUndo = '$_editorIconRoot/undo.png';
+const String _iconRedo = '$_editorIconRoot/redo.png';
+const String _iconGrid = '$_editorIconRoot/grid.png';

@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../config/app_config.dart';
 import '../../l10n/app_localizations.dart';
 
 import 'my_card_editor_page.dart';
@@ -419,6 +421,18 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     return context.l10n.tr(key);
   }
 
+  Future<void> _openManual(String url) async {
+    final Uri? uri = Uri.tryParse(url);
+    if (uri == null) {
+      return;
+    }
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // The optional manual link must not break the home screen.
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     PixelTheme.active = PixelTheme.getPalette(_selectedScheme);
@@ -439,12 +453,22 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
             Scaffold(
               backgroundColor: PixelTheme.bgDark,
               appBar: AppBar(
-                leading: _showAdminModeSwitch
-                    ? AdminModeSwitchButton(
-                        target: AdminModeTarget.adminTools,
-                        color: PixelTheme.accent,
-                      )
-                    : null,
+                leading: ValueListenableBuilder<String?>(
+                  valueListenable: AppConfig.manualUrlListenable,
+                  builder:
+                      (BuildContext context, String? manualUrl, Widget? child) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 10, 0, 10),
+                          child: _PixelHelpButton(
+                            key: const Key('home-manual-button'),
+                            onPressed: manualUrl == null
+                                ? null
+                                : () => unawaited(_openManual(manualUrl)),
+                            tooltip: context.l10n.tr('manualTooltip'),
+                          ),
+                        );
+                      },
+                ),
                 title: ValueListenableBuilder<int>(
                   valueListenable: _selectedTab,
                   builder: (BuildContext context, int tab, Widget? child) {
@@ -453,7 +477,18 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                       2 => context.l10n.tr('scoreboardTab'),
                       _ => context.l10n.tr('appTitle'),
                     };
-                    return Text(title);
+                    return FittedBox(
+                      key: const Key('home-app-bar-title-fitted'),
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.center,
+                      child: Text(
+                        title,
+                        key: const Key('home-app-bar-title'),
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.visible,
+                      ),
+                    );
                   },
                 ),
                 titleTextStyle: TextStyle(
@@ -469,6 +504,11 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                 elevation: 0,
                 toolbarHeight: 68,
                 actions: [
+                  if (_showAdminModeSwitch)
+                    AdminModeSwitchButton(
+                      target: AdminModeTarget.adminTools,
+                      color: PixelTheme.accent,
+                    ),
                   PopupMenuButton<PixelScheme>(
                     tooltip: context.l10n.tr('paletteTooltip'),
                     icon: _PixelThemeIcon(color: PixelTheme.accent),
@@ -512,7 +552,15 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                         ),
                       ),
                       _KeepAlivePage(
-                        child: ScoreBoardPage(scheme: _selectedScheme),
+                        child: ScoreBoardPage(
+                          scheme: _selectedScheme,
+                          stampMission: _stampMission,
+                          profile: _authService.userProfile,
+                          collectionCards:
+                              _collectionData != null || _localCards.isNotEmpty
+                              ? _cards
+                              : null,
+                        ),
                       ),
                     ],
                   ),
@@ -2108,6 +2156,98 @@ class _PixelCardState extends State<_PixelCard>
 }
 
 /// 獎品面板
+class _PixelHelpButton extends StatelessWidget {
+  const _PixelHelpButton({
+    super.key,
+    required this.onPressed,
+    required this.tooltip,
+  });
+
+  final VoidCallback? onPressed;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool enabled = onPressed != null;
+    final Color color = enabled ? PixelTheme.accent : PixelTheme.textGray;
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: tooltip,
+      child: Tooltip(
+        message: tooltip,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: Center(
+              child: Opacity(
+                opacity: enabled ? 1 : 0.45,
+                child: SizedBox(
+                  key: const Key('home-manual-pixel-question-mark'),
+                  width: 16,
+                  height: 20,
+                  child: CustomPaint(
+                    painter: _PixelQuestionMarkPainter(color: color),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PixelQuestionMarkPainter extends CustomPainter {
+  const _PixelQuestionMarkPainter({required this.color});
+
+  final Color color;
+
+  static const List<String> _pattern = <String>[
+    '00111100',
+    '01100110',
+    '11000011',
+    '00000011',
+    '00000110',
+    '00001100',
+    '00011000',
+    '00000000',
+    '00011000',
+    '00011000',
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double cellWidth = size.width / _pattern.first.length;
+    final double cellHeight = size.height / _pattern.length;
+    final Paint paint = Paint()
+      ..isAntiAlias = false
+      ..style = PaintingStyle.fill
+      ..color = color;
+
+    for (int y = 0; y < _pattern.length; y += 1) {
+      for (int x = 0; x < _pattern[y].length; x += 1) {
+        if (_pattern[y][x] == '1') {
+          canvas.drawRect(
+            Rect.fromLTWH(x * cellWidth, y * cellHeight, cellWidth, cellHeight),
+            paint,
+          );
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PixelQuestionMarkPainter oldDelegate) {
+    return oldDelegate.color != color;
+  }
+}
+
 /// 像素風按鈕
 class _PixelIconButton extends StatefulWidget {
   const _PixelIconButton({

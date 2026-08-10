@@ -3,5 +3,16 @@
   "api_base_url": "https://nfc-battle-staging.hitcon2026.online",
   "allow_user_tag_unlock": false,
   "show_panasonic_logo": true,
-  "show_panasonic_logo_on_print": true
+  "show_panasonic_logo_on_print": true,
+  "manual_url": "https://github.com/justinlin099/HITCON-NFC-Battle#readme",
+  "achievement_rules": {
+    "sponsor_scout": {
+      "enabled": true,
+      "thresholds": [1, 5, 10]
+    },
+    "community_explorer": {
+      "enabled": true,
+      "thresholds": [1, 5, 10]
+    }
+  }
 }

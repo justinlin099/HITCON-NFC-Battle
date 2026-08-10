@@ -37,6 +37,8 @@ void main() {
     WidgetTester tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
     tester.binding.platformDispatcher.localeTestValue = const Locale(
       'zh',
       'TW',
@@ -71,13 +73,66 @@ void main() {
       expect(toolLabel('復原'), findsOneWidget);
       expect(toolLabel('重做'), findsOneWidget);
       expect(toolLabel('網格開啟'), findsOneWidget);
-      expect(toolLabel('縮小筆刷'), findsOneWidget);
-      expect(toolLabel('放大筆刷'), findsOneWidget);
+      expect(toolLabel('縮小筆刷'), findsNothing);
+      expect(toolLabel('放大筆刷'), findsNothing);
+      final Finder brushSizeSliderFinder = find.byKey(
+        const Key('pixel-editor-brush-size-slider'),
+        skipOffstage: false,
+      );
+      expect(brushSizeSliderFinder, findsOneWidget);
+      expect(
+        find.byKey(
+          const Key('pixel-editor-brush-size-preview'),
+          skipOffstage: false,
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('pixel-editor-apply-button'), skipOffstage: false),
+        findsOneWidget,
+      );
+
+      final SingleChildScrollView editorScrollView = tester
+          .widget<SingleChildScrollView>(
+            find.byKey(
+              const Key('pixel-editor-scroll-view'),
+              skipOffstage: false,
+            ),
+          );
+      expect(editorScrollView.controller?.position.maxScrollExtent, 0);
+
+      final Slider brushSizeSlider = tester.widget<Slider>(
+        brushSizeSliderFinder,
+      );
+      expect(brushSizeSlider.min, 1);
+      expect(brushSizeSlider.max, 3);
+      expect(brushSizeSlider.divisions, 2);
+      brushSizeSlider.onChanged?.call(3);
+      await tester.pump();
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(
+                const Key('pixel-editor-brush-size-value'),
+                skipOffstage: false,
+              ),
+            )
+            .data,
+        '筆刷粗細：3',
+      );
+
+      tester.view.physicalSize = const Size(800, 600);
+      await tester.pumpAndSettle();
+      expect(
+        editorScrollView.controller?.position.maxScrollExtent,
+        greaterThan(0),
+      );
       expect(find.textContaining('撌'), findsNothing);
       expect(find.textContaining('蝑'), findsNothing);
-
     } finally {
       debugDefaultTargetPlatformOverride = null;
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
       tester.binding.platformDispatcher.clearLocaleTestValue();
     }
   });
