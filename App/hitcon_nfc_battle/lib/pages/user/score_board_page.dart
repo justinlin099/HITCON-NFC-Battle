@@ -920,12 +920,22 @@ class _AchievementDetailsDialog extends StatelessWidget {
               Center(
                 child: Hero(
                   tag: 'achievement-badge-${achievement.kind.name}',
-                  child: _TiltableHolographicBadge(
-                    achievement: achievement,
-                    level: level,
-                    color: color,
-                    dimension: badgeSize,
-                  ),
+                  child: achievement.isUnlocked
+                      ? _TiltableHolographicBadge(
+                          achievement: achievement,
+                          level: level,
+                          color: color,
+                          dimension: badgeSize,
+                        )
+                      : KeyedSubtree(
+                          key: const Key('achievement-static-badge'),
+                          child: _AchievementBadgeImage(
+                            achievement: achievement,
+                            level: level,
+                            color: color,
+                            dimension: badgeSize,
+                          ),
+                        ),
                 ),
               ),
               const SizedBox(height: 10),

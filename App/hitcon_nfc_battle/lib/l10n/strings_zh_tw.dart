@@ -22,7 +22,7 @@ const Map<String, String> appStringsZhTw = <String, String>{
   'achievementTierSponsorStamps': '等級 {level}：需累積 {target} 枚贊助商印章',
   'achievementTierCommunityStamps': '等級 {level}：需累積 {target} 枚社群印章',
   'achievementTierRanking': '等級 {level}：結算名次需進入前 {target} 名',
-  'achievementRequirementHelloWorld': '完成顯示名稱、像素頭像與自我介紹。',
+  'achievementRequirementHelloWorld': '完成顯示名稱、像素大頭貼與自我介紹。',
   'achievementRequirementNfcOnline': '將一枚實體 NFC Badge 配對到你的個人資料。',
   'achievementRequirementFirstContact': '掃描其他玩家的 NFC Badge，收集第一張卡片。',
   'achievementRequirementPacketCollector': '各等級的玩家卡片累積條件：\n{tiers}',

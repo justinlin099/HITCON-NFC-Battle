@@ -229,6 +229,47 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets(
+    'locked achievement detail stays static without holographic foil',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _localizedApp(
+          child: const ScoreBoardPage(
+            profile: <String, dynamic>{
+              'display_name': '',
+              'pixel_avatar_base64': '',
+              'bio': '',
+              'physical_id': '',
+              'phishing_count': 0,
+            },
+            collectionCards: <Map<String, dynamic>>[],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('scoreboard-achievement-nfcOnline')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('achievement-detail-dialog')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('achievement-static-badge')), findsOneWidget);
+      expect(
+        find.byKey(const Key('achievement-holographic-badge')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('achievement-holographic-foil')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('achievement-detail-share')), findsNothing);
+    },
+  );
 }
 
 Widget _localizedApp({required Widget child}) {
