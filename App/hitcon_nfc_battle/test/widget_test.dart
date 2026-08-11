@@ -11,6 +11,22 @@ import 'package:hitcon_nfc_battle/pages/debug/test_login_page.dart';
 import 'package:hitcon_nfc_battle/pages/user/my_card_editor_page.dart';
 
 void main() {
+  test('fill tolerance matches nearby RGB colors by channel distance', () {
+    const Color target = Color(0xFF646464);
+
+    expect(pixelColorsMatchWithinTolerance(target, target, 0), isTrue);
+    expect(
+      pixelColorsMatchWithinTolerance(const Color(0xFF7D7D7D), target, 10),
+      isTrue,
+    );
+    expect(
+      pixelColorsMatchWithinTolerance(const Color(0xFF7F6464), target, 10),
+      isFalse,
+    );
+    expect(pixelColorsMatchWithinTolerance(null, null, 100), isTrue);
+    expect(pixelColorsMatchWithinTolerance(target, null, 100), isFalse);
+  });
+
   testWidgets('server token login page renders as initial route', (
     WidgetTester tester,
   ) async {
@@ -60,12 +76,14 @@ void main() {
           cardColor: const Color(0xFFFFD700),
         ),
       );
-      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
 
       Finder toolLabel(String text) => find.text(text, skipOffstage: false);
+      Finder editorKey(String value) =>
+          find.byKey(Key(value), skipOffstage: false);
 
       expect(toolLabel('匯入'), findsOneWidget);
-      expect(toolLabel('清空'), findsOneWidget);
+      expect(toolLabel('清除'), findsOneWidget);
       expect(toolLabel('筆刷 ON'), findsOneWidget);
       expect(toolLabel('橡皮擦'), findsOneWidget);
       expect(toolLabel('填色'), findsOneWidget);
@@ -75,6 +93,149 @@ void main() {
       expect(toolLabel('網格開啟'), findsOneWidget);
       expect(toolLabel('縮小筆刷'), findsNothing);
       expect(toolLabel('放大筆刷'), findsNothing);
+
+      const List<Key> orderedToolKeys = <Key>[
+        Key('pixel-editor-tool-import'),
+        Key('pixel-editor-tool-undo'),
+        Key('pixel-editor-tool-redo'),
+        Key('pixel-editor-tool-grid'),
+        Key('pixel-editor-tool-brush'),
+        Key('pixel-editor-tool-eraser'),
+        Key('pixel-editor-tool-fill'),
+        Key('pixel-editor-tool-picker'),
+        Key('pixel-editor-tool-clear'),
+      ];
+      final List<Rect> orderedToolRects = orderedToolKeys
+          .map(
+            (Key key) => tester.getRect(find.byKey(key, skipOffstage: false)),
+          )
+          .toList(growable: false);
+      for (int index = 1; index < orderedToolRects.length; index += 1) {
+        expect(
+          orderedToolRects[index].left,
+          greaterThan(orderedToolRects[index - 1].left),
+        );
+      }
+      for (final Rect rect in orderedToolRects) {
+        expect(rect.height, 70);
+        expect(rect.top, orderedToolRects.first.top);
+      }
+
+      await tester.tap(editorKey('pixel-editor-tool-clear'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('pixel-editor-clear-confirm-dialog')),
+        findsOneWidget,
+      );
+      expect(find.text('確定要清除畫布嗎？'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('pixel-editor-clear-cancel')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('pixel-editor-clear-confirm-dialog')),
+        findsNothing,
+      );
+
+      await tester.tap(editorKey('pixel-editor-tool-clear'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pixel-editor-clear-confirm')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('畫布已清除'), findsOneWidget);
+      expect(find.textContaining('不支援的圖片格式'), findsNothing);
+
+      await tester.tap(editorKey('pixel-editor-tool-fill'));
+      await tester.pump();
+      expect(find.textContaining('準備畫圖...'), findsOneWidget);
+      expect(find.textContaining('區域已填色'), findsNothing);
+      expect(
+        find.byKey(const Key('pixel-editor-fill-tolerance-control')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('pixel-editor-brush-size-control')),
+        findsNothing,
+      );
+      final Finder fillToleranceSliderFinder = find.byKey(
+        const Key('pixel-editor-fill-tolerance-slider'),
+      );
+      final Slider fillToleranceSlider = tester.widget<Slider>(
+        fillToleranceSliderFinder,
+      );
+      expect(fillToleranceSlider.min, 0);
+      expect(fillToleranceSlider.max, 100);
+      expect(fillToleranceSlider.divisions, 20);
+      fillToleranceSlider.onChanged?.call(35);
+      await tester.pump();
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('pixel-editor-fill-tolerance-value')),
+            )
+            .data,
+        '填色容忍度：35%',
+      );
+      expect(find.textContaining('工具：填色 | 容忍度：35%'), findsOneWidget);
+      await tester.tapAt(tester.getCenter(editorKey('pixel-editor-canvas')));
+      await tester.pump();
+      expect(find.textContaining('區域已填色'), findsOneWidget);
+      expect(find.textContaining('畫布已清除'), findsNothing);
+      await tester.tapAt(tester.getCenter(editorKey('pixel-editor-canvas')));
+      await tester.pump();
+      expect(find.textContaining('顏色相同，未變更'), findsOneWidget);
+      expect(find.textContaining('區域已填色'), findsNothing);
+
+      await tester.tap(editorKey('pixel-editor-tool-brush'));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('pixel-editor-fill-tolerance-control')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('pixel-editor-brush-size-control')),
+        findsOneWidget,
+      );
+
+      expect(
+        find.byKey(const Key('pixel-editor-color-scroll-right-hint')),
+        findsOneWidget,
+      );
+      tester.view.physicalSize = const Size(430, 1200);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('pixel-editor-tool-scroll-right-hint')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('pixel-editor-color-scroll-right-hint')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('pixel-editor-tool-scroll-left-hint')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('pixel-editor-color-scroll-left-hint')),
+        findsNothing,
+      );
+      await tester.drag(
+        find.byKey(const Key('pixel-editor-tool-scroll-view')),
+        const Offset(-220, 0),
+      );
+      await tester.drag(
+        find.byKey(const Key('pixel-editor-color-scroll-view')),
+        const Offset(-220, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('pixel-editor-tool-scroll-left-hint')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('pixel-editor-color-scroll-left-hint')),
+        findsOneWidget,
+      );
+
+      tester.view.physicalSize = const Size(800, 1200);
+      await tester.pumpAndSettle();
       final Finder brushSizeSliderFinder = find.byKey(
         const Key('pixel-editor-brush-size-slider'),
         skipOffstage: false,

@@ -47,6 +47,10 @@ const List<DefaultAvatarOption> defaultAvatarCatalog = <DefaultAvatarOption>[
     labelKey: 'defaultAvatarHackerRabbit',
   ),
   DefaultAvatarOption(
+    assetPath: 'assets/images/default_avatars/hacker_seal.png',
+    labelKey: 'defaultAvatarHackerSeal',
+  ),
+  DefaultAvatarOption(
     assetPath: 'assets/images/default_avatars/hitcon_hat.png',
     labelKey: 'defaultAvatarHitconHat',
   ),

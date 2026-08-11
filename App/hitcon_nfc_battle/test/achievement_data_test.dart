@@ -16,6 +16,30 @@ void main() {
     }
   });
 
+  test('Taiwan localization uses consistent Taiwan terminology', () {
+    const Map<String, String> replacements = <String, String>{
+      '頭像': '大頭貼',
+      '保存': '儲存',
+      '密鑰': '金鑰',
+      '點擊': '點一下',
+      '重置': '重設',
+      '剪裁': '裁剪',
+      '卡牌': '卡片',
+      '清空': '清除',
+    };
+    for (final String oldTerm in replacements.keys) {
+      expect(
+        appStringsZhTw.values.where((String value) => value.contains(oldTerm)),
+        isEmpty,
+        reason: '請將「$oldTerm」改為「${replacements[oldTerm]}」',
+      );
+    }
+    expect(
+      appStringsZhTw['achievementRequirementHelloWorld'],
+      contains('像素大頭貼'),
+    );
+  });
+
   test('tier requirements explain every level with an explicit unit', () {
     const List<String> tierKeys = <String>[
       'achievementTierPlayerCards',
@@ -62,8 +86,6 @@ void main() {
           'bio': 'Hello',
           'physical_id': '04:A1',
           'collection': List<String>.generate(26, (int index) => 'u$index'),
-          'phishing_count': 2,
-          'solder_master': true,
         },
         collectionCards: const <Map<String, dynamic>>[
           <String, dynamic>{'role': 'ATTENDEE'},
@@ -78,6 +100,8 @@ void main() {
         },
         prizeResult: const <String, dynamic>{'rank_prize': true},
         rank: 7,
+        phishingCount: 2,
+        externalPrizeClaimed: true,
         scoreboardFrozen: true,
         remoteRules: AchievementRules(
           sponsorScout: AchievementRule(
@@ -133,9 +157,16 @@ void main() {
     expect(progress(50).isMaxLevel, isTrue);
   });
 
-  test('missing optional backend fields stay unavailable without throwing', () {
+  test('ignores obsolete profile guesses for API-backed achievements', () {
     final List<AchievementBadgeProgress> achievements = evaluateAchievements(
-      const AchievementSnapshot(profile: <String, dynamic>{}),
+      const AchievementSnapshot(
+        profile: <String, dynamic>{
+          'phishing_count': 2,
+          'solder_master': true,
+          'solder_completed': true,
+          'solder_count': 1,
+        },
+      ),
     );
 
     AchievementBadgeProgress badge(AchievementKind kind) => achievements
@@ -153,6 +184,20 @@ void main() {
       ),
       isEmpty,
     );
+  });
+
+  test('valid false API values keep phishing and solder badges locked', () {
+    final List<AchievementBadgeProgress> achievements = evaluateAchievements(
+      const AchievementSnapshot(phishingCount: 0, externalPrizeClaimed: false),
+    );
+
+    AchievementBadgeProgress badge(AchievementKind kind) => achievements
+        .singleWhere((AchievementBadgeProgress item) => item.kind == kind);
+
+    expect(badge(AchievementKind.phishing).dataAvailable, isTrue);
+    expect(badge(AchievementKind.phishing).isUnlocked, isFalse);
+    expect(badge(AchievementKind.solderMaster).dataAvailable, isTrue);
+    expect(badge(AchievementKind.solderMaster).isUnlocked, isFalse);
   });
 
   test('roman level labels support every allowed remote tier', () {

@@ -4,12 +4,14 @@ import 'dart:typed_data';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show DeviceOrientation, SystemChrome;
+import 'package:flutter/services.dart'
+    show DeviceOrientation, SystemChrome, SystemUiOverlayStyle;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 import 'l10n/app_localizations.dart';
 import 'pages/admin/admin_home_page.dart';
 import 'pages/user/card_collection_page.dart';
+import 'pages/user/panasonic_support_mark.dart';
 import 'pages/user/setup_page.dart';
 import 'pages/debug/test_login_page.dart';
 import 'services/auth_service.dart';
@@ -81,9 +83,46 @@ class _SessionGateState extends State<_SessionGate> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Color(0xFF101820),
-      body: Center(child: CircularProgressIndicator(color: Color(0xFF7CFF6B))),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0F0018),
+        body: Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            Center(
+              child: Semantics(
+                label: 'HITCON NFC Battle',
+                image: true,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(36),
+                  child: Image.asset(
+                    'assets/app_icon/app_icon_master.png',
+                    key: const ValueKey<String>('startup-app-icon'),
+                    width: 160,
+                    height: 160,
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.high,
+                  ),
+                ),
+              ),
+            ),
+            const SafeArea(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: 48),
+                  child: PanasonicSupportMark(
+                    key: ValueKey<String>('startup-panasonic-mark'),
+                    width: 160,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -149,7 +188,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: AppLocalizations.supportedLocales,
-      localeListResolutionCallback: _resolveLocale,
+      localeListResolutionCallback: resolveAppLocale,
       home: const _SessionGate(),
       routes: {
         '/home': (context) => const NTagReaderPage(),
@@ -159,29 +198,33 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       },
     );
   }
+}
 
-  Locale _resolveLocale(
-    List<Locale>? preferredLocales,
-    Iterable<Locale> supportedLocales,
-  ) {
-    for (final Locale locale in preferredLocales ?? const <Locale>[]) {
-      final String country = locale.countryCode?.toUpperCase() ?? '';
-      final String script = locale.scriptCode?.toLowerCase() ?? '';
-      final bool traditionalChinese =
-          locale.languageCode == 'zh' &&
-          (script == 'hant' ||
-              country == 'TW' ||
-              country == 'HK' ||
-              country == 'MO');
-      if (traditionalChinese) {
-        return const Locale.fromSubtags(languageCode: 'zh', countryCode: 'TW');
-      }
-      if (locale.languageCode == 'en') {
-        return const Locale('en');
-      }
+Locale resolveAppLocale(
+  List<Locale>? preferredLocales,
+  Iterable<Locale> supportedLocales,
+) {
+  final Set<String> supportedLanguageCodes = supportedLocales
+      .map((Locale locale) => locale.languageCode)
+      .toSet();
+  for (final Locale locale in preferredLocales ?? const <Locale>[]) {
+    final String country = locale.countryCode?.toUpperCase() ?? '';
+    final String script = locale.scriptCode?.toLowerCase() ?? '';
+    final bool traditionalChinese =
+        locale.languageCode == 'zh' &&
+        (script == 'hant' ||
+            country == 'TW' ||
+            country == 'HK' ||
+            country == 'MO');
+    if (traditionalChinese && supportedLanguageCodes.contains('zh')) {
+      return const Locale.fromSubtags(languageCode: 'zh', countryCode: 'TW');
     }
-    return const Locale('en');
+    if (<String>{'en', 'ja', 'ko'}.contains(locale.languageCode) &&
+        supportedLanguageCodes.contains(locale.languageCode)) {
+      return Locale(locale.languageCode);
+    }
   }
+  return const Locale('en');
 }
 
 class _AutoNtagScanner {

@@ -5,6 +5,7 @@ class ScoreboardEntry {
     required this.score,
     required this.rank,
     required this.emojiIcon,
+    this.externalPrize,
   });
 
   final String userId;
@@ -12,6 +13,7 @@ class ScoreboardEntry {
   final int score;
   final int rank;
   final String emojiIcon;
+  final bool? externalPrize;
 
   static ScoreboardEntry? tryParse(Object? raw, {String fallbackUserId = ''}) {
     final Map<String, dynamic>? item = _stringMap(raw);
@@ -29,8 +31,13 @@ class ScoreboardEntry {
     final int score = _intValue(item['score'] ?? item['points']);
     final String emojiIcon = (item['emoji_icon'] ?? item['emoji'] ?? '')
         .toString();
+    final bool? externalPrize = _boolValue(item['external_prize']);
 
-    if (userId.isEmpty && displayName.isEmpty && rank <= 0 && score == 0) {
+    if (userId.isEmpty &&
+        displayName.isEmpty &&
+        rank <= 0 &&
+        score == 0 &&
+        externalPrize == null) {
       return null;
     }
 
@@ -40,6 +47,7 @@ class ScoreboardEntry {
       score: score,
       rank: rank,
       emojiIcon: emojiIcon,
+      externalPrize: externalPrize,
     );
   }
 
@@ -65,8 +73,27 @@ class ScoreboardEntry {
       'score': score,
       'rank': rank,
       'emoji_icon': emojiIcon,
+      if (externalPrize != null) 'external_prize': externalPrize,
     };
   }
+}
+
+int? scoreboardPhishingCount(Map<String, dynamic> payload) {
+  Object selected = payload;
+  for (final String key in <String>['ranking', 'entry', 'me', 'player']) {
+    final Object? candidate = payload[key];
+    if (_stringMap(candidate) != null) {
+      selected = candidate!;
+      break;
+    }
+  }
+  final Map<String, dynamic>? data = _stringMap(selected);
+  final Object? value = data?['num_of_phishing'];
+  if (value is! num || !value.isFinite || value < 0) {
+    return null;
+  }
+  final int count = value.toInt();
+  return value == count ? count : null;
 }
 
 class ScoreboardPageData {

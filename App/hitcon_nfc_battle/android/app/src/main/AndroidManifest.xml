@@ -14,6 +14,7 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
+        android:localeConfig="@xml/locales_config"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:usesCleartextTraffic="false">

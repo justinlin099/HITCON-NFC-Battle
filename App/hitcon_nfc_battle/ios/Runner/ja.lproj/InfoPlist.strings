@@ -1,0 +1,3 @@
+"NFCReaderUsageDescription" = "NFCタグの読み取りと書き込みにNFCを使用します。";
+"NSCameraUsageDescription" = "ログイン用QRコードをスキャンするためにカメラを使用します。";
+"NSPhotoLibraryUsageDescription" = "カード画像の選択と作成のために写真ライブラリにアクセスします。";

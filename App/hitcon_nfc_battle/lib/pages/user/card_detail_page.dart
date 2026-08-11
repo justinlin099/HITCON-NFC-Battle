@@ -146,6 +146,7 @@ class _CardDetailPageState extends State<CardDetailPage> {
                             child: Material(
                               color: Colors.transparent,
                               child: _TiltableDetailCard(
+                                key: const Key('card-detail-tiltable-card'),
                                 width: cardWidth,
                                 height: cardHeight,
                                 dismissVelocity: _dismissVelocity,
@@ -183,7 +184,11 @@ class _CardDetailPageState extends State<CardDetailPage> {
                                                 cardWidth: cardWidth,
                                                 scale: expandedCardScale,
                                                 color: PixelTheme.textWhite
-                                                    .withValues(alpha: 0.18),
+                                                    .withValues(
+                                                      alpha:
+                                                          ExpandedPixelCardStyle
+                                                              .watermarkOpacity,
+                                                    ),
                                               ),
                                             )
                                           : null,
@@ -286,7 +291,6 @@ class _CardDetailPageState extends State<CardDetailPage> {
         poster: SocialSharePoster(
           eyebrow: context.l10n.tr('socialShareCardLabel'),
           headline: headline,
-          detail: '${widget.attributeEmoji} ${widget.attributeLabel}',
           accentColor: widget.cardColor,
           visual: Transform.rotate(
             angle: -0.035,
@@ -305,6 +309,8 @@ class _CardDetailPageState extends State<CardDetailPage> {
                 attributeFontSize: 8,
                 emojiFontSize: 10,
                 titleMaxLines: 2,
+                attributeMaxLines: 3,
+                stackAttributePairs: true,
                 watermarkScale: 1.1,
                 verticalHitconWatermark: true,
                 verticalHitconScale: 0.9,
@@ -559,6 +565,7 @@ class _SparkleBurstPainter extends CustomPainter {
 
 class _TiltableDetailCard extends StatefulWidget {
   const _TiltableDetailCard({
+    super.key,
     required this.width,
     required this.height,
     required this.dismissVelocity,
@@ -663,8 +670,10 @@ class _TiltableDetailCardState extends State<_TiltableDetailCard>
   }
 
   void _handlePanEnd(DragEndDetails details) {
-    final double velocity = details.velocity.pixelsPerSecond.dx;
-    if (velocity.abs() >= widget.dismissVelocity) {
+    final Offset velocity = details.velocity.pixelsPerSecond;
+    final bool swipedHorizontally = velocity.dx.abs() >= widget.dismissVelocity;
+    final bool swipedDown = velocity.dy >= widget.dismissVelocity;
+    if (swipedHorizontally || swipedDown) {
       widget.onDismiss();
       return;
     }

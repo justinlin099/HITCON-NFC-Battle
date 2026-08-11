@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -22,6 +25,7 @@ class ScoreBoardPage extends StatefulWidget {
     this.profile,
     this.collectionCards,
     this.prizeResult,
+    this.scoreboardMe,
   });
 
   final PixelScheme? scheme;
@@ -29,6 +33,7 @@ class ScoreBoardPage extends StatefulWidget {
   final Map<String, dynamic>? profile;
   final List<Map<String, dynamic>>? collectionCards;
   final Map<String, dynamic>? prizeResult;
+  final Map<String, dynamic>? scoreboardMe;
 
   @override
   State<ScoreBoardPage> createState() => _ScoreBoardPageState();
@@ -57,10 +62,14 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>>? _collectionCards;
   Map<String, dynamic>? _prizeResult;
+  int? _phishingCount;
 
   @override
   void initState() {
     super.initState();
+    _authService.achievementProgressVersion.addListener(
+      _handleAchievementProgressChanged,
+    );
     final Map<String, dynamic>? initialMission = widget.stampMission;
     if (initialMission != null) {
       _stampMission = Map<String, dynamic>.from(initialMission);
@@ -78,6 +87,14 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
     final Map<String, dynamic>? initialPrize = widget.prizeResult;
     if (initialPrize != null) {
       _prizeResult = Map<String, dynamic>.from(initialPrize);
+    }
+    final Map<String, dynamic>? initialScoreboardMe = widget.scoreboardMe;
+    if (initialScoreboardMe != null) {
+      _applyMyRank(
+        initialScoreboardMe,
+        fallbackUserId: _authService.currentUserId ?? '',
+        allowUnmatched: true,
+      );
     }
     _loadBoard();
   }
@@ -107,13 +124,31 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
         !identical(updatedPrize, oldWidget.prizeResult)) {
       _prizeResult = Map<String, dynamic>.from(updatedPrize);
     }
+    final Map<String, dynamic>? updatedScoreboardMe = widget.scoreboardMe;
+    if (updatedScoreboardMe != null &&
+        !identical(updatedScoreboardMe, oldWidget.scoreboardMe)) {
+      _applyMyRank(
+        updatedScoreboardMe,
+        fallbackUserId: _authService.currentUserId ?? '',
+        allowUnmatched: true,
+      );
+    }
   }
 
   @override
   void dispose() {
+    _authService.achievementProgressVersion.removeListener(
+      _handleAchievementProgressChanged,
+    );
     _refreshStatus.dispose();
     _refreshPullDistance.dispose();
     super.dispose();
+  }
+
+  void _handleAchievementProgressChanged() {
+    if (mounted) {
+      unawaited(_loadBoard());
+    }
   }
 
   Future<void> _loadBoard({int? page, bool refreshMe = true}) async {
@@ -303,6 +338,7 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
     required String fallbackUserId,
     bool allowUnmatched = false,
   }) {
+    _phishingCount = scoreboardPhishingCount(payload);
     final ScoreboardEntry? entry = ScoreboardEntry.fromMyRankPayload(
       payload,
       fallbackUserId: fallbackUserId,
@@ -408,7 +444,10 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
     String userId,
     ScoreboardEntry resolved,
   ) async {
-    await _localStore.saveMyRank(userId, resolved.toJson());
+    await _localStore.saveMyRank(userId, <String, dynamic>{
+      ...resolved.toJson(),
+      if (_phishingCount != null) 'num_of_phishing': _phishingCount,
+    });
     if (!mounted) {
       return;
     }
@@ -546,6 +585,11 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
                                     stampMission: _stampMission,
                                     prizeResult: _prizeResult,
                                     rank: _myRank?.rank,
+                                    phishingCount: _phishingCount,
+                                    // The event's soldering challenge is
+                                    // redeemed by staff as an EXTERNAL prize.
+                                    externalPrizeClaimed:
+                                        _myRank?.externalPrize,
                                     scoreboardFrozen: _frozen,
                                     remoteRules: rules,
                                   ),
@@ -554,6 +598,7 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
                               padding: const EdgeInsets.only(bottom: 12),
                               child: _ScoreboardAchievementPanel(
                                 achievements: achievements,
+                                shareAccentColor: _profileCardColor(_profile),
                               ),
                             );
                           },
@@ -645,13 +690,55 @@ class _ScoreBoardPageState extends State<ScoreBoardPage> {
   }
 }
 
+Color _profileCardColor(Map<String, dynamic>? profile) {
+  final Object? raw = profile?['card_color'];
+  int? parsed;
+  if (raw is int) {
+    parsed = raw;
+  } else if (raw is num) {
+    parsed = raw.toInt();
+  } else if (raw is String) {
+    final String value = raw.trim();
+    if (value.startsWith('#')) {
+      final String hex = value.substring(1);
+      parsed = int.tryParse(hex.length == 6 ? 'FF$hex' : hex, radix: 16);
+    } else if (RegExp(r'^\d+$').hasMatch(value)) {
+      parsed = int.tryParse(value);
+    } else {
+      parsed = int.tryParse(value, radix: 16);
+    }
+  }
+  if (parsed == null || parsed < 0 || parsed > 0xFFFFFFFF) {
+    return PixelTheme.accent;
+  }
+  return Color(parsed <= 0xFFFFFF ? parsed | 0xFF000000 : parsed);
+}
+
 class _ScoreboardAchievementPanel extends StatelessWidget {
-  const _ScoreboardAchievementPanel({required this.achievements});
+  const _ScoreboardAchievementPanel({
+    required this.achievements,
+    required this.shareAccentColor,
+  });
 
   final List<AchievementBadgeProgress> achievements;
+  final Color shareAccentColor;
 
   @override
   Widget build(BuildContext context) {
+    final List<AchievementBadgeProgress>
+    orderedAchievements = <AchievementBadgeProgress>[
+      ...achievements.where(
+        (AchievementBadgeProgress achievement) => achievement.isUnlocked,
+      ),
+      ...achievements.where(
+        (AchievementBadgeProgress achievement) =>
+            !achievement.isUnlocked && !achievement.kind.isHiddenUntilUnlocked,
+      ),
+      ...achievements.where(
+        (AchievementBadgeProgress achievement) =>
+            !achievement.isUnlocked && achievement.kind.isHiddenUntilUnlocked,
+      ),
+    ];
     return Container(
       key: const Key('scoreboard-achievements'),
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -686,15 +773,16 @@ class _ScoreboardAchievementPanel extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: achievements
+              children: orderedAchievements
                   .map(
                     (AchievementBadgeProgress achievement) => Padding(
-                      padding: const EdgeInsets.only(right: 9),
+                      padding: const EdgeInsets.only(right: 4),
                       child: _ScoreboardAchievementBadge(
                         key: ValueKey<String>(
                           'scoreboard-achievement-${achievement.kind.name}',
                         ),
                         achievement: achievement,
+                        shareAccentColor: shareAccentColor,
                       ),
                     ),
                   )
@@ -708,20 +796,28 @@ class _ScoreboardAchievementPanel extends StatelessWidget {
 }
 
 class _ScoreboardAchievementBadge extends StatelessWidget {
-  const _ScoreboardAchievementBadge({super.key, required this.achievement});
+  const _ScoreboardAchievementBadge({
+    super.key,
+    required this.achievement,
+    required this.shareAccentColor,
+  });
 
   final AchievementBadgeProgress achievement;
+  final Color shareAccentColor;
 
   @override
   Widget build(BuildContext context) {
     final bool unlocked = achievement.isUnlocked;
     final bool available = achievement.dataAvailable;
+    final bool hidden = achievement.kind.isHiddenUntilUnlocked && !unlocked;
     final Color color = unlocked
         ? PixelTheme.accent
         : available
         ? PixelTheme.textGray
         : PixelTheme.textGray.withValues(alpha: 0.65);
-    final String title = context.l10n.tr(achievement.kind.titleKey);
+    final String title = context.l10n.tr(
+      hidden ? 'achievementHidden' : achievement.kind.titleKey,
+    );
     final String status = !available
         ? context.l10n.tr('achievementPendingData')
         : context.l10n.tr(
@@ -744,20 +840,26 @@ class _ScoreboardAchievementBadge extends StatelessWidget {
     final String semanticTitle = level.isEmpty ? title : '$title $level';
 
     return Semantics(
-      button: true,
-      label: '$semanticTitle, $status${detail.isEmpty ? '' : ', $detail'}',
-      hint: context.l10n.tr('achievementTapForDetails'),
+      container: true,
+      excludeSemantics: hidden,
+      button: !hidden,
+      label: hidden
+          ? title
+          : '$semanticTitle, $status${detail.isEmpty ? '' : ', $detail'}',
+      hint: hidden ? null : context.l10n.tr('achievementTapForDetails'),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => _showDetails(
-          context,
-          title: title,
-          status: status,
-          level: level,
-          color: color,
-        ),
+        onTap: hidden
+            ? null
+            : () => _showDetails(
+                context,
+                title: title,
+                status: status,
+                level: level,
+                color: color,
+              ),
         child: SizedBox(
-          width: 118,
+          width: 102,
           child: Column(
             children: <Widget>[
               Hero(
@@ -782,30 +884,32 @@ class _ScoreboardAchievementBadge extends StatelessWidget {
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              Text(
-                status,
-                style: TextStyle(
-                  color: color,
-                  fontFamily: 'Unifont',
-                  fontSize: 8.5,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              if (detail.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 2),
+              if (!hidden) ...<Widget>[
                 Text(
-                  detail,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
+                  status,
                   style: TextStyle(
-                    color: available ? color : PixelTheme.textGray,
+                    color: color,
                     fontFamily: 'Unifont',
-                    fontSize: 8,
-                    height: 1.05,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
+                if (detail.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    detail,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: available ? color : PixelTheme.textGray,
+                      fontFamily: 'Unifont',
+                      fontSize: 8,
+                      height: 1.05,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ],
             ],
           ),
@@ -842,6 +946,7 @@ class _ScoreboardAchievementBadge extends StatelessWidget {
               status: status,
               level: level,
               color: color,
+              shareAccentColor: shareAccentColor,
             ),
         transitionsBuilder:
             (
@@ -881,6 +986,7 @@ class _AchievementDetailsDialog extends StatelessWidget {
     required this.status,
     required this.level,
     required this.color,
+    required this.shareAccentColor,
   });
 
   final AchievementBadgeProgress achievement;
@@ -888,6 +994,7 @@ class _AchievementDetailsDialog extends StatelessWidget {
   final String status;
   final String level;
   final Color color;
+  final Color shareAccentColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1047,14 +1154,14 @@ class _AchievementDetailsDialog extends StatelessWidget {
     return showSocialSharePreview(
       context: context,
       payload: SocialSharePayload(
-        accentColor: color,
+        accentColor: shareAccentColor,
         fileName: 'hitcon-achievement-${achievement.kind.name}.png',
         text: shareText,
         poster: SocialSharePoster(
           eyebrow: context.l10n.tr('socialShareAchievementLabel'),
           headline: headline,
-          detail: isRankAchievement ? title : status,
-          accentColor: color,
+          detail: isRankAchievement ? title : null,
+          accentColor: shareAccentColor,
           visual: _AchievementBadgeImage(
             achievement: achievement,
             level: level,
@@ -1168,25 +1275,38 @@ class _TiltableHolographicBadgeState extends State<_TiltableHolographicBadge>
   Offset? _dragStart;
   double _startTiltX = 0;
   double _startTiltY = 0;
-  late final AnimationController _returnController;
-  late Animation<double> _returnX;
-  late Animation<double> _returnY;
+  late final AnimationController _motionController;
+  late Animation<double> _animatedTiltX;
+  late Animation<double> _animatedTiltY;
+  Timer? _introTimer;
 
   @override
   void initState() {
     super.initState();
-    _returnController =
+    _motionController =
         AnimationController(
           vsync: this,
           duration: const Duration(milliseconds: 480),
         )..addListener(() {
           setState(() {
-            _tiltX = _returnX.value;
-            _tiltY = _returnY.value;
+            _tiltX = _animatedTiltX.value;
+            _tiltY = _animatedTiltY.value;
           });
         });
-    _returnX = const AlwaysStoppedAnimation<double>(0);
-    _returnY = const AlwaysStoppedAnimation<double>(0);
+    _animatedTiltX = const AlwaysStoppedAnimation<double>(0);
+    _animatedTiltY = const AlwaysStoppedAnimation<double>(0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || MediaQuery.disableAnimationsOf(context)) {
+        return;
+      }
+      _introTimer = Timer(const Duration(milliseconds: 380), () {
+        _introTimer = null;
+        if (!mounted || MediaQuery.disableAnimationsOf(context)) {
+          return;
+        }
+        _playHolographicIntro();
+      });
+    });
   }
 
   @override
@@ -1245,7 +1365,9 @@ class _TiltableHolographicBadgeState extends State<_TiltableHolographicBadge>
   }
 
   void _startTilt(Offset globalPosition) {
-    _returnController.stop();
+    _introTimer?.cancel();
+    _introTimer = null;
+    _motionController.stop();
     setState(() {
       _dragStart = globalPosition;
       _startTiltX = _tiltX;
@@ -1269,18 +1391,71 @@ class _TiltableHolographicBadgeState extends State<_TiltableHolographicBadge>
     setState(() {
       _dragStart = null;
     });
-    _returnX = Tween<double>(begin: _tiltX, end: 0).animate(
-      CurvedAnimation(parent: _returnController, curve: Curves.easeOutCubic),
+    _motionController.duration = const Duration(milliseconds: 480);
+    _animatedTiltX = Tween<double>(begin: _tiltX, end: 0).animate(
+      CurvedAnimation(parent: _motionController, curve: Curves.easeOutCubic),
     );
-    _returnY = Tween<double>(begin: _tiltY, end: 0).animate(
-      CurvedAnimation(parent: _returnController, curve: Curves.easeOutCubic),
+    _animatedTiltY = Tween<double>(begin: _tiltY, end: 0).animate(
+      CurvedAnimation(parent: _motionController, curve: Curves.easeOutCubic),
     );
-    _returnController.forward(from: 0);
+    _motionController.forward(from: 0);
+  }
+
+  void _playHolographicIntro() {
+    _motionController.duration = const Duration(milliseconds: 1100);
+    _animatedTiltX = TweenSequence<double>(<TweenSequenceItem<double>>[
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: 0,
+          end: -0.08,
+        ).chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 28,
+      ),
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: -0.08,
+          end: 0.07,
+        ).chain(CurveTween(curve: Curves.easeInOutCubic)),
+        weight: 38,
+      ),
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: 0.07,
+          end: 0,
+        ).chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 34,
+      ),
+    ]).animate(_motionController);
+    _animatedTiltY = TweenSequence<double>(<TweenSequenceItem<double>>[
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: 0,
+          end: 0.32,
+        ).chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 30,
+      ),
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: 0.32,
+          end: -0.27,
+        ).chain(CurveTween(curve: Curves.easeInOutCubic)),
+        weight: 38,
+      ),
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: -0.27,
+          end: 0,
+        ).chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 32,
+      ),
+    ]).animate(_motionController);
+    _motionController.forward(from: 0);
   }
 
   @override
   void dispose() {
-    _returnController.dispose();
+    _introTimer?.cancel();
+    _motionController.dispose();
     super.dispose();
   }
 }
@@ -1300,6 +1475,8 @@ class _HolographicBadgeFoil extends StatelessWidget {
   final double tiltY;
   final double strength;
 
+  static Future<ui.Image>? _hatPatternImageFuture;
+
   @override
   Widget build(BuildContext context) {
     final double shift = ((tiltY - tiltX) / 0.72).clamp(-1.0, 1.0);
@@ -1308,22 +1485,19 @@ class _HolographicBadgeFoil extends StatelessWidget {
         key: const Key('achievement-holographic-foil'),
         fit: StackFit.expand,
         children: <Widget>[
-          Opacity(
-            opacity: 0.12 + strength * 0.34,
-            child: _maskedGradient(
-              LinearGradient(
-                begin: Alignment(-1.2 + shift * 0.75, -1),
-                end: Alignment(1.2 + shift * 0.75, 1),
-                colors: const <Color>[
-                  Color(0xFFFF2BD6),
-                  Color(0xFF35E7FF),
-                  Color(0xFFFFF36A),
-                  Color(0xFF69FF97),
-                  Color(0xFF7C5CFF),
-                  Color(0xFFFF2BD6),
-                ],
-              ),
-            ),
+          FutureBuilder<ui.Image>(
+            key: const Key('achievement-holographic-hat-pattern'),
+            future: _loadHatPatternImage(),
+            builder: (BuildContext context, AsyncSnapshot<ui.Image> snapshot) {
+              final ui.Image? hatPatternImage = snapshot.data;
+              if (hatPatternImage == null) {
+                return const SizedBox.shrink();
+              }
+              return Opacity(
+                opacity: 0.13 + strength * 0.42,
+                child: _maskedHatPattern(hatPatternImage, shift),
+              );
+            },
           ),
           Opacity(
             opacity: 0.05 + strength * 0.34,
@@ -1347,21 +1521,150 @@ class _HolographicBadgeFoil extends StatelessWidget {
     );
   }
 
+  Future<ui.Image> _loadHatPatternImage() {
+    return _hatPatternImageFuture ??= _renderOfficialHatPatternImage();
+  }
+
+  Future<ui.Image> _renderOfficialHatPatternImage() async {
+    const int patternSize = 320;
+    const double patternExtent = 320;
+    const double hatSize = 148;
+    final ui.Image hatImage = await _renderOfficialHatImage();
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+    final Paint paint = Paint()..filterQuality = FilterQuality.high;
+    final Rect source = Rect.fromLTWH(
+      0,
+      0,
+      hatImage.width.toDouble(),
+      hatImage.height.toDouble(),
+    );
+
+    // Two offset rows repeat into a diamond lattice. Drawing the four corner
+    // copies keeps hats that cross a tile boundary visually intact.
+    const List<Offset> centers = <Offset>[
+      Offset(0, 0),
+      Offset(patternExtent, 0),
+      Offset(0, patternExtent),
+      Offset(patternExtent, patternExtent),
+      Offset(patternExtent / 2, patternExtent / 2),
+    ];
+    for (final Offset center in centers) {
+      canvas.drawImageRect(
+        hatImage,
+        source,
+        Rect.fromCenter(center: center, width: hatSize, height: hatSize),
+        paint,
+      );
+    }
+    return recorder.endRecording().toImage(patternSize, patternSize);
+  }
+
+  Future<ui.Image> _renderOfficialHatImage() {
+    // Exact vector paths from the official HITCON homepage asset:
+    // https://hitcon.org/images/hitcon-hat-logo-2024-white.svg
+    const double sourceSize = 1417.32;
+    const int rasterSize = 160;
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+    canvas.scale(rasterSize / sourceSize);
+    final Paint paint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    final Path crown = Path()
+      ..moveTo(618.01, 315.04)
+      ..relativeCubicTo(50.36, -20.61, 107.12, 27.94, 175.09, 49.41)
+      ..relativeCubicTo(85.42, 26.98, 179.06, 38.72, 192.95, 127.88)
+      ..relativeCubicTo(22.5, 144.62, -19.33, 226.57, -19.33, 226.57)
+      ..relativeCubicTo(0, 0, -108.86, 80.28, -328.87, -31.36)
+      ..relativeCubicTo(-219.96, -111.63, -198.61, -164.71, -198.61, -164.71)
+      ..relativeCubicTo(0, 0, 32.8, -148.02, 178.77, -207.78)
+      ..close();
+    final Path brim = Path()
+      ..moveTo(419, 533.74)
+      ..relativeCubicTo(0, 0, -26.81, 22.87, -20.53, 44.47)
+      ..relativeCubicTo(6.3, 21.61, 55.77, 110.95, 206.86, 175.7)
+      ..relativeCubicTo(151.1, 64.78, 306.32, 74.77, 354.22, 32.35)
+      ..relativeCubicTo(15.22, -13.48, 6.44, -75.53, 6.44, -75.53)
+      ..relativeLineTo(16.43, -110.22)
+      ..relativeCubicTo(24.98, 11.12, 37.18, 12.51, 78.09, 32.48)
+      ..relativeCubicTo(107.34, 52.4, 260.79, 228.61, 202.13, 366.21)
+      ..relativeCubicTo(-58.65, 137.62, -275.6, 145.61, -483.11, 13.6)
+      ..relativeCubicTo(-348.96, -221.98, -378.22, -401.94, -547.07, -481.61)
+      ..relativeCubicTo(-34.04, -16.06, 40.75, 24.95, 115.51, 11.53)
+      ..relativeCubicTo(74.75, -13.43, 71.03, -8.98, 71.03, -8.98)
+      ..close();
+    final Path trail = Path()
+      ..moveTo(182.01, 507.4)
+      ..relativeCubicTo(84.97, 38.84, 229.05, 194.35, 344.27, 319.78)
+      ..relativeCubicTo(0, 0, -330.59, -278.58, -366, -296.71)
+      ..relativeCubicTo(-30.94, -15.85, -22.81, -43.44, 21.74, -23.07)
+      ..close();
+    canvas.drawPath(crown, paint);
+    canvas.drawPath(brim, paint);
+    canvas.drawPath(trail, paint);
+    return recorder.endRecording().toImage(rasterSize, rasterSize);
+  }
+
+  Widget _maskedHatPattern(ui.Image hatPatternImage, double shift) {
+    final double tileSize = dimension * 0.46;
+    final double tileScale = tileSize / hatPatternImage.width;
+    final double centeredOffset = (dimension - tileSize) / 2;
+    final Matrix4 patternMatrix =
+        Matrix4.diagonal3Values(tileScale, tileScale, 1)..setTranslationRaw(
+          centeredOffset + shift * tileSize * 0.48,
+          centeredOffset,
+          0,
+        );
+    final LinearGradient rainbow = LinearGradient(
+      begin: Alignment(-1.25 + shift * 0.8, -1),
+      end: Alignment(1.25 + shift * 0.8, 1),
+      colors: const <Color>[
+        Color(0xFFFF2BD6),
+        Color(0xFF35E7FF),
+        Color(0xFFFFF36A),
+        Color(0xFF69FF97),
+        Color(0xFF7C5CFF),
+        Color(0xFFFF2BD6),
+      ],
+    );
+
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: rainbow.createShader,
+      child: ShaderMask(
+        blendMode: BlendMode.srcIn,
+        shaderCallback: (_) => ui.ImageShader(
+          hatPatternImage,
+          TileMode.repeated,
+          TileMode.repeated,
+          patternMatrix.storage,
+        ),
+        child: _badgeMask(),
+      ),
+    );
+  }
+
   Widget _maskedGradient(Gradient gradient) {
     return ShaderMask(
       blendMode: BlendMode.srcIn,
       shaderCallback: gradient.createShader,
-      child: Image.asset(
-        assetPath,
-        width: dimension,
-        height: dimension,
-        fit: BoxFit.contain,
-        filterQuality: FilterQuality.none,
-        cacheWidth: (dimension * 2).round(),
-        cacheHeight: (dimension * 2).round(),
-        color: Colors.white,
-        colorBlendMode: BlendMode.srcIn,
-      ),
+      child: _badgeMask(),
+    );
+  }
+
+  Widget _badgeMask() {
+    return Image.asset(
+      assetPath,
+      width: dimension,
+      height: dimension,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.none,
+      cacheWidth: (dimension * 2).round(),
+      cacheHeight: (dimension * 2).round(),
+      color: Colors.white,
+      colorBlendMode: BlendMode.srcIn,
     );
   }
 }
@@ -1436,6 +1739,71 @@ class _AchievementBadgeImage extends StatelessWidget {
         );
       },
     );
+    if (achievement.kind.isHiddenUntilUnlocked && !achievement.isUnlocked) {
+      return SizedBox.square(
+        key: ValueKey<String>(
+          'achievement-hidden-cover-${achievement.kind.name}',
+        ),
+        dimension: dimension,
+        child: Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            ColorFiltered(
+              colorFilter: ColorFilter.mode(PixelTheme.bgDark, BlendMode.srcIn),
+              child: image,
+            ),
+            Center(
+              child: Container(
+                width: 48 * scale,
+                height: 56 * scale,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: PixelTheme.bgDark,
+                  border: Border.all(
+                    color: PixelTheme.textGray,
+                    width: 2 * scale,
+                  ),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: Colors.black,
+                      blurRadius: 0,
+                      offset: Offset(3 * scale, 3 * scale),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  '?',
+                  style: TextStyle(
+                    color: PixelTheme.textGray,
+                    fontFamily: 'Unifont',
+                    fontSize: 38 * scale,
+                    height: 1,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    // The HELLO WORLD source art has a visibly shorter non-transparent frame
+    // than the other badge assets despite sharing the same square canvas.
+    // Normalize only its vertical artwork bounds so every badge frame reads
+    // as the same height in the list, detail view, and share poster.
+    if (achievement.kind == AchievementKind.helloWorld) {
+      image = Transform.translate(
+        key: const ValueKey<String>('achievement-image-offset-helloWorld'),
+        offset: Offset(0, 1.5 * scale),
+        child: Transform.scale(
+          key: const ValueKey<String>(
+            'achievement-image-normalization-helloWorld',
+          ),
+          scaleY: 1.05,
+          child: image,
+        ),
+      );
+    }
     if (!achievement.isUnlocked) {
       image = Opacity(
         opacity: achievement.dataAvailable ? 0.52 : 0.32,
@@ -1500,9 +1868,6 @@ class _AchievementBadgeProgressMark extends StatelessWidget {
           ),
         ),
       );
-    }
-    if (!achievement.isUnlocked) {
-      return const SizedBox.shrink();
     }
     return Positioned(
       left: 18 * scale,

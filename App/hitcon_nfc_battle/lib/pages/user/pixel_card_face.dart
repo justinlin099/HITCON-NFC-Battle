@@ -19,6 +19,7 @@ class ExpandedPixelCardStyle {
   static const double thumbnailHitconRightInsetFactor = 0.025;
   static const double thumbnailHitconBottomInsetFactor = 0.02;
   static const double dividerExtraLength = 4;
+  static const double watermarkOpacity = 0.30;
 }
 
 class PixelCardFace extends StatelessWidget {
@@ -434,7 +435,9 @@ class _HitconWatermark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final TextStyle style = TextStyle(
-      color: PixelTheme.textWhite.withValues(alpha: 0.18),
+      color: PixelTheme.textWhite.withValues(
+        alpha: ExpandedPixelCardStyle.watermarkOpacity,
+      ),
       fontFamily: 'Unifont',
       fontSize: fontSize,
       fontWeight: FontWeight.w900,

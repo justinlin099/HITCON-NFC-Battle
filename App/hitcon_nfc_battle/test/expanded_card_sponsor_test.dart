@@ -7,6 +7,7 @@ import 'package:hitcon_nfc_battle/pages/user/card_detail_page.dart';
 import 'package:hitcon_nfc_battle/pages/user/panasonic_support_mark.dart';
 import 'package:hitcon_nfc_battle/pages/user/pixel_card_face.dart';
 import 'package:hitcon_nfc_battle/pages/user/pixel_theme.dart';
+import 'package:hitcon_nfc_battle/pages/user/social_share_dialog.dart';
 
 void main() {
   testWidgets('expanded card places Panasonic left of HITCON', (
@@ -60,10 +61,20 @@ void main() {
     final Rect hitconRect = tester.getRect(hitcon);
     expect(panasonicRect.center.dx, lessThan(hitconRect.center.dx));
     expect(panasonicRect.left, greaterThan(cardRect.left + 3));
-    expect(panasonicRect.bottom, lessThan(cardRect.bottom - 3));
+    expect(panasonicRect.bottom, lessThan(cardRect.bottom - 10));
 
     final Text hitconText = tester.widget<Text>(hitcon);
     expect(hitconText.style?.fontSize, greaterThan(30));
+    expect(
+      hitconText.style?.color?.a,
+      closeTo(ExpandedPixelCardStyle.watermarkOpacity, 0.001),
+    );
+
+    final PanasonicSupportMark panasonicMark = tester.widget(panasonic);
+    expect(
+      panasonicMark.color.a,
+      closeTo(ExpandedPixelCardStyle.watermarkOpacity, 0.001),
+    );
   });
 
   testWidgets('expanded card matches my-card bio height and bottom fade', (
@@ -150,7 +161,36 @@ void main() {
 
     expect(find.byKey(const Key('social-share-dialog')), findsOneWidget);
     expect(find.text('Collected SHARE TEST'), findsOneWidget);
-    expect(find.text('#HITCON  #NFCBATTLE'), findsOneWidget);
+    expect(find.text('#HITCON  #HITCON2026  #NFCBATTLE'), findsOneWidget);
+    final Size posterSize = tester.getSize(
+      find.byKey(const Key('social-share-poster')),
+    );
+    expect(posterSize, const Size(360, 360));
+    expect(find.byKey(const Key('social-share-visual-fitted')), findsOneWidget);
+    final Finder sharePoster = find.byKey(const Key('social-share-poster'));
+    final SocialSharePoster poster = tester.widget<SocialSharePoster>(
+      find.byType(SocialSharePoster),
+    );
+    expect(poster.detail, isNull);
+    final PixelCardFace sharedCard = tester.widget<PixelCardFace>(
+      find.descendant(of: sharePoster, matching: find.byType(PixelCardFace)),
+    );
+    expect(sharedCard.attributeMaxLines, 3);
+    expect(sharedCard.stackAttributePairs, isTrue);
+    final Image appIcon = tester.widget<Image>(
+      find.byKey(const Key('social-share-app-icon')),
+    );
+    expect(appIcon.image, isA<AssetImage>());
+    expect(
+      (appIcon.image as AssetImage).assetName,
+      'assets/app_icon/app_icon_master.png',
+    );
+    expect(appIcon.width, 24);
+    expect(appIcon.height, 24);
+    final ClipRRect appIconClip = tester.widget<ClipRRect>(
+      find.byKey(const Key('social-share-app-icon-clip')),
+    );
+    expect(appIconClip.borderRadius, BorderRadius.circular(5));
     expect(find.byKey(const Key('social-share-submit')), findsOneWidget);
   });
 }

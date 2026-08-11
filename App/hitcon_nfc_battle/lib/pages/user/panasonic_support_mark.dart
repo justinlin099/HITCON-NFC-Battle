@@ -38,12 +38,13 @@ class ExpandedCardPanasonicMark extends StatelessWidget {
   final Color color;
 
   static const double widthFactor = 0.38;
-  static const double padding = 8;
+  static const double horizontalPadding = 8;
+  static const double bottomPadding = 12;
 
   @override
   Widget build(BuildContext context) {
     return Transform.translate(
-      offset: Offset(padding * scale, -padding * scale),
+      offset: Offset(horizontalPadding * scale, -bottomPadding * scale),
       child: PanasonicSupportMark(width: cardWidth * widthFactor, color: color),
     );
   }

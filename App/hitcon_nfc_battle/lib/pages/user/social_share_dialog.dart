@@ -45,7 +45,7 @@ class SocialSharePoster extends StatelessWidget {
   });
 
   static const double width = 360;
-  static const double height = 450;
+  static const double height = 360;
 
   final String eyebrow;
   final String headline;
@@ -59,6 +59,7 @@ class SocialSharePoster extends StatelessWidget {
         Color.lerp(PixelTheme.bgDark, accentColor, 0.12) ?? PixelTheme.bgDark;
     return MediaQuery.withNoTextScaling(
       child: SizedBox(
+        key: const Key('social-share-poster'),
         width: width,
         height: height,
         child: Material(
@@ -73,20 +74,21 @@ class SocialSharePoster extends StatelessWidget {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 18),
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 14),
                 child: Column(
                   children: <Widget>[
                     Row(
                       children: <Widget>[
-                        Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            color: accentColor,
-                            border: Border.all(
-                              color: PixelTheme.textWhite,
-                              width: 2,
-                            ),
+                        ClipRRect(
+                          key: const Key('social-share-app-icon-clip'),
+                          borderRadius: BorderRadius.circular(5),
+                          child: Image.asset(
+                            'assets/app_icon/app_icon_master.png',
+                            key: const Key('social-share-app-icon'),
+                            width: 24,
+                            height: 24,
+                            fit: BoxFit.cover,
+                            filterQuality: FilterQuality.none,
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -114,9 +116,17 @@ class SocialSharePoster extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    Expanded(child: Center(child: visual)),
-                    const SizedBox(height: 9),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: Center(
+                        child: FittedBox(
+                          key: const Key('social-share-visual-fitted'),
+                          fit: BoxFit.contain,
+                          child: visual,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 7),
                     Text(
                       eyebrow.toUpperCase(),
                       maxLines: 1,
@@ -130,7 +140,7 @@ class SocialSharePoster extends StatelessWidget {
                         letterSpacing: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 4),
                     Text(
                       headline,
                       maxLines: 2,
@@ -145,10 +155,10 @@ class SocialSharePoster extends StatelessWidget {
                       ),
                     ),
                     if (detail?.trim().isNotEmpty == true) ...<Widget>[
-                      const SizedBox(height: 5),
+                      const SizedBox(height: 4),
                       Text(
                         detail!.trim(),
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
                         style: TextStyle(
@@ -160,15 +170,13 @@ class SocialSharePoster extends StatelessWidget {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 11),
-                    Container(height: 2, color: accentColor),
                     const SizedBox(height: 8),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: <Widget>[
                         Expanded(
                           child: Text(
-                            '#HITCON  #NFCBATTLE',
+                            '#HITCON  #HITCON2026  #NFCBATTLE',
                             maxLines: 1,
                             style: TextStyle(
                               color: accentColor,
@@ -246,17 +254,6 @@ class _SocialShareDialogState extends State<_SocialShareDialog> {
                   fontFamily: 'Unifont',
                   fontSize: 16,
                   fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                context.l10n.tr('socialSharePreviewHint'),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: PixelTheme.textGray,
-                  fontFamily: 'Unifont',
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 12),
@@ -489,7 +486,6 @@ class _SocialShareBackdropPainter extends CustomPainter {
     }
 
     final Paint cornerPaint = Paint()..color = accentColor;
-    canvas.drawRect(const Rect.fromLTWH(0, 0, 6, 38), cornerPaint);
     canvas.drawRect(
       Rect.fromLTWH(size.width - 6, size.height - 38, 6, 38),
       cornerPaint,

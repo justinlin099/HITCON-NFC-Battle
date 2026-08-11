@@ -1,0 +1,3 @@
+"NFCReaderUsageDescription" = "需要使用 NFC 讀取與寫入 NFC Tag。";
+"NSCameraUsageDescription" = "需要使用相機掃描登入 QR Code。";
+"NSPhotoLibraryUsageDescription" = "需要存取照片圖庫，讓你選擇圖片並製作個人卡片。";

@@ -22,9 +22,26 @@ void main() {
 
       final img.Image? decoded = img.decodePng(asset.readAsBytesSync());
       expect(decoded, isNotNull, reason: option.assetPath);
-      expect(decoded!.width, 512, reason: option.assetPath);
-      expect(decoded.height, 512, reason: option.assetPath);
+      expect(decoded!.width, 48, reason: option.assetPath);
+      expect(decoded.height, 48, reason: option.assetPath);
     }
+  });
+
+  test('hacker seal avatar is registered as 駭客豹豹', () {
+    final DefaultAvatarOption seal = defaultAvatarCatalog.singleWhere(
+      (DefaultAvatarOption option) =>
+          option.assetPath.endsWith('/hacker_seal.png'),
+    );
+
+    expect(seal.labelKey, 'defaultAvatarHackerSeal');
+    final img.Image? decoded = img.decodePng(
+      File(seal.assetPath).readAsBytesSync(),
+    );
+    expect(decoded, isNotNull);
+    final img.Pixel corner = decoded!.getPixel(0, 0);
+    expect(corner.r.toInt(), 0);
+    expect(corner.g.toInt(), 25);
+    expect(corner.b.toInt(), 51);
   });
 
   testWidgets('default avatar page title uses the pixel font', (

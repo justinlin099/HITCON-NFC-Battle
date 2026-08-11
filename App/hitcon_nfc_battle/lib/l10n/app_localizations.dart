@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'strings_en.dart';
+import 'strings_ja.dart';
+import 'strings_ko.dart';
 import 'strings_zh_tw.dart';
 
 class AppLocalizations {
@@ -12,6 +14,8 @@ class AppLocalizations {
   static const List<Locale> supportedLocales = <Locale>[
     Locale('en'),
     Locale.fromSubtags(languageCode: 'zh', countryCode: 'TW'),
+    Locale('ja'),
+    Locale('ko'),
   ];
 
   static const LocalizationsDelegate<AppLocalizations> delegate =
@@ -22,7 +26,12 @@ class AppLocalizations {
   }
 
   Map<String, String> get _strings {
-    return locale.languageCode == 'zh' ? appStringsZhTw : appStringsEn;
+    return switch (locale.languageCode) {
+      'zh' => appStringsZhTw,
+      'ja' => appStringsJa,
+      'ko' => appStringsKo,
+      _ => appStringsEn,
+    };
   }
 
   String tr(String key, [Map<String, Object?> values = const {}]) {
@@ -40,7 +49,7 @@ class _AppLocalizationsDelegate
 
   @override
   bool isSupported(Locale locale) {
-    return locale.languageCode == 'en' || locale.languageCode == 'zh';
+    return const <String>{'en', 'zh', 'ja', 'ko'}.contains(locale.languageCode);
   }
 
   @override

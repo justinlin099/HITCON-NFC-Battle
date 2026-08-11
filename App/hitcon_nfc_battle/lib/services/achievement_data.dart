@@ -18,6 +18,8 @@ enum AchievementKind {
 enum AchievementProgressDirection { increasing, rank }
 
 extension AchievementKindPresentation on AchievementKind {
+  bool get isHiddenUntilUnlocked => this == AchievementKind.phishing;
+
   String get titleKey => switch (this) {
     AchievementKind.helloWorld => 'achievementHelloWorld',
     AchievementKind.nfcOnline => 'achievementNfcOnline',
@@ -144,6 +146,8 @@ class AchievementSnapshot {
     this.stampMission,
     this.prizeResult,
     this.rank,
+    this.phishingCount,
+    this.externalPrizeClaimed,
     this.scoreboardFrozen = false,
     this.remoteRules,
   });
@@ -153,6 +157,8 @@ class AchievementSnapshot {
   final Map<String, dynamic>? stampMission;
   final Map<String, dynamic>? prizeResult;
   final int? rank;
+  final int? phishingCount;
+  final bool? externalPrizeClaimed;
   final bool scoreboardFrozen;
   final AchievementRules? remoteRules;
 }
@@ -181,17 +187,8 @@ List<AchievementBadgeProgress> evaluateAchievements(
     'SPONSOR',
     'COMMUNITY',
   }.where(roles.contains).length;
-  final int? phishingCount = _strictNonNegativeInt(profile?['phishing_count']);
-  final bool? solderCompleted = _firstBool(<Object?>[
-    profile?['solder_master'],
-    profile?['solder_completed'],
-    mission?['solder_master'],
-    mission?['solder_completed'],
-  ]);
-  final int? solderCount = _firstInt(<Object?>[
-    profile?['solder_count'],
-    mission?['solder_count'],
-  ]);
+  final int? phishingCount = snapshot.phishingCount;
+  final bool? solderCompleted = snapshot.externalPrizeClaimed;
   final bool prizeUnlocked =
       mission?['eligible_for_stamp_prize'] == true ||
       prize?['stamp_prize'] == true ||
@@ -264,13 +261,9 @@ List<AchievementBadgeProgress> evaluateAchievements(
     ),
     AchievementBadgeProgress(
       kind: AchievementKind.solderMaster,
-      current: solderCompleted == true
-          ? 1
-          : (solderCount ?? 0) > 0
-          ? 1
-          : 0,
+      current: solderCompleted == true ? 1 : 0,
       thresholds: const <int>[1],
-      dataAvailable: solderCompleted != null || solderCount != null,
+      dataAvailable: solderCompleted != null,
     ),
   ];
 
@@ -335,25 +328,6 @@ int? _strictNonNegativeInt(Object? value) {
   }
   final int result = value.toInt();
   return value == result ? result : null;
-}
-
-int? _firstInt(Iterable<Object?> values) {
-  for (final Object? value in values) {
-    final int? parsed = _strictNonNegativeInt(value);
-    if (parsed != null) {
-      return parsed;
-    }
-  }
-  return null;
-}
-
-bool? _firstBool(Iterable<Object?> values) {
-  for (final Object? value in values) {
-    if (value is bool) {
-      return value;
-    }
-  }
-  return null;
 }
 
 String achievementRomanLevel(int level) {

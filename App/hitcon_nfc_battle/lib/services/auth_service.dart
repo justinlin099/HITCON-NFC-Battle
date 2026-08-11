@@ -10,7 +10,6 @@ import 'local_collection_store.dart';
 import 'local_profile_store.dart';
 import 'nfc_battle_api_client.dart';
 import 'ntag_security_service.dart';
-import 'user_profile_fields.dart';
 
 enum UserRole { admin, user, eventStaff, unknown }
 
@@ -47,6 +46,7 @@ class AuthService {
   String? _lastApiErrorCode;
   int? _lastAuthStatusCode;
   String? _lastNtagSecretError;
+  final ValueNotifier<int> achievementProgressVersion = ValueNotifier<int>(0);
 
   Future<bool> loginWithToken(String token) async {
     _lastAuthError = null;
@@ -627,6 +627,7 @@ class AuthService {
         token: _jwtToken!,
         body: <String, dynamic>{'victim': victim, 'attacker': attacker},
       );
+      achievementProgressVersion.value += 1;
       return true;
     } catch (e) {
       _log('Error recording phishing event: $e');
@@ -1042,7 +1043,6 @@ class AuthService {
 
   Map<String, dynamic> _normalizeProfile(Object? raw) {
     final Map<String, dynamic> profile = _jsonMap(raw);
-    final int? phishingCount = readPhishingCount(profile);
     final CardBioData cardBio = _cardBioCodec.decode(profile['bio']);
     final String emoji =
         profile['attribute_emoji'] as String? ??
@@ -1069,11 +1069,6 @@ class AuthService {
     if (physicalId != null) {
       normalized['physical_id'] = physicalId;
       normalized['paired_ntag_uid'] = physicalId;
-    }
-    if (phishingCount == null) {
-      normalized.remove('phishing_count');
-    } else {
-      normalized['phishing_count'] = phishingCount;
     }
     return normalized;
   }
@@ -1280,7 +1275,6 @@ class AuthService {
   UserRole get currentRole => _currentRole;
   String? get jwtToken => _jwtToken;
   Map<String, dynamic>? get userProfile => _userProfile;
-  int? get phishingCount => readPhishingCount(_userProfile);
   String? get lastAuthError => _lastAuthError;
   String? get lastApiErrorCode => _lastApiErrorCode;
   String? get lastNtagSecretError => _lastNtagSecretError;

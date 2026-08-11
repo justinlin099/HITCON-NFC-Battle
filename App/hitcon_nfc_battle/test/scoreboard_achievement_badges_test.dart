@@ -7,6 +7,7 @@ import 'package:hitcon_nfc_battle/config/achievement_config.dart';
 import 'package:hitcon_nfc_battle/config/app_config.dart';
 import 'package:hitcon_nfc_battle/l10n/app_localizations.dart';
 import 'package:hitcon_nfc_battle/pages/user/score_board_page.dart';
+import 'package:hitcon_nfc_battle/pages/user/social_share_dialog.dart';
 
 void main() {
   setUp(() {
@@ -36,7 +37,13 @@ void main() {
             'display_name': 'Alice',
             'pixel_avatar_base64': 'avatar',
             'bio': 'Hello',
-            'phishing_count': 0,
+            'card_color': 0xFF00D9FF,
+          },
+          scoreboardMe: <String, dynamic>{
+            'rank': 7,
+            'score': 10,
+            'num_of_phishing': 0,
+            'external_prize': false,
           },
           collectionCards: <Map<String, dynamic>>[],
           stampMission: <String, dynamic>{
@@ -77,16 +84,82 @@ void main() {
     );
     expect(
       find.byKey(const ValueKey<String>('achievement-complete-nfcOnline')),
-      findsNothing,
+      findsOneWidget,
     );
     expect(
       find.byKey(const ValueKey<String>('achievement-complete-sponsorScout')),
       findsNothing,
     );
 
+    final Finder hiddenPhishingBadge = find.byKey(
+      const ValueKey<String>('scoreboard-achievement-phishing'),
+    );
+    expect(
+      find.descendant(
+        of: hiddenPhishingBadge,
+        matching: find.text('HIDDEN ACHIEVEMENT'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: hiddenPhishingBadge, matching: find.text('PHISHING')),
+      findsNothing,
+    );
+    final Finder hiddenPhishingCover = find.byKey(
+      const ValueKey<String>('achievement-hidden-cover-phishing'),
+    );
+    expect(hiddenPhishingCover, findsOneWidget);
+    expect(
+      find.descendant(of: hiddenPhishingCover, matching: find.text('?')),
+      findsOneWidget,
+    );
+    final GestureDetector hiddenPhishingGesture = tester
+        .widget<GestureDetector>(
+          find.descendant(
+            of: hiddenPhishingBadge,
+            matching: find.byType(GestureDetector),
+          ),
+        );
+    expect(hiddenPhishingGesture.onTap, isNull);
+    expect(
+      find.byKey(const ValueKey<String>('achievement-complete-phishing')),
+      findsNothing,
+    );
+    final Finder solderMasterBadge = find.byKey(
+      const ValueKey<String>('scoreboard-achievement-solderMaster'),
+    );
+    expect(
+      tester.getTopLeft(hiddenPhishingBadge).dx,
+      greaterThan(tester.getTopLeft(solderMasterBadge).dx),
+    );
+
+    final Transform helloWorldNormalization = tester.widget<Transform>(
+      find.byKey(
+        const ValueKey<String>('achievement-image-normalization-helloWorld'),
+      ),
+    );
+    expect(helloWorldNormalization.transform.storage[0], closeTo(1, 0.001));
+    expect(helloWorldNormalization.transform.storage[5], closeTo(1.05, 0.001));
+    final Transform helloWorldOffset = tester.widget<Transform>(
+      find.byKey(const ValueKey<String>('achievement-image-offset-helloWorld')),
+    );
+    expect(helloWorldOffset.transform.storage[13], closeTo(1.5, 0.001));
+
     final Finder helloWorldBadge = find.byKey(
       const ValueKey<String>('scoreboard-achievement-helloWorld'),
     );
+    final Finder nfcOnlineBadge = find.byKey(
+      const ValueKey<String>('scoreboard-achievement-nfcOnline'),
+    );
+    final Finder sponsorBadge = find.byKey(
+      const ValueKey<String>('scoreboard-achievement-sponsorScout'),
+    );
+    final Rect helloWorldBadgeRect = tester.getRect(helloWorldBadge);
+    final Rect nfcOnlineBadgeRect = tester.getRect(nfcOnlineBadge);
+    final Rect sponsorBadgeRect = tester.getRect(sponsorBadge);
+    expect(helloWorldBadgeRect.width, closeTo(102, 0.01));
+    expect(sponsorBadgeRect.left - helloWorldBadgeRect.right, closeTo(4, 0.01));
+    expect(nfcOnlineBadgeRect.left, greaterThan(sponsorBadgeRect.left));
     final Rect helloWorldImageRect = tester.getRect(
       find.descendant(of: helloWorldBadge, matching: find.byType(Hero)),
     );
@@ -98,9 +171,6 @@ void main() {
       closeTo(8, 0.01),
     );
 
-    final Finder sponsorBadge = find.byKey(
-      const ValueKey<String>('scoreboard-achievement-sponsorScout'),
-    );
     final Rect sponsorImageRect = tester.getRect(
       find.descendant(of: sponsorBadge, matching: find.byType(Hero)),
     );
@@ -126,7 +196,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('social-share-dialog')), findsOneWidget);
     expect(find.text('Unlocked HELLO, WORLD!'), findsOneWidget);
-    expect(find.text('#HITCON  #NFCBATTLE'), findsOneWidget);
+    expect(find.text('#HITCON  #HITCON2026  #NFCBATTLE'), findsOneWidget);
+    final SocialSharePoster poster = tester.widget<SocialSharePoster>(
+      find.byType(SocialSharePoster),
+    );
+    expect(poster.detail, isNull);
+    expect(poster.accentColor, const Color(0xFF00D9FF));
     await tester.tap(find.byKey(const Key('social-share-cancel')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('social-share-dialog')), findsNothing);
@@ -141,6 +216,10 @@ void main() {
     expect(holographicBadge, findsOneWidget);
     expect(
       find.byKey(const Key('achievement-holographic-foil')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('achievement-holographic-hat-pattern')),
       findsOneWidget,
     );
     expect(tester.getSize(holographicBadge).width, greaterThan(180));
@@ -231,6 +310,56 @@ void main() {
   });
 
   testWidgets(
+    'unlocked achievement automatically previews its holographic tilt',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _localizedApp(
+          child: const ScoreBoardPage(
+            profile: <String, dynamic>{
+              'display_name': 'Alice',
+              'pixel_avatar_base64': 'avatar',
+              'bio': 'Hello',
+              'physical_id': '',
+            },
+            collectionCards: <Map<String, dynamic>>[],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('scoreboard-achievement-helloWorld')),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final Finder badgeTransform = find.byKey(
+        const Key('achievement-badge-transform'),
+      );
+      expect(
+        MediaQuery.disableAnimationsOf(tester.element(badgeTransform)),
+        isFalse,
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 300));
+      final List<double> animatedTransform = List<double>.of(
+        tester.widget<Transform>(badgeTransform).transform.storage,
+      );
+      final List<double> restingTransform = List<double>.of(
+        (Matrix4.identity()..setEntry(3, 2, 0.0018)).storage,
+      );
+      expect(animatedTransform, isNot(equals(restingTransform)));
+
+      await tester.pumpAndSettle();
+      final List<double> returnedTransform = List<double>.of(
+        tester.widget<Transform>(badgeTransform).transform.storage,
+      );
+      expect(returnedTransform, equals(restingTransform));
+    },
+  );
+
+  testWidgets(
     'locked achievement detail stays static without holographic foil',
     (WidgetTester tester) async {
       await tester.pumpWidget(
@@ -241,7 +370,6 @@ void main() {
               'pixel_avatar_base64': '',
               'bio': '',
               'physical_id': '',
-              'phishing_count': 0,
             },
             collectionCards: <Map<String, dynamic>>[],
           ),
@@ -270,6 +398,107 @@ void main() {
       expect(find.byKey(const Key('achievement-detail-share')), findsNothing);
     },
   );
+
+  testWidgets('unlocks solder master from the external prize claim', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      _localizedApp(
+        child: const ScoreBoardPage(
+          scoreboardMe: <String, dynamic>{
+            'rank': 7,
+            'score': 10,
+            'num_of_phishing': 0,
+            'external_prize': true,
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('achievement-complete-solderMaster')),
+      findsOneWidget,
+    );
+    final Finder solderMasterBadge = find.byKey(
+      const ValueKey<String>('scoreboard-achievement-solderMaster'),
+    );
+    final Finder helloWorldBadge = find.byKey(
+      const ValueKey<String>('scoreboard-achievement-helloWorld'),
+    );
+    expect(
+      tester.getTopLeft(solderMasterBadge).dx,
+      lessThan(tester.getTopLeft(helloWorldBadge).dx),
+    );
+  });
+
+  testWidgets('reveals the hidden phishing achievement after unlock', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      _localizedApp(
+        child: const ScoreBoardPage(
+          profile: <String, dynamic>{
+            'display_name': '',
+            'pixel_avatar_base64': '',
+            'bio': '',
+            'physical_id': '',
+          },
+          scoreboardMe: <String, dynamic>{
+            'rank': 7,
+            'score': 0,
+            'num_of_phishing': 1,
+            'external_prize': false,
+          },
+          collectionCards: <Map<String, dynamic>>[],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final Finder phishingBadge = find.byKey(
+      const ValueKey<String>('scoreboard-achievement-phishing'),
+    );
+    expect(
+      find.byKey(const ValueKey<String>('achievement-hidden-cover-phishing')),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: phishingBadge, matching: find.text('PHISHING')),
+      findsOneWidget,
+    );
+    final Finder solderMasterBadge = find.byKey(
+      const ValueKey<String>('scoreboard-achievement-solderMaster'),
+    );
+    expect(
+      tester.getTopLeft(phishingBadge).dx,
+      lessThan(tester.getTopLeft(solderMasterBadge).dx),
+    );
+    final Finder helloWorldBadge = find.byKey(
+      const ValueKey<String>('scoreboard-achievement-helloWorld'),
+    );
+    expect(
+      tester.getTopLeft(phishingBadge).dx,
+      lessThan(tester.getTopLeft(helloWorldBadge).dx),
+    );
+    final GestureDetector phishingGesture = tester.widget<GestureDetector>(
+      find.descendant(
+        of: phishingBadge,
+        matching: find.byType(GestureDetector),
+      ),
+    );
+    expect(phishingGesture.onTap, isNotNull);
+    phishingGesture.onTap!();
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('achievement-detail-dialog')), findsOneWidget);
+    expect(
+      find.text(
+        'Open a player card through its link instead of scanning its physical NFC tag.',
+      ),
+      findsOneWidget,
+    );
+  });
 }
 
 Widget _localizedApp({required Widget child}) {

@@ -18,6 +18,7 @@ import 'my_card_editor_page.dart';
 import 'ntag_pairing_page.dart';
 import 'panasonic_support_mark.dart';
 import 'pixel_card_face.dart';
+import 'pixel_link_icon.dart';
 import 'pixel_theme.dart';
 
 class SetupPage extends StatefulWidget {
@@ -377,9 +378,10 @@ class _SetupPageState extends State<SetupPage> {
       return;
     }
     unawaited(
-      Navigator.of(
-        context,
-      ).pushReplacementNamed('/collection', arguments: <String, int>{'tab': 1}),
+      Navigator.of(context).pushReplacementNamed(
+        '/collection',
+        arguments: <String, Object>{'tab': 1, 'promptManualAfterSetup': true},
+      ),
     );
   }
 
@@ -786,48 +788,50 @@ class _SetupPageState extends State<SetupPage> {
     final String bio = _bioController.text.trim().isEmpty
         ? context.l10n.tr('defaultPlayerBio')
         : _bioController.text.trim();
+    final String link = buildHttpsLink(_linkController.text);
 
     final double width = large ? 280 : 240;
     final double height = width / (53.98 / 85.60);
+    final double scale = (width / 320).clamp(0.85, 1.1);
     final double expandedCardScale =
         width / ExpandedPixelCardStyle.referenceCardWidth;
+    double s(double value) => value * scale;
     final Widget card = PanasonicBrandingBuilder(
       builder: (context, showPanasonicLogo) => PixelCardFace(
+        key: const Key('setup-card-preview-face'),
         title: title,
-        attributeEmoji: _attributeEmoji,
-        attributeLabel: _attributeLabel,
+        attributeEmoji: '',
+        attributeLabel: emojiLabelForValue(_attributeEmoji).toUpperCase(),
         cardColor: _cardColor,
         showText: true,
-        titleFontSize: large ? 20 : 17,
+        titleFontSize: s(22),
         titleFontWeight: FontWeight.w900,
-        attributeFontSize: large ? 11 : 10,
-        emojiFontSize: large ? 15 : 13,
+        attributeFontSize: s(12),
+        emojiFontSize: s(16),
         titleMaxLines: 2,
-        attributeMaxLines: 3,
-        stackAttributePairs: true,
         watermarkScale: 1.6,
         watermarkFooterHeight: showPanasonicLogo
             ? ExpandedPixelCardStyle.myCardWatermarkFooterHeight *
                   expandedCardScale
             : 0,
-        imageToTitleSpacing: 10,
-        extraContentSpacing: 10,
-        image: _avatarImage(),
+        verticalHitconWatermark: true,
+        fadeExtraContentAtBottom: true,
+        imageToTitleSpacing: s(8),
+        extraContentSpacing: s(8),
+        image: _avatarImage(emojiFontSize: s(32)),
         bottomLeftWatermark: showPanasonicLogo
             ? ExpandedCardPanasonicMark(
                 cardWidth: width,
                 scale: expandedCardScale,
-                color: PixelTheme.textWhite.withValues(alpha: 0.18),
+                color: PixelTheme.textWhite.withValues(
+                  alpha: ExpandedPixelCardStyle.watermarkOpacity,
+                ),
               )
             : null,
-        extraContent: Text(
-          bio,
-          style: TextStyle(
-            color: PixelTheme.textWhite,
-            fontFamily: 'Unifont',
-            fontSize: large ? 11 : 10,
-            height: 1.35,
-          ),
+        fixedContent: _SetupPreviewLinkRow(link: link, fontSize: s(10)),
+        extraContent: _SetupPreviewDescription(
+          description: bio,
+          fontSize: s(ExpandedPixelCardStyle.descriptionFontSize),
         ),
       ),
     );
@@ -840,7 +844,7 @@ class _SetupPageState extends State<SetupPage> {
     );
   }
 
-  Widget _avatarImage() {
+  Widget _avatarImage({double emojiFontSize = 32}) {
     if (_avatarBytes != null) {
       return Image.memory(
         _avatarBytes!,
@@ -848,7 +852,71 @@ class _SetupPageState extends State<SetupPage> {
         filterQuality: FilterQuality.none,
       );
     }
-    return _SetupCardAvatar(color: _cardColor, emoji: _attributeEmoji);
+    return _SetupCardAvatar(emoji: _attributeEmoji, fontSize: emojiFontSize);
+  }
+}
+
+class _SetupPreviewLinkRow extends StatelessWidget {
+  const _SetupPreviewLinkRow({required this.link, required this.fontSize});
+
+  final String link;
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final String displayLink = link.trim().isEmpty
+        ? context.l10n.tr('noLink')
+        : link;
+    return Row(
+      key: const Key('setup-card-preview-link'),
+      children: <Widget>[
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: PixelTheme.bgDark,
+            border: Border.all(color: PixelTheme.textWhite, width: 2),
+          ),
+          child: PixelLinkIcon(size: fontSize + 8, color: PixelTheme.textWhite),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            displayLink,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: PixelTheme.textWhite,
+              fontSize: fontSize,
+              fontFamily: 'Unifont',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SetupPreviewDescription extends StatelessWidget {
+  const _SetupPreviewDescription({
+    required this.description,
+    required this.fontSize,
+  });
+
+  final String description;
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      key: const Key('setup-card-preview-description'),
+      description,
+      style: TextStyle(
+        color: PixelTheme.textWhite,
+        fontSize: fontSize,
+        height: ExpandedPixelCardStyle.descriptionLineHeight,
+        fontFamily: 'Unifont',
+      ),
+    );
   }
 }
 
@@ -1283,63 +1351,32 @@ class _ColorSwatch extends StatelessWidget {
 }
 
 class _SetupCardAvatar extends StatelessWidget {
-  const _SetupCardAvatar({required this.color, required this.emoji});
+  const _SetupCardAvatar({required this.emoji, required this.fontSize});
 
-  final Color color;
   final String emoji;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
-    final List<String> rows = emoji.characters.take(3).toList(growable: false);
+    final List<String> rows = emoji.characters
+        .where(isEmojiGrapheme)
+        .take(3)
+        .toList(growable: false);
     return Container(
       color: PixelTheme.bgDark,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: CustomPaint(painter: _SetupAvatarGridPainter(color)),
-          ),
-          Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: rows
-                  .map(
-                    (String item) => Text(
-                      item,
-                      style: systemEmojiTextStyle(fontSize: 32, height: 1.05),
-                    ),
-                  )
-                  .toList(growable: false),
-            ),
-          ),
-        ],
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: rows
+            .map(
+              (String item) => Text(
+                item,
+                style: systemEmojiTextStyle(fontSize: fontSize, height: 1),
+              ),
+            )
+            .toList(growable: false),
       ),
     );
-  }
-}
-
-class _SetupAvatarGridPainter extends CustomPainter {
-  const _SetupAvatarGridPainter(this.color);
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint paint = Paint()
-      ..color = color.withValues(alpha: 0.28)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    const int cells = 6;
-    final double step = size.width / cells;
-    for (int i = 1; i < cells; i += 1) {
-      final double offset = i * step;
-      canvas.drawLine(Offset(offset, 0), Offset(offset, size.height), paint);
-      canvas.drawLine(Offset(0, offset), Offset(size.width, offset), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_SetupAvatarGridPainter oldDelegate) {
-    return oldDelegate.color != color;
   }
 }
 

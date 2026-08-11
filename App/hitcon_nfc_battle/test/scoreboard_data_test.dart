@@ -72,6 +72,44 @@ void main() {
     expect(entry?.score, 123);
   });
 
+  test('parses API achievement fields from scoreboard responses', () {
+    final ScoreboardEntry? entry = ScoreboardEntry.tryParse(<String, dynamic>{
+      'user_id': 'current-user',
+      'display_name': 'Me',
+      'rank': 7,
+      'score': 230,
+      'external_prize': true,
+    });
+    final Map<String, dynamic> me = <String, dynamic>{
+      'rank': 7,
+      'score': 230,
+      'num_of_phishing': 2,
+    };
+
+    expect(entry?.externalPrize, isTrue);
+    expect(entry?.toJson()['external_prize'], isTrue);
+    expect(scoreboardPhishingCount(me), 2);
+  });
+
+  test('rejects invalid phishing counters from scoreboard me', () {
+    expect(
+      scoreboardPhishingCount(<String, dynamic>{'num_of_phishing': null}),
+      isNull,
+    );
+    expect(
+      scoreboardPhishingCount(<String, dynamic>{'num_of_phishing': -1}),
+      isNull,
+    );
+    expect(
+      scoreboardPhishingCount(<String, dynamic>{'num_of_phishing': 1.5}),
+      isNull,
+    );
+    expect(
+      scoreboardPhishingCount(<String, dynamic>{'num_of_phishing': '2'}),
+      isNull,
+    );
+  });
+
   test('keeps parsing the root when ranking is a scalar field', () {
     final ScoreboardEntry? entry = ScoreboardEntry.fromMyRankPayload(
       <String, dynamic>{

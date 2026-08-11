@@ -115,10 +115,10 @@ void main() {
                   style: TextStyle(fontSize: 10),
                 ),
                 extraContent: const Text(
-                  'This description is long enough to occupy all four lines '
+                  'This description is long enough to occupy all three lines '
                   'available in the printable card preview without scrolling.',
-                  key: ValueKey<String>('four-line-print-description'),
-                  maxLines: 4,
+                  key: ValueKey<String>('three-line-print-description'),
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 13,
@@ -153,13 +153,18 @@ void main() {
     expect(
       tester
           .getSize(
-            find.byKey(const ValueKey<String>('four-line-print-description')),
+            find.byKey(const ValueKey<String>('three-line-print-description')),
           )
           .height,
-      greaterThanOrEqualTo(64),
+      greaterThanOrEqualTo(48),
     );
+    final Text description = tester.widget<Text>(
+      find.byKey(const ValueKey<String>('three-line-print-description')),
+    );
+    expect(description.maxLines, 3);
+    expect(description.overflow, TextOverflow.ellipsis);
     final Rect descriptionRect = tester.getRect(
-      find.byKey(const ValueKey<String>('four-line-print-description')),
+      find.byKey(const ValueKey<String>('three-line-print-description')),
     );
     final Rect viewportRect = tester.getRect(
       find.byKey(const ValueKey<String>('card-extra-content-static')),

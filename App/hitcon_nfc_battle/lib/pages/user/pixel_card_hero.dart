@@ -110,7 +110,9 @@ HeroFlightShuttleBuilder pixelCardFlightShuttleBuilder({
                     child: ExpandedCardPanasonicMark(
                       cardWidth: shuttleSize.width,
                       scale: rawExpandedCardScale,
-                      color: PixelTheme.textWhite.withValues(alpha: 0.18),
+                      color: PixelTheme.textWhite.withValues(
+                        alpha: ExpandedPixelCardStyle.watermarkOpacity,
+                      ),
                     ),
                   )
                 : null,

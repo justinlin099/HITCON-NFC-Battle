@@ -23,11 +23,14 @@ import '../../services/local_collection_store.dart';
 import '../../services/local_profile_store.dart';
 import '../../services/nfc_deep_link_service.dart';
 import '../../services/nfc_battle_api_client.dart';
+import '../../services/setup_service.dart';
 import '../../widgets/admin_mode_switch_button.dart';
 import 'offline_retry_banner.dart';
 
 class CardCollectionPage extends StatefulWidget {
-  const CardCollectionPage({super.key});
+  const CardCollectionPage({super.key, this.manualLauncher});
+
+  final Future<bool> Function(Uri uri)? manualLauncher;
 
   @override
   State<CardCollectionPage> createState() => _CardCollectionPageState();
@@ -37,6 +40,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   final AuthService _authService = AuthService();
   final LocalCollectionStore _localStore = LocalCollectionStore();
   final LocalProfileStore _localProfileStore = LocalProfileStore();
+  final SetupService _setupService = SetupService();
   final NfcDeepLinkService _deepLinks = NfcDeepLinkService.instance;
   final ScrollController _collectionScrollController = ScrollController();
   final PageController _pageController = PageController();
@@ -44,6 +48,8 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
 
   PixelScheme _selectedScheme = PixelTheme.defaultScheme;
   bool _appliedInitialTab = false;
+  bool _promptManualAfterSetup = false;
+  bool _postSetupManualPromptShown = false;
   bool _showAdminModeSwitch = false;
   int _myCardPairingRequest = 0;
 
@@ -71,9 +77,20 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     );
     _loadData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_consumePendingNfcRequest());
-      unawaited(_showNtagPairingReminderIfNeeded());
+      unawaited(_runInitialRouteActions());
     });
+  }
+
+  Future<void> _runInitialRouteActions() async {
+    await _consumePendingNfcRequest();
+    if (!mounted) {
+      return;
+    }
+    await _showPostSetupManualPromptIfNeeded();
+    if (!mounted || _postSetupManualPromptShown) {
+      return;
+    }
+    await _showNtagPairingReminderIfNeeded();
   }
 
   void _handleIncomingNfcRequest(NfcScanRequest request) {
@@ -123,6 +140,8 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     _appliedInitialTab = true;
 
     final Object? args = ModalRoute.of(context)?.settings.arguments;
+    _promptManualAfterSetup =
+        args is Map && args['promptManualAfterSetup'] == true;
     _showAdminModeSwitch =
         _authService.isAdmin ||
         _authService.isEventStaff ||
@@ -422,16 +441,78 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     return context.l10n.tr(key);
   }
 
-  Future<void> _openManual(String url) async {
-    final Uri? uri = Uri.tryParse(url);
-    if (uri == null) {
+  Future<void> _showPostSetupManualPromptIfNeeded() async {
+    if (_postSetupManualPromptShown || !mounted) {
       return;
     }
+
+    final String? userId = _authService.currentUserId;
+    bool shouldPrompt = _promptManualAfterSetup;
+    if (!shouldPrompt && userId != null) {
+      shouldPrompt = await _setupService.shouldPromptManual(userId);
+    }
+    if (!mounted || !shouldPrompt) {
+      return;
+    }
+
+    final String? manualUrl = AppConfig.manualUrl;
+    if (manualUrl == null) {
+      return;
+    }
+
+    _postSetupManualPromptShown = true;
+    final bool? openManual = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) => const _PostSetupManualDialog(),
+    );
+    if (!mounted) {
+      return;
+    }
+
+    if (userId != null && _authService.currentUserId == userId) {
+      await _setupService.markManualPromptHandled(userId);
+    }
+    if (!mounted) {
+      return;
+    }
+
+    if (openManual == true) {
+      _showManualAccessHint();
+      await _openManual(manualUrl);
+    } else {
+      _showManualAccessHint();
+    }
+  }
+
+  Future<bool> _openManual(String url) async {
+    final Uri? uri = Uri.tryParse(url);
+    if (uri == null) {
+      return false;
+    }
     try {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final bool opened = widget.manualLauncher != null
+          ? await widget.manualLauncher!(uri)
+          : await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return opened;
     } catch (_) {
       // The optional manual link must not break the home screen.
+      return false;
     }
+  }
+
+  void _showManualAccessHint() {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          key: const Key('manual-access-hint'),
+          content: Text(context.l10n.tr('manualAccessHint')),
+        ),
+      );
   }
 
   @override
@@ -1272,6 +1353,76 @@ class _KeepAlivePageState extends State<_KeepAlivePage>
   Widget build(BuildContext context) {
     super.build(context);
     return RepaintBoundary(child: widget.child);
+  }
+}
+
+/// 首次設定完成後的說明書引導。
+class _PostSetupManualDialog extends StatelessWidget {
+  const _PostSetupManualDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      key: const Key('post-setup-manual-dialog'),
+      backgroundColor: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: PixelTheme.bgMid,
+          border: Border.all(color: PixelTheme.accent, width: 3),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(color: Colors.black, blurRadius: 0, offset: Offset(6, 6)),
+          ],
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              context.l10n.tr('postSetupManualTitle'),
+              style: TextStyle(
+                color: PixelTheme.accent,
+                fontFamily: 'Unifont',
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              context.l10n.tr('postSetupManualBody'),
+              style: TextStyle(
+                color: PixelTheme.textWhite,
+                fontFamily: 'Unifont',
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: _PixelButton(
+                    key: const Key('post-setup-manual-later'),
+                    onPressed: () => Navigator.of(context).pop(false),
+                    label: context.l10n.tr('postSetupManualLater'),
+                    fullWidth: true,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _PixelButton(
+                    key: const Key('post-setup-manual-open'),
+                    onPressed: () => Navigator.of(context).pop(true),
+                    label: context.l10n.tr('postSetupManualOpen'),
+                    fullWidth: true,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -2516,6 +2667,7 @@ class _PixelIconButtonState extends State<_PixelIconButton> {
 
 class _PixelButton extends StatefulWidget {
   const _PixelButton({
+    super.key,
     required this.onPressed,
     required this.label,
     this.fullWidth = false,
