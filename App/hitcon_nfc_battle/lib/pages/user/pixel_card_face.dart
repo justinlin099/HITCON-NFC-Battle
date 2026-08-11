@@ -12,6 +12,8 @@ class ExpandedPixelCardStyle {
   static const double printWatermarkFooterHeight = 24;
   static const double descriptionFontSize = 13;
   static const double descriptionLineHeight = 1.25;
+  static const double emojiLineHeight = 1.15;
+  static const double titleLineHeight = 1.1;
   static const double verticalHitconWidthFactor = 0.11;
   static const double verticalHitconEdgeBleedFactor = 0.075;
   static const double hitconWordGapFactor = 0.18;
@@ -20,6 +22,19 @@ class ExpandedPixelCardStyle {
   static const double thumbnailHitconBottomInsetFactor = 0.02;
   static const double dividerExtraLength = 4;
   static const double watermarkOpacity = 0.30;
+
+  static StrutStyle compactTextStrut({
+    required double fontSize,
+    double height = 1,
+  }) {
+    return StrutStyle(
+      fontFamily: 'Unifont',
+      fontSize: fontSize,
+      height: height,
+      leading: 0,
+      forceStrutHeight: true,
+    );
+  }
 }
 
 class PixelCardFace extends StatelessWidget {
@@ -264,9 +279,17 @@ class PixelCardFace extends StatelessWidget {
                                             title,
                                             maxLines: titleMaxLines,
                                             overflow: TextOverflow.ellipsis,
+                                            strutStyle:
+                                                ExpandedPixelCardStyle.compactTextStrut(
+                                                  fontSize: titleFontSize,
+                                                  height: ExpandedPixelCardStyle
+                                                      .titleLineHeight,
+                                                ),
                                             style: TextStyle(
                                               color: textColor,
                                               fontSize: titleFontSize,
+                                              height: ExpandedPixelCardStyle
+                                                  .titleLineHeight,
                                               fontWeight: titleFontWeight,
                                               fontFamily: 'Unifont',
                                             ),
@@ -288,9 +311,17 @@ class PixelCardFace extends StatelessWidget {
                                         if (_showSeparateAttributeEmoji) ...[
                                           Text(
                                             attributeEmoji,
+                                            strutStyle:
+                                                ExpandedPixelCardStyle.compactTextStrut(
+                                                  fontSize: emojiFontSize,
+                                                  height: ExpandedPixelCardStyle
+                                                      .emojiLineHeight,
+                                                ),
                                             style: systemEmojiTextStyle(
                                               color: attributeTextColor,
                                               fontSize: emojiFontSize,
+                                              height: ExpandedPixelCardStyle
+                                                  .emojiLineHeight,
                                             ),
                                           ),
                                           const SizedBox(width: 4),
@@ -299,6 +330,12 @@ class PixelCardFace extends StatelessWidget {
                                           child: RichText(
                                             maxLines: attributeMaxLines,
                                             overflow: TextOverflow.ellipsis,
+                                            strutStyle:
+                                                ExpandedPixelCardStyle.compactTextStrut(
+                                                  fontSize: emojiFontSize,
+                                                  height: ExpandedPixelCardStyle
+                                                      .emojiLineHeight,
+                                                ),
                                             text: TextSpan(
                                               children: _attributeLabelSpans(
                                                 attributeTextColor,

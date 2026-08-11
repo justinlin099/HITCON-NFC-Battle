@@ -77,6 +77,7 @@ const Map<String, String> appStringsZhTw = <String, String>{
   'socialShareCollectionText':
       '我在 HITCON NFC Battle 已經收集 {count} 張卡片！#HITCON #HITCON2026 #NFCBattle',
   'startScan': '開始掃描',
+  'scan': '掃描',
   'stopScan': '停止掃描',
   'scanAgain': '重新掃描',
   'collectionTab': '收集卡片',
@@ -92,7 +93,7 @@ const Map<String, String> appStringsZhTw = <String, String>{
   'themeName': '{name} 主題',
   'noLink': '尚未設定連結',
   'noDescription': '尚未填寫自我介紹。',
-  'uidLabel': 'UID',
+  'uidLabel': 'NTAG UID',
   'collectedDate': '收藏時間',
   'nfcUidMissing': '讀不到 Tag UID，請將手機重新靠近卡片再掃一次。',
   'collectionFailed': '卡片收集失敗，請確認網路後再掃一次。',

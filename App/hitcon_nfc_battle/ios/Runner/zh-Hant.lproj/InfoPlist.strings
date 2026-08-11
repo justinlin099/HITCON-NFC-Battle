@@ -1,3 +1,4 @@
 "NFCReaderUsageDescription" = "需要使用 NFC 讀取與寫入 NFC Tag。";
 "NSCameraUsageDescription" = "需要使用相機掃描登入 QR Code。";
+"NSLocationWhenInUseUsageDescription" = "選取照片時，圖片選取元件會讀取照片附帶的位置資訊，以正確處理圖片；本 App 不會用它追蹤你的位置。";
 "NSPhotoLibraryUsageDescription" = "需要存取照片圖庫，讓你選擇圖片並製作個人卡片。";

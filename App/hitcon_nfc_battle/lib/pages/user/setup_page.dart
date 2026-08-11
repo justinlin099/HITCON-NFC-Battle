@@ -910,6 +910,10 @@ class _SetupPreviewDescription extends StatelessWidget {
     return Text(
       key: const Key('setup-card-preview-description'),
       description,
+      strutStyle: ExpandedPixelCardStyle.compactTextStrut(
+        fontSize: fontSize,
+        height: ExpandedPixelCardStyle.descriptionLineHeight,
+      ),
       style: TextStyle(
         color: PixelTheme.textWhite,
         fontSize: fontSize,
@@ -1371,7 +1375,14 @@ class _SetupCardAvatar extends StatelessWidget {
             .map(
               (String item) => Text(
                 item,
-                style: systemEmojiTextStyle(fontSize: fontSize, height: 1),
+                strutStyle: ExpandedPixelCardStyle.compactTextStrut(
+                  fontSize: fontSize,
+                  height: ExpandedPixelCardStyle.emojiLineHeight,
+                ),
+                style: systemEmojiTextStyle(
+                  fontSize: fontSize,
+                  height: ExpandedPixelCardStyle.emojiLineHeight,
+                ),
               ),
             )
             .toList(growable: false),

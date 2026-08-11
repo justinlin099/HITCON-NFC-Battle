@@ -69,5 +69,13 @@ void main() {
       find.byKey(const Key('setup-card-preview-description')),
       findsOneWidget,
     );
+    final Text description = tester.widget<Text>(
+      find.byKey(const Key('setup-card-preview-description')),
+    );
+    expect(description.strutStyle?.forceStrutHeight, isTrue);
+    expect(
+      description.strutStyle?.height,
+      ExpandedPixelCardStyle.descriptionLineHeight,
+    );
   });
 }

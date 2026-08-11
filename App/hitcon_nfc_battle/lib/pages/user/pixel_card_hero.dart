@@ -210,6 +210,10 @@ class _HeroDescription extends StatelessWidget {
       description.trim().isEmpty
           ? context.l10n.tr('noDescription')
           : description.trim(),
+      strutStyle: ExpandedPixelCardStyle.compactTextStrut(
+        fontSize: fontSize,
+        height: ExpandedPixelCardStyle.descriptionLineHeight,
+      ),
       style: TextStyle(
         color: PixelTheme.textWhite,
         fontSize: fontSize,

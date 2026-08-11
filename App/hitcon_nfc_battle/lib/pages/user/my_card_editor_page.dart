@@ -977,9 +977,13 @@ class _PokemonStyleCard extends StatelessWidget {
                         ..._emojiPreviewRows(emoji).map(
                           (String rowEmoji) => Text(
                             rowEmoji,
+                            strutStyle: ExpandedPixelCardStyle.compactTextStrut(
+                              fontSize: s(32),
+                              height: ExpandedPixelCardStyle.emojiLineHeight,
+                            ),
                             style: systemEmojiTextStyle(
                               fontSize: s(32),
-                              height: 1.0,
+                              height: ExpandedPixelCardStyle.emojiLineHeight,
                               color: PixelTheme.textWhite,
                             ),
                           ),
@@ -1118,6 +1122,10 @@ class _EditorDescription extends StatelessWidget {
             child: Text(
               key: const ValueKey<String>('my-card-description-text'),
               description,
+              strutStyle: ExpandedPixelCardStyle.compactTextStrut(
+                fontSize: fontSize,
+                height: ExpandedPixelCardStyle.descriptionLineHeight,
+              ),
               style: TextStyle(
                 color: PixelTheme.textWhite,
                 fontSize: fontSize,
@@ -2415,7 +2423,14 @@ class _CardArtworkPreview extends StatelessWidget {
             .map(
               (String value) => Text(
                 value,
-                style: systemEmojiTextStyle(fontSize: fontSize, height: 1),
+                strutStyle: ExpandedPixelCardStyle.compactTextStrut(
+                  fontSize: fontSize,
+                  height: ExpandedPixelCardStyle.emojiLineHeight,
+                ),
+                style: systemEmojiTextStyle(
+                  fontSize: fontSize,
+                  height: ExpandedPixelCardStyle.emojiLineHeight,
+                ),
               ),
             )
             .toList(),
@@ -2458,10 +2473,14 @@ class _PrintDescription extends StatelessWidget {
       description,
       maxLines: 3,
       overflow: TextOverflow.ellipsis,
+      strutStyle: ExpandedPixelCardStyle.compactTextStrut(
+        fontSize: fontSize,
+        height: ExpandedPixelCardStyle.descriptionLineHeight,
+      ),
       style: TextStyle(
         color: PixelTheme.textWhite,
         fontSize: fontSize,
-        height: 1.25,
+        height: ExpandedPixelCardStyle.descriptionLineHeight,
         fontFamily: 'Unifont',
       ),
     );

@@ -193,4 +193,38 @@ void main() {
     expect(appIconClip.borderRadius, BorderRadius.circular(5));
     expect(find.byKey(const Key('social-share-submit')), findsOneWidget);
   });
+
+  testWidgets('collection info labels and displays the physical NTAG UID', (
+    WidgetTester tester,
+  ) async {
+    PixelTheme.active = PixelTheme.getPalette(PixelTheme.defaultScheme);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        locale: Locale('zh', 'TW'),
+        localizationsDelegates: <LocalizationsDelegate<dynamic>>[
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: CardDetailPage(
+          heroTag: 'physical-uid-test-card',
+          title: 'UID TEST',
+          attributeEmoji: '🛰️',
+          attributeLabel: 'RF',
+          link: '',
+          description: '',
+          uid: '04:11:22:33:44:55:66',
+          collectedAt: '2026-08-12',
+          cardColor: Color(0xFF00D9FF),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('NTAG UID'), findsOneWidget);
+    expect(find.text('04:11:22:33:44:55:66'), findsOneWidget);
+  });
 }

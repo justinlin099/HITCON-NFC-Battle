@@ -5,6 +5,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var nativeNfcWriter: NativeNfcWriter?
+  private var nativeCollectionNfcScanner: NativeCollectionNfcScanner?
   private var nfcLaunchChannel: FlutterMethodChannel?
 
   override func application(
@@ -23,6 +24,13 @@ import UIKit
         binaryMessenger: registrar.messenger()
       )
       nativeNfcWriter = NativeNfcWriter(channel: channel)
+    }
+    if let registrar = registry.registrar(forPlugin: "NativeCollectionNfcScanner") {
+      let channel = FlutterMethodChannel(
+        name: "hitcon_nfc_battle/ios_collection_nfc_scanner",
+        binaryMessenger: registrar.messenger()
+      )
+      nativeCollectionNfcScanner = NativeCollectionNfcScanner(channel: channel)
     }
     if let registrar = registry.registrar(forPlugin: "IosNfcLaunchEvidence") {
       let channel = FlutterMethodChannel(
@@ -51,6 +59,343 @@ import UIKit
       continue: userActivity,
       restorationHandler: restorationHandler
     )
+  }
+}
+
+@available(iOS 13.0, *)
+private final class NativeCollectionNfcScanner: NSObject, NFCTagReaderSessionDelegate {
+  // Core NFC reports user cancellation before the system sheet has fully
+  // released the NFC hardware on older devices (notably iPhone 8 / iOS 16).
+  // Keep the Flutter request pending through that dismissal window so the
+  // scan button is not re-enabled while a new session would still hang.
+  private static let restartCooldown: TimeInterval = 1.5
+  private static let activationTimeout: TimeInterval = 2.0
+
+  private let channel: FlutterMethodChannel
+  private var session: NFCTagReaderSession?
+  private var scanResult: FlutterResult?
+  private var pendingPayload: [String: Any]?
+  private var stopResults = [FlutterResult]()
+  private var scheduledStart: DispatchWorkItem?
+  private var activationWatchdog: DispatchWorkItem?
+  private var sessionBecameActive = false
+  private var lastInvalidatedAt = Date.distantPast
+
+  init(channel: FlutterMethodChannel) {
+    self.channel = channel
+    super.init()
+    channel.setMethodCallHandler(handle)
+  }
+
+  private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "scan":
+      NSLog(
+        "[NFCCollection] scan requested session=%@ pendingStart=%@",
+        session == nil ? "none" : "active",
+        scheduledStart == nil ? "no" : "yes"
+      )
+      guard NFCTagReaderSession.readingAvailable else {
+        NSLog("[NFCCollection] NFC unavailable")
+        result([
+          "status": "error",
+          "type": "unavailable",
+          "message": "NFC is unavailable",
+        ])
+        return
+      }
+      guard session == nil, scanResult == nil, scheduledStart == nil else {
+        NSLog("[NFCCollection] rejected because another scan is still active")
+        result([
+          "status": "error",
+          "type": "systemIsBusy",
+          "message": "An NFC scan is already active",
+        ])
+        return
+      }
+      scanResult = result
+      pendingPayload = nil
+      scheduleSessionStart()
+
+    case "stop":
+      if let pendingStart = scheduledStart {
+        NSLog("[NFCCollection] cancelled before Core NFC session began")
+        pendingStart.cancel()
+        scheduledStart = nil
+        let pendingResult = scanResult
+        scanResult = nil
+        pendingPayload = nil
+        pendingResult?(["status": "cancelled"])
+        result(nil)
+        return
+      }
+      guard let activeSession = session else {
+        result(nil)
+        return
+      }
+      stopResults.append(result)
+      if pendingPayload == nil {
+        pendingPayload = ["status": "cancelled"]
+      }
+      NSLog("[NFCCollection] stop requested for active session")
+      activeSession.invalidate()
+
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func scheduleSessionStart() {
+    let elapsed = Date().timeIntervalSince(lastInvalidatedAt)
+    let delay = max(0, Self.restartCooldown - elapsed)
+    let workItem = DispatchWorkItem { [weak self] in
+      self?.beginScheduledSession()
+    }
+    scheduledStart = workItem
+    NSLog("[NFCCollection] scheduling Core NFC begin in %.0fms", delay * 1000)
+    if delay == 0 {
+      DispatchQueue.main.async(execute: workItem)
+    } else {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+  }
+
+  private func beginScheduledSession() {
+    scheduledStart = nil
+    guard scanResult != nil, session == nil else {
+      NSLog("[NFCCollection] scheduled begin abandoned")
+      return
+    }
+    guard let newSession = NFCTagReaderSession(
+      pollingOption: [.iso14443],
+      delegate: self,
+      queue: .main
+    ) else {
+      let result = scanResult
+      scanResult = nil
+      result?([
+        "status": "error",
+        "type": "unavailable",
+        "message": "Cannot create NFC session",
+      ])
+      return
+    }
+
+    sessionBecameActive = false
+    session = newSession
+    newSession.alertMessage = "請將卡片靠近 iPhone 頂部"
+    NSLog("[NFCCollection] calling Core NFC begin")
+    newSession.begin()
+    startActivationWatchdog(for: newSession)
+  }
+
+  private func startActivationWatchdog(for watchedSession: NFCTagReaderSession) {
+    activationWatchdog?.cancel()
+    let workItem = DispatchWorkItem { [weak self, weak watchedSession] in
+      guard let self,
+            let watchedSession,
+            self.session === watchedSession,
+            !self.sessionBecameActive else {
+        return
+      }
+      NSLog("[NFCCollection] activation timed out; invalidating stuck session")
+      self.pendingPayload = [
+        "status": "error",
+        "type": "systemIsBusy",
+        "message": "Core NFC session did not become active",
+      ]
+      watchedSession.invalidate()
+    }
+    activationWatchdog = workItem
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + Self.activationTimeout,
+      execute: workItem
+    )
+  }
+
+  func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) {
+    guard self.session === session else {
+      return
+    }
+    sessionBecameActive = true
+    activationWatchdog?.cancel()
+    activationWatchdog = nil
+    NSLog("[NFCCollection] Core NFC session became active")
+  }
+
+  func tagReaderSession(_ session: NFCTagReaderSession, didInvalidateWithError error: Error) {
+    guard self.session === session else {
+      return
+    }
+
+    activationWatchdog?.cancel()
+    activationWatchdog = nil
+    sessionBecameActive = false
+    lastInvalidatedAt = Date()
+    let payload = pendingPayload ?? errorPayload(error)
+    let readerCode = (error as? NFCReaderError)?.code.rawValue ?? -1
+    NSLog("[NFCCollection] session invalidated code=%ld payload=%@", readerCode, String(describing: payload))
+    self.session = nil
+    pendingPayload = nil
+
+    let result = scanResult
+    scanResult = nil
+    if payload["status"] as? String == "cancelled" {
+      NSLog(
+        "[NFCCollection] holding cancellation result for %.0fms cooldown",
+        Self.restartCooldown * 1000
+      )
+      DispatchQueue.main.asyncAfter(
+        deadline: .now() + Self.restartCooldown
+      ) {
+        result?(payload)
+      }
+    } else {
+      result?(payload)
+    }
+
+    let pendingStops = stopResults
+    stopResults.removeAll()
+    pendingStops.forEach { $0(nil) }
+  }
+
+  func tagReaderSession(_ session: NFCTagReaderSession, didDetect tags: [NFCTag]) {
+    guard self.session === session else {
+      return
+    }
+    guard tags.count == 1, let tag = tags.first else {
+      session.alertMessage = "一次只能感應一張卡片"
+      session.restartPolling()
+      return
+    }
+
+    session.connect(to: tag) { [weak self, weak session] error in
+      guard let self, let session, self.session === session else {
+        return
+      }
+      guard error == nil else {
+        session.alertMessage = "讀取失敗，請再靠近一次"
+        session.restartPolling()
+        return
+      }
+
+      let uid = self.tagIdentifier(tag)
+      guard let ndefTag = self.ndefTag(from: tag) else {
+        self.finishScan(session: session, uid: uid, userId: "")
+        return
+      }
+
+      ndefTag.readNDEF { [weak self, weak session] message, _ in
+        guard let self, let session, self.session === session else {
+          return
+        }
+        self.finishScan(
+          session: session,
+          uid: uid,
+          userId: self.targetUserId(from: message)
+        )
+      }
+    }
+  }
+
+  private func finishScan(session: NFCTagReaderSession, uid: String, userId: String) {
+    guard self.session === session, pendingPayload == nil else {
+      return
+    }
+    pendingPayload = [
+      "status": "scanned",
+      "uid": uid,
+      "userId": userId,
+    ]
+    session.alertMessage = "讀取完成"
+    session.invalidate()
+  }
+
+  private func targetUserId(from message: NFCNDEFMessage?) -> String {
+    guard let message else {
+      return ""
+    }
+    for record in message.records {
+      guard let uri = parseUriPayload(record),
+            let components = URLComponents(string: uri),
+            components.host?.lowercased() == "game.hitcon2026.online",
+            components.path == "/b" || components.path == "/b/" else {
+        continue
+      }
+      return components.queryItems?.first(where: { $0.name == "u" })?.value ?? ""
+    }
+    return ""
+  }
+
+  private func parseUriPayload(_ payload: NFCNDEFPayload) -> String? {
+    guard payload.typeNameFormat == .nfcWellKnown,
+          payload.type == Data([0x55]),
+          let code = payload.payload.first else {
+      return nil
+    }
+    let prefixes = ["", "http://www.", "https://www.", "http://", "https://"]
+    let prefix = Int(code) < prefixes.count ? prefixes[Int(code)] : ""
+    guard let body = String(data: Data(payload.payload.dropFirst()), encoding: .utf8) else {
+      return nil
+    }
+    return prefix + body
+  }
+
+  private func ndefTag(from tag: NFCTag) -> NFCNDEFTag? {
+    switch tag {
+    case .feliCa(let tag): return tag
+    case .miFare(let tag): return tag
+    case .iso7816(let tag): return tag
+    case .iso15693(let tag): return tag
+    @unknown default: return nil
+    }
+  }
+
+  private func tagIdentifier(_ tag: NFCTag) -> String {
+    switch tag {
+    case .feliCa(let tag): return hex(tag.currentIDm)
+    case .miFare(let tag): return hex(tag.identifier)
+    case .iso7816(let tag): return hex(tag.identifier)
+    case .iso15693(let tag): return hex(tag.identifier)
+    @unknown default: return ""
+    }
+  }
+
+  private func errorPayload(_ error: Error) -> [String: Any] {
+    guard let readerError = error as? NFCReaderError else {
+      return [
+        "status": "error",
+        "type": "unknown",
+        "message": error.localizedDescription,
+      ]
+    }
+
+    switch readerError.code {
+    case .readerSessionInvalidationErrorUserCanceled:
+      return ["status": "cancelled"]
+    case .readerSessionInvalidationErrorSessionTimeout:
+      return [
+        "status": "error",
+        "type": "sessionTimeout",
+        "message": readerError.localizedDescription,
+      ]
+    case .readerSessionInvalidationErrorSystemIsBusy:
+      return [
+        "status": "error",
+        "type": "systemIsBusy",
+        "message": readerError.localizedDescription,
+      ]
+    default:
+      return [
+        "status": "error",
+        "type": "unknown",
+        "message": readerError.localizedDescription,
+      ]
+    }
+  }
+
+  private func hex(_ data: Data) -> String {
+    data.map { String(format: "%02X", $0) }.joined(separator: ":")
   }
 }
 

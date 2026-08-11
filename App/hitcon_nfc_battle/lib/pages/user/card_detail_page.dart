@@ -782,6 +782,10 @@ class _CardDescription extends StatelessWidget {
       description.trim().isEmpty
           ? context.l10n.tr('noDescription')
           : description.trim(),
+      strutStyle: ExpandedPixelCardStyle.compactTextStrut(
+        fontSize: fontSize,
+        height: ExpandedPixelCardStyle.descriptionLineHeight,
+      ),
       style: TextStyle(
         color: PixelTheme.textWhite,
         fontSize: fontSize,
@@ -819,7 +823,7 @@ class _InfoCard extends StatelessWidget {
         children: [
           _InfoRow(
             label: context.l10n.tr('uidLabel'),
-            value: uid,
+            value: uid.trim().isEmpty ? '—' : uid.trim(),
             fontSize: fontSize,
           ),
           const SizedBox(height: 4),

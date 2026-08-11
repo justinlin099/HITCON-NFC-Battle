@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../config/app_config.dart';
@@ -26,6 +27,24 @@ import '../../services/nfc_battle_api_client.dart';
 import '../../services/setup_service.dart';
 import '../../widgets/admin_mode_switch_button.dart';
 import 'offline_retry_banner.dart';
+
+String physicalNtagUidForCard(Map<String, dynamic> card) {
+  final String owner =
+      (card['owner'] as String? ?? card['user_id'] as String? ?? '').trim();
+  for (final String key in <String>[
+    'physical_uid',
+    'scanned_physical_uid',
+    'scanned_uid',
+    'physical_id',
+    'paired_ntag_uid',
+  ]) {
+    final String candidate = (card[key] as String? ?? '').trim();
+    if (candidate.isNotEmpty && candidate != owner) {
+      return candidate;
+    }
+  }
+  return '';
+}
 
 class CardCollectionPage extends StatefulWidget {
   const CardCollectionPage({super.key, this.manualLauncher});
@@ -57,6 +76,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
   bool _dataLoadInFlight = false;
   bool _isOffline = false;
   bool _isHandlingNfcRequest = false;
+  bool _isManualScanActive = false;
   bool _isCardDetailOpen = false;
   bool _ntagReminderChecked = false;
   int _nfcRequestGeneration = 0;
@@ -118,6 +138,24 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
         unawaited(_consumePendingNfcRequest());
       },
     );
+  }
+
+  Future<void> _startManualCollectionScan() async {
+    if (_isManualScanActive) {
+      return;
+    }
+    setState(() {
+      _isManualScanActive = true;
+    });
+    try {
+      await _deepLinks.requestManualCollectionScan();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isManualScanActive = false;
+        });
+      }
+    }
   }
 
   @override
@@ -660,13 +698,17 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                             key: const ValueKey<String>(
                               'ios-collection-scan-button',
                             ),
-                            onPressed: () {
-                              unawaited(
-                                _deepLinks.requestManualCollectionScan(),
-                              );
-                            },
-                            icon: Icons.nfc_rounded,
-                            tooltip: context.l10n.tr('startScan'),
+                            onPressed: _isManualScanActive
+                                ? null
+                                : () => unawaited(_startManualCollectionScan()),
+                            icon: _isManualScanActive
+                                ? Icons.nfc_rounded
+                                : Icons.center_focus_strong_rounded,
+                            label: context.l10n.tr(
+                              _isManualScanActive ? 'scanning' : 'scan',
+                            ),
+                            tooltip: context.l10n.tr('scan'),
+                            busy: _isManualScanActive,
                           ),
                         );
                       },
@@ -857,10 +899,13 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                           card['description'] as String? ??
                           '';
                       final Color cardColor = _cardColorForCard(card, index);
+                      final String physicalNtagUid = physicalNtagUidForCard(
+                        card,
+                      );
                       final String heroTag = 'card-$index';
                       return _PixelCard(
                         title: title,
-                        uid: card['physical_uid'] as String? ?? '',
+                        uid: physicalNtagUid,
                         collectedAt: card['collected_at'] as String? ?? '',
                         index: index,
                         cardColor: cardColor,
@@ -877,7 +922,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
                           attributeLabel: attributeLabel,
                           link: link,
                           description: description,
-                          uid: card['physical_uid'] as String? ?? '',
+                          uid: physicalNtagUid,
                           collectedAt: card['collected_at'] as String? ?? '',
                           cardColor: cardColor,
                           imageBase64: card['pixel_avatar_base64'] as String?,
@@ -1266,7 +1311,7 @@ class _CardCollectionPageState extends State<CardCollectionPage> {
     int index, {
     required bool playRevealEffect,
   }) {
-    final String uid = card['physical_uid'] as String? ?? '';
+    final String uid = physicalNtagUidForCard(card);
     return _openCardDetail(
       heroTag: 'card-$index',
       title: _titleForCard(card),
@@ -2598,12 +2643,16 @@ class _PixelIconButton extends StatefulWidget {
     super.key,
     required this.onPressed,
     required this.icon,
+    required this.label,
     required this.tooltip,
+    this.busy = false,
   });
 
   final VoidCallback? onPressed;
   final IconData icon;
+  final String label;
   final String tooltip;
+  final bool busy;
 
   @override
   State<_PixelIconButton> createState() => _PixelIconButtonState();
@@ -2614,14 +2663,25 @@ class _PixelIconButtonState extends State<_PixelIconButton> {
 
   @override
   Widget build(BuildContext context) {
-    final bool enabled = widget.onPressed != null;
-    final Color color = enabled ? PixelTheme.accent : PixelTheme.textGray;
-    final Color bgColor = enabled
+    final bool enabled = widget.onPressed != null && !widget.busy;
+    final Color color = widget.busy
+        ? PixelTheme.bgDark
+        : enabled
+        ? PixelTheme.accent
+        : PixelTheme.textGray;
+    final Color bgColor = widget.busy
+        ? PixelTheme.accent
+        : enabled
         ? PixelTheme.bgDark
         : PixelTheme.bgMid.withValues(alpha: 0.5);
 
     return GestureDetector(
-      onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+      onTapDown: enabled
+          ? (_) {
+              HapticFeedback.lightImpact();
+              setState(() => _pressed = true);
+            }
+          : null,
       onTapUp: enabled
           ? (_) {
               setState(() => _pressed = false);
@@ -2633,31 +2693,55 @@ class _PixelIconButtonState extends State<_PixelIconButton> {
         button: true,
         enabled: enabled,
         label: widget.tooltip,
-        child: Tooltip(
-          message: widget.tooltip,
-          child: Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: bgColor,
-              border: Border.all(color: color, width: 2),
-              boxShadow: [
-                if (_pressed && enabled)
-                  const BoxShadow(
-                    color: Colors.black,
-                    blurRadius: 0,
-                    offset: Offset(1, 1),
-                  )
-                else if (enabled)
-                  const BoxShadow(
-                    color: Colors.black,
-                    blurRadius: 0,
-                    offset: Offset(3, 3),
+        excludeSemantics: true,
+        child: ExcludeSemantics(
+          child: Tooltip(
+            message: widget.tooltip,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 80),
+              transform: Matrix4.translationValues(
+                _pressed || widget.busy ? 2 : 0,
+                _pressed || widget.busy ? 2 : 0,
+                0,
+              ),
+              height: 48,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: bgColor,
+                border: Border.all(color: color, width: 2),
+                boxShadow: [
+                  if ((_pressed && enabled) || widget.busy)
+                    const BoxShadow(
+                      color: Colors.black,
+                      blurRadius: 0,
+                      offset: Offset(1, 1),
+                    )
+                  else if (enabled)
+                    const BoxShadow(
+                      color: Colors.black,
+                      blurRadius: 0,
+                      offset: Offset(3, 3),
+                    ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Icon(widget.icon, color: color, size: 22),
+                  const SizedBox(width: 7),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      color: color,
+                      fontFamily: 'Unifont',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-              ],
+                ],
+              ),
             ),
-            alignment: Alignment.center,
-            child: Icon(widget.icon, color: color, size: 24),
           ),
         ),
       ),

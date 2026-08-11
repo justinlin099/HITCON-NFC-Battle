@@ -91,6 +91,7 @@ const Map<String, String> appStringsEn = <String, String>{
   'socialShareCollectionText':
       'I have collected {count} cards in HITCON NFC Battle! #HITCON #HITCON2026 #NFCBattle',
   'startScan': 'Start scan',
+  'scan': 'Scan',
   'stopScan': 'Stop scan',
   'scanAgain': 'Scan again',
   'collectionTab': 'Cards',
@@ -108,7 +109,7 @@ const Map<String, String> appStringsEn = <String, String>{
   'themeName': '{name} Theme',
   'noLink': 'No link',
   'noDescription': 'No description yet.',
-  'uidLabel': 'UID',
+  'uidLabel': 'NTAG UID',
   'collectedDate': 'Collected',
   'nfcUidMissing':
       'Could not read the Tag UID. Move your phone close and scan again.',

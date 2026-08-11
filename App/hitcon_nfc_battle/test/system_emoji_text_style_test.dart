@@ -74,6 +74,51 @@ void main() {
 
       expect(square.style?.fontFamily, 'Noto Color Emoji');
       expect(square.style?.fontFamily, isNot('Unifont'));
+      expect(attributeText.strutStyle?.forceStrutHeight, isTrue);
+      expect(attributeText.strutStyle?.fontSize, 10);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('iOS emoji attribute rows keep a fixed compact line height', (
+    WidgetTester tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      PixelTheme.active = PixelTheme.getPalette(PixelTheme.defaultScheme);
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Center(
+            child: SizedBox(
+              width: 136,
+              height: 216,
+              child: PixelCardFace(
+                title: 'TEST',
+                attributeEmoji: '✨💻🔥',
+                attributeLabel: 'MAGIC / LAPTOP / FIRE',
+                attributeMaxLines: 3,
+                stackAttributePairs: true,
+                cardColor: Color(0xFF7A233D),
+                showText: true,
+                image: ColoredBox(color: Colors.black),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final Finder attributeFinder = find.byWidgetPredicate(
+        (Widget widget) =>
+            widget is RichText && widget.text.toPlainText().contains('MAGIC'),
+      );
+      final RichText attributeText = tester.widget<RichText>(attributeFinder);
+
+      expect(attributeText.strutStyle?.forceStrutHeight, isTrue);
+      expect(attributeText.strutStyle?.fontSize, 10);
+      expect(attributeText.strutStyle?.height, 1.15);
+      expect(tester.getSize(attributeFinder).height, closeTo(36, 0.1));
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

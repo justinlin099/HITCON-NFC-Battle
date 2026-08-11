@@ -3,9 +3,16 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show DeviceOrientation, SystemChrome, SystemUiOverlayStyle;
+    show
+        DeviceOrientation,
+        MethodChannel,
+        MissingPluginException,
+        PlatformException,
+        SystemChrome,
+        SystemUiOverlayStyle;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 import 'l10n/app_localizations.dart';
@@ -136,14 +143,14 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-  late final _AutoNtagScanner _autoScanner;
+  late final AutoNtagScanner _autoScanner;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(NfcDeepLinkService.instance.initialize());
-    _autoScanner = _AutoNtagScanner(deepLinks: NfcDeepLinkService.instance);
+    _autoScanner = AutoNtagScanner(deepLinks: NfcDeepLinkService.instance);
     NfcDeepLinkService.instance.registerInAppScanStarter(_autoScanner.start);
   }
 
@@ -227,27 +234,153 @@ Locale resolveAppLocale(
   return const Locale('en');
 }
 
-class _AutoNtagScanner {
-  _AutoNtagScanner({required this.deepLinks});
+class AutoNtagScanner {
+  AutoNtagScanner({
+    required this.deepLinks,
+    MethodChannel? iosCollectionScanner,
+  }) : _iosCollectionScanner =
+           iosCollectionScanner ?? _defaultIosCollectionScanner;
 
   final NfcDeepLinkService deepLinks;
   static const NtagSecurityService _ntagSecurity = NtagSecurityService();
-  bool _isScanning = false;
+  static const MethodChannel _defaultIosCollectionScanner = MethodChannel(
+    'hitcon_nfc_battle/ios_collection_nfc_scanner',
+  );
+  final MethodChannel _iosCollectionScanner;
   bool _isStarting = false;
+  bool _isIosScanRunning = false;
+  bool _iosScanQueued = false;
   bool _isHandling = false;
   bool _isDisposed = false;
   NfcSessionLease? _nfcLease;
+  Completer<void>? _sessionInvalidated;
+  DateTime _nextSessionStartAt = DateTime.fromMillisecondsSinceEpoch(0);
   String _lastTagId = '';
   DateTime _lastReadTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   Future<void> start() async {
-    if (_isStarting || _isScanning || _isDisposed) {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _startIosScan();
+      return;
+    }
+    await _startPluginScan();
+  }
+
+  Future<void> _startIosScan() async {
+    if (_isDisposed) {
+      return;
+    }
+    if (_isIosScanRunning) {
+      // A tap can arrive while iOS is finishing the dismissal animation. Do
+      // not lose it; reopen as soon as didInvalidateWithError has completed.
+      _iosScanQueued = true;
+      return;
+    }
+
+    _isIosScanRunning = true;
+    try {
+      do {
+        _iosScanQueued = false;
+        await _runIosScan();
+      } while (_iosScanQueued && !_isDisposed);
+    } finally {
+      _isIosScanRunning = false;
+    }
+  }
+
+  Future<void> _runIosScan() async {
+    NfcSessionLease? lease;
+    try {
+      lease = await NfcSessionController.instance.acquire(
+        NfcSessionOwner.collectionScanner,
+        onPreempt: _stopForPreempt,
+      );
+      if (lease == null || _isDisposed) {
+        lease?.release();
+        return;
+      }
+
+      final NfcSessionLease acquiredLease = lease;
+      _nfcLease = acquiredLease;
+      for (int attempt = 0; attempt < 3; attempt++) {
+        if (!acquiredLease.isActive || _isDisposed) {
+          return;
+        }
+        debugPrint(
+          '[NFCCollection] invoking native scan attempt ${attempt + 1}',
+        );
+        final Map<String, dynamic>? response = await _iosCollectionScanner
+            .invokeMapMethod<String, dynamic>('scan');
+        final String status = response?['status'] as String? ?? 'error';
+        final String errorType = response?['type'] as String? ?? '';
+        debugPrint(
+          '[NFCCollection] native scan completed status=$status type=$errorType',
+        );
+        if (status == 'error' && errorType == 'systemIsBusy' && attempt < 2) {
+          // The native scanner only completes after Core NFC confirms the old
+          // reader is invalidated. Older iPhones can need more than one retry
+          // after the cancellation sheet has disappeared.
+          await Future<void>.delayed(
+            Duration(milliseconds: 250 * (attempt + 1)),
+          );
+          continue;
+        }
+        if (status == 'scanned' && acquiredLease.isActive && !_isDisposed) {
+          await _handleScan(
+            response?['uid'] as String? ?? '',
+            response?['userId'] as String? ?? '',
+          );
+        }
+        return;
+      }
+    } on MissingPluginException catch (error) {
+      // Only possible on a non-iOS test host or an out-of-date installation.
+      debugPrint('[NFCCollection] native scanner missing: $error');
+    } on PlatformException catch (error) {
+      // Core NFC errors are normally returned as structured scan responses.
+      debugPrint('[NFCCollection] native scanner platform error: $error');
+    } finally {
+      if (lease != null) {
+        if (identical(_nfcLease, lease)) {
+          _nfcLease = null;
+        }
+        lease.release();
+      }
+    }
+  }
+
+  Future<void> _startPluginScan() async {
+    if (_isStarting || _isDisposed) {
       return;
     }
 
     _isStarting = true;
     NfcSessionLease? lease;
     try {
+      final NfcSessionLease? staleLease = _nfcLease;
+      final Completer<void>? staleInvalidation = _sessionInvalidated;
+      if (staleLease != null && staleLease.isActive) {
+        // When the user closes the Core NFC sheet, iOS invalidates the reader
+        // before the Dart error callback arrives. Wait for that callback first
+        // so an old invalidation cannot be delivered to the next session.
+        if (staleInvalidation != null) {
+          try {
+            await staleInvalidation.future.timeout(
+              const Duration(milliseconds: 1200),
+            );
+          } on TimeoutException {
+            // Fall back to explicitly stopping a genuinely stuck session.
+          }
+        }
+      }
+      if (staleLease != null && staleLease.isActive) {
+        await _stopOwnedSession(staleLease);
+      }
+      await _waitForCoreNfcCooldown();
+      if (_isDisposed) {
+        return;
+      }
+
       final bool isAvailable = await NfcManager.instance.isAvailable();
       if (!isAvailable || _isDisposed) {
         return;
@@ -266,8 +399,9 @@ class _AutoNtagScanner {
       if (!acquiredLease.isActive) {
         return;
       }
+      final Completer<void> sessionInvalidated = Completer<void>();
       _nfcLease = acquiredLease;
-      _isScanning = true;
+      _sessionInvalidated = sessionInvalidated;
       await NfcManager.instance.startSession(
         pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
         alertMessage: '請將卡片靠近 iPhone 頂部',
@@ -292,6 +426,7 @@ class _AutoNtagScanner {
 
           try {
             await _stopOwnedSession(acquiredLease);
+            _completeInvalidation(acquiredLease, sessionInvalidated);
             final String targetUserId = _readTargetUserId(tag);
             await _handleScan(uid, targetUserId);
           } finally {
@@ -300,9 +435,14 @@ class _AutoNtagScanner {
         },
         onError: (_) async {
           if (!acquiredLease.isActive || _isDisposed) {
+            _completeInvalidation(acquiredLease, sessionInvalidated);
             return;
           }
-          await _stopOwnedSession(acquiredLease);
+          // didInvalidateWithError means Core NFC has already ended this
+          // session. Calling stopSession() again here can produce a delayed
+          // second invalidation that shuts down the following scan.
+          _releaseInvalidatedSession(acquiredLease);
+          _completeInvalidation(acquiredLease, sessionInvalidated);
           _isHandling = false;
         },
       );
@@ -379,35 +519,91 @@ class _AutoNtagScanner {
   }
 
   Future<void> _stopOwnedSession(NfcSessionLease lease) async {
+    final Completer<void>? invalidation = identical(_nfcLease, lease)
+        ? _sessionInvalidated
+        : null;
     if (!lease.isActive) {
       if (identical(_nfcLease, lease)) {
         _nfcLease = null;
       }
-      _isScanning = false;
+      if (invalidation != null) {
+        _completeInvalidation(lease, invalidation);
+      }
       return;
     }
 
     try {
       await NfcManager.instance.stopSession();
+      _startCoreNfcCooldown();
     } catch (_) {
       // The session may already have been stopped by iOS.
     } finally {
       if (identical(_nfcLease, lease)) {
         _nfcLease = null;
       }
-      _isScanning = false;
       lease.release();
+      if (invalidation != null) {
+        _completeInvalidation(lease, invalidation);
+      }
+    }
+  }
+
+  void _releaseInvalidatedSession(NfcSessionLease lease) {
+    if (identical(_nfcLease, lease)) {
+      _nfcLease = null;
+    }
+    lease.release();
+  }
+
+  void _completeInvalidation(
+    NfcSessionLease lease,
+    Completer<void> invalidation,
+  ) {
+    if (!invalidation.isCompleted) {
+      invalidation.complete();
+    }
+    if (identical(_sessionInvalidated, invalidation) &&
+        !identical(_nfcLease, lease)) {
+      _sessionInvalidated = null;
+    }
+  }
+
+  void _startCoreNfcCooldown() {
+    final DateTime nextStart = DateTime.now().add(
+      const Duration(milliseconds: 1200),
+    );
+    if (nextStart.isAfter(_nextSessionStartAt)) {
+      _nextSessionStartAt = nextStart;
+    }
+  }
+
+  Future<void> _waitForCoreNfcCooldown() async {
+    final Duration remaining = _nextSessionStartAt.difference(DateTime.now());
+    if (remaining > Duration.zero) {
+      // stopSession() returns before Core NFC finishes invalidating. Keep the
+      // next begin() outside that window on older devices such as iPhone 8.
+      await Future<void>.delayed(remaining);
     }
   }
 
   Future<void> _stopForPreempt() async {
     _nfcLease = null;
-    _isScanning = false;
+    final Completer<void>? invalidation = _sessionInvalidated;
+    _sessionInvalidated = null;
     _isHandling = false;
     try {
-      await NfcManager.instance.stopSession();
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        await _iosCollectionScanner.invokeMethod<void>('stop');
+      } else {
+        await NfcManager.instance.stopSession();
+        _startCoreNfcCooldown();
+      }
     } catch (_) {
       // The new owner can continue even if the old iOS sheet already closed.
+    } finally {
+      if (invalidation != null && !invalidation.isCompleted) {
+        invalidation.complete();
+      }
     }
   }
 
@@ -415,14 +611,17 @@ class _AutoNtagScanner {
     _isDisposed = true;
     final NfcSessionLease? lease = _nfcLease;
     _nfcLease = null;
-    _isScanning = false;
+    final Completer<void>? invalidation = _sessionInvalidated;
+    _sessionInvalidated = null;
+    if (invalidation != null && !invalidation.isCompleted) {
+      invalidation.complete();
+    }
     if (lease != null && lease.isActive) {
-      unawaited(
-        NfcManager.instance
-            .stopSession()
-            .catchError((_) {})
-            .whenComplete(lease.release),
-      );
+      final Future<void> stopFuture =
+          defaultTargetPlatform == TargetPlatform.iOS
+          ? _iosCollectionScanner.invokeMethod<void>('stop')
+          : NfcManager.instance.stopSession();
+      unawaited(stopFuture.catchError((_) {}).whenComplete(lease.release));
     }
   }
 }
