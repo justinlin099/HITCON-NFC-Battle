@@ -3,6 +3,13 @@
     "apps": [],
     "details": [
       {
+        "appID": "9UZ879Y8DL.org.hitcon.nfcbattle",
+        "paths": [
+          "/b",
+          "/b/"
+        ]
+      },
+      {
         "appID": "LL6L3HH3MX.org.hitcon.nfcbattle",
         "paths": [
           "/b",
