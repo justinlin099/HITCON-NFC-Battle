@@ -91,8 +91,8 @@ print-card metadata in D1; image bytes are stored in this private bucket.
 npm run wrangler -- r2 bucket create nfc-battle-print-cards-staging
 ```
 
-Replace the staging placeholder `database_id` in
-[`wrangler.jsonc`](./wrangler.jsonc), then regenerate types and apply remote
+Confirm the staging `database_id` in [`wrangler.jsonc`](./wrangler.jsonc)
+matches the ID returned by Wrangler, then regenerate types and apply remote
 migrations:
 
 ```txt
@@ -150,8 +150,8 @@ Create the production R2 bucket used for print-card PNGs:
 npm run wrangler -- r2 bucket create nfc-battle-print-cards
 ```
 
-Replace the production placeholder `database_id` in
-[`wrangler.jsonc`](./wrangler.jsonc), then regenerate types and apply remote
+Confirm the production `database_id` in [`wrangler.jsonc`](./wrangler.jsonc)
+matches the ID returned by Wrangler, then regenerate types and apply remote
 migrations:
 
 ```txt
@@ -174,27 +174,27 @@ npm run deploy:production
 
 ## GitHub Deploy
 
-Backend pull requests and backend pushes run **Backend CI**. Pushes to `main` that touch the backend also run **Backend Staging Deploy**. The staging workflow runs tests, typecheck, remote staging D1 migrations, syncs staging Worker secrets from GitHub environment secrets, and deploys the staging Worker. Shared staging is not updated from unmerged PR code.
+Backend pull requests and backend pushes run **Backend CI**. Pushes to `main` that touch the backend also run **Backend Staging Deploy**. The staging workflow runs tests, typecheck, remote staging D1 migrations, syncs staging Worker secrets from explicitly named repository secrets, and deploys the staging Worker. Shared staging is not updated from unmerged PR code.
 
 The manual **Backend Deploy** workflow can deploy either `staging` or `production`. It expects these repository-level GitHub Actions secrets:
 
 ```txt
 CLOUDFLARE_ACCOUNT_ID
 CLOUDFLARE_API_TOKEN
+STAGING_JWT_SECRET
+STAGING_STAFF_DANGER_TOKEN
+PRODUCTION_JWT_SECRET
+PRODUCTION_STAFF_DANGER_TOKEN
 ```
 
 `CLOUDFLARE_ACCOUNT_ID` can be copied from the Cloudflare dashboard URL for the HITCON Events account. `CLOUDFLARE_API_TOKEN` can be generated from Cloudflare **User API Tokens** using the **Edit Cloudflare Workers** template, then adding account-level D1 edit permission so the workflow can apply remote D1 migrations.
 
-Create GitHub Environments named `staging` and `production`, then add these secrets to each environment. GitHub deploy workflows read these environment secrets and sync them to Cloudflare before deploying:
+The Cloudflare credentials are shared by staging and production because both are in the HITCON Events account. The four environment-prefixed secrets must contain distinct staging and production values. The workflows sync them to Cloudflare as the runtime secrets `JWT_SECRET` and `STAFF_DANGER_TOKEN` for the selected Worker environment.
 
-```txt
-JWT_SECRET
-STAFF_DANGER_TOKEN
-```
-
-Before running it, replace the target environment's placeholder `database_id` in
-[`wrangler.jsonc`](./wrangler.jsonc) with the real D1 database ID. The workflow
-runs tests, typecheck, remote D1 migrations, Worker secret sync, and deploy.
+Before running it, confirm the target environment's `database_id` in
+[`wrangler.jsonc`](./wrangler.jsonc) matches the remote D1 database. The
+workflow runs tests, typecheck, remote D1 migrations, Worker secret sync, and
+deploy.
 
 [For generating/synchronizing types based on your Worker configuration run](https://developers.cloudflare.com/workers/wrangler/commands/#types):
 

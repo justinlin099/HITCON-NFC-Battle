@@ -66,11 +66,17 @@
 		},
 		"production": {
 			"name": "nfc-battle-api-server",
+			"routes": [
+				{
+					"pattern": "nfc-battle-api.hitcon2026.online",
+					"custom_domain": true
+				}
+			],
 			"d1_databases": [
 				{
 					"binding": "DB",
 					"database_name": "nfc-battle-api-server",
-					"database_id": "00000000-0000-0000-0000-000000000000"
+					"database_id": "133fa8c1-bb61-4383-91b2-ff4ccfa88ead"
 				}
 			],
 			"r2_buckets": [

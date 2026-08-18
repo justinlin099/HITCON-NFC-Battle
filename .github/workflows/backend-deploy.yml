@@ -16,7 +16,6 @@ jobs:
   deploy:
     name: Deploy Worker backend (${{ inputs.environment }})
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
 
     defaults:
       run:
@@ -49,11 +48,27 @@ jobs:
       - name: Apply remote D1 migrations
         run: npm run db:migrate:${{ inputs.environment }}
 
-      - name: Sync JWT secret
-        run: printf '%s' "${{ secrets.JWT_SECRET }}" | npx wrangler secret put JWT_SECRET --env ${{ inputs.environment }}
+      - name: Sync staging Worker secrets
+        if: inputs.environment == 'staging'
+        env:
+          JWT_SECRET: ${{ secrets.STAGING_JWT_SECRET }}
+          STAFF_DANGER_TOKEN: ${{ secrets.STAGING_STAFF_DANGER_TOKEN }}
+        run: |
+          test -n "$JWT_SECRET" || { echo "STAGING_JWT_SECRET is not configured"; exit 1; }
+          test -n "$STAFF_DANGER_TOKEN" || { echo "STAGING_STAFF_DANGER_TOKEN is not configured"; exit 1; }
+          printf '%s' "$JWT_SECRET" | npx wrangler secret put JWT_SECRET --env staging
+          printf '%s' "$STAFF_DANGER_TOKEN" | npx wrangler secret put STAFF_DANGER_TOKEN --env staging
 
-      - name: Sync staff danger token
-        run: printf '%s' "${{ secrets.STAFF_DANGER_TOKEN }}" | npx wrangler secret put STAFF_DANGER_TOKEN --env ${{ inputs.environment }}
+      - name: Sync production Worker secrets
+        if: inputs.environment == 'production'
+        env:
+          JWT_SECRET: ${{ secrets.PRODUCTION_JWT_SECRET }}
+          STAFF_DANGER_TOKEN: ${{ secrets.PRODUCTION_STAFF_DANGER_TOKEN }}
+        run: |
+          test -n "$JWT_SECRET" || { echo "PRODUCTION_JWT_SECRET is not configured"; exit 1; }
+          test -n "$STAFF_DANGER_TOKEN" || { echo "PRODUCTION_STAFF_DANGER_TOKEN is not configured"; exit 1; }
+          printf '%s' "$JWT_SECRET" | npx wrangler secret put JWT_SECRET --env production
+          printf '%s' "$STAFF_DANGER_TOKEN" | npx wrangler secret put STAFF_DANGER_TOKEN --env production
 
       - name: Deploy Worker
         run: npm run deploy:${{ inputs.environment }}
