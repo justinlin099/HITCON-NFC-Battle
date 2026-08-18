@@ -1,81 +1,338 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Open HITCON NFC Battle</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b0712" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" type="image/png" href="./app-icon.png" />
+    <link rel="apple-touch-icon" href="./app-icon.png" />
+    <title>開啟 HITCON NFC Battle</title>
     <style>
       :root {
-        --bg: #0b141a;
-        --card: #10222c;
-        --text: #e5f3ff;
-        --muted: #9ec3dc;
-        --accent: #2ed3a5;
+        color-scheme: dark;
+        --bg: #0b0712;
+        --card: #160b22;
+        --card-highlight: #21102f;
+        --text: #fff8ff;
+        --muted: #c8b9d2;
+        --accent: #12e3e3;
+        --accent-strong: #06c9cf;
+        --magenta: #ff16db;
+        --line: rgba(255, 22, 219, 0.35);
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      html {
+        min-width: 0;
+        background: var(--bg);
       }
       body {
         margin: 0;
         min-height: 100vh;
+        min-height: 100dvh;
+        min-width: 0;
+        padding: max(18px, env(safe-area-inset-top))
+          max(16px, env(safe-area-inset-right))
+          max(18px, env(safe-area-inset-bottom))
+          max(16px, env(safe-area-inset-left));
         display: grid;
         place-items: center;
-        font-family: "Segoe UI", "Noto Sans", sans-serif;
+        overflow-x: hidden;
+        font-family: "Segoe UI", "Noto Sans TC", "Noto Sans", sans-serif;
         color: var(--text);
-        background: radial-gradient(circle at 20% 0%, #163645 0%, var(--bg) 55%);
+        background:
+          radial-gradient(circle at 15% 0%, rgba(255, 22, 219, 0.2), transparent 42%),
+          radial-gradient(circle at 100% 100%, rgba(18, 227, 227, 0.16), transparent 45%),
+          var(--bg);
       }
       .card {
-        width: min(92vw, 560px);
-        background: linear-gradient(165deg, #123342 0%, var(--card) 70%);
-        border: 1px solid #25586f;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+        position: relative;
+        width: 100%;
+        max-width: 560px;
+        min-width: 0;
+        overflow: hidden;
+        background: linear-gradient(155deg, var(--card-highlight) 0%, var(--card) 72%);
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        padding: clamp(20px, 6vw, 30px);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48);
+      }
+      .card::after {
+        position: absolute;
+        top: -80px;
+        right: -80px;
+        width: 190px;
+        height: 190px;
+        border: 1px solid rgba(18, 227, 227, 0.18);
+        border-radius: 50%;
+        content: "";
+        pointer-events: none;
+      }
+      .brand {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 22px;
+      }
+      .app-icon {
+        width: 76px;
+        height: 76px;
+        flex: 0 0 76px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        box-shadow: 0 10px 30px rgba(255, 22, 219, 0.15);
+      }
+      .brand-copy {
+        min-width: 0;
+      }
+      .eyebrow {
+        margin: 0 0 3px;
+        color: var(--accent);
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
       }
       h1 {
-        margin-top: 0;
-        margin-bottom: 8px;
+        margin: 0;
+        overflow-wrap: anywhere;
+        font-size: clamp(1.45rem, 6.4vw, 2rem);
+        line-height: 1.1;
       }
       p {
         color: var(--muted);
         line-height: 1.5;
       }
-      .btn {
-        display: inline-block;
-        padding: 10px 14px;
-        border-radius: 10px;
-        text-decoration: none;
-        font-weight: 700;
-        margin-right: 8px;
-        margin-top: 8px;
-      }
-      .primary {
-        background: var(--accent);
-        color: #062119;
-      }
-      .secondary {
-        border: 1px solid #3d7088;
+      .lead {
+        margin: 0 0 14px;
         color: var(--text);
+        font-size: 1.05rem;
+        font-weight: 700;
+      }
+      .status {
+        display: flex;
+        min-width: 0;
+        align-items: flex-start;
+        gap: 10px;
+        margin: 0 0 20px;
+        padding: 12px 14px;
+        border: 1px solid rgba(18, 227, 227, 0.2);
+        border-radius: 12px;
+        background: rgba(18, 227, 227, 0.07);
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .status-dot {
+        width: 9px;
+        height: 9px;
+        flex: 0 0 9px;
+        margin-top: 0.43em;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 14px rgba(18, 227, 227, 0.8);
+      }
+      .link-label {
+        margin: 0 0 7px;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      .link-box {
+        width: 100%;
+        min-width: 0;
+        margin-bottom: 18px;
+        padding: 11px 12px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.2);
       }
       code {
-        word-break: break-all;
+        display: block;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        color: #dbcfe3;
+        font-size: 0.78rem;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+      .desktop-qr {
+        margin: 0 0 20px;
+        text-align: center;
+      }
+      .qr-shell {
+        width: min(100%, 288px);
+        margin: 0 auto;
+        padding: 12px;
+        border: 2px solid rgba(255, 22, 219, 0.58);
+        border-radius: 20px;
+        background: #fff;
+        box-shadow:
+          0 0 30px rgba(255, 22, 219, 0.12),
+          0 14px 34px rgba(0, 0, 0, 0.28);
+      }
+      .qr-code {
+        display: grid;
+        width: 100%;
+        aspect-ratio: 1;
+        place-items: center;
+        overflow: hidden;
+        color: #281830;
+        background: #fff;
+      }
+      .qr-code svg,
+      .qr-code canvas,
+      .qr-code img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .qr-loading,
+      .qr-error {
+        padding: 18px;
+        color: #49364f;
+        font-size: 0.88rem;
+        line-height: 1.5;
+      }
+      .qr-error {
+        color: #8c174f;
+      }
+      .qr-help {
+        margin: 12px auto 0;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .btn {
+        display: flex;
+        width: 100%;
+        min-width: 0;
+        min-height: 50px;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 14px;
+        border-radius: 12px;
+        text-decoration: none;
+        text-align: center;
+        font-weight: 700;
+        line-height: 1.25;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .primary {
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        color: #04191d;
+        box-shadow: 0 9px 24px rgba(18, 227, 227, 0.18);
+      }
+      .secondary {
+        border: 1px solid rgba(255, 22, 219, 0.48);
+        color: var(--text);
+        background: rgba(255, 22, 219, 0.06);
+      }
+      .hint {
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-align: center;
+      }
+      .btn:focus-visible {
+        outline: 3px solid #fff;
+        outline-offset: 3px;
+      }
+      @media (max-width: 420px) {
+        .card {
+          border-radius: 18px;
+        }
+        .brand {
+          gap: 13px;
+        }
+        .app-icon {
+          width: 64px;
+          height: 64px;
+          flex-basis: 64px;
+          border-radius: 17px;
+        }
+        .actions {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+        }
       }
     </style>
   </head>
   <body>
     <main class="card">
-      <h1>Opening HITCON NFC Battle...</h1>
-      <p id="status">If app is not installed, we will send you to the store.</p>
-      <p>Current link:</p>
-      <p><code id="link"></code></p>
-      <a id="openApp" class="btn primary" href="#">Open App</a>
-      <a id="openStore" class="btn secondary" href="#">Open Store</a>
+      <header class="brand">
+        <img
+          class="app-icon"
+          src="./app-icon.png"
+          width="180"
+          height="180"
+          alt="HITCON NFC Battle App 圖示"
+        />
+        <div class="brand-copy">
+          <p class="eyebrow">HITCON 2026</p>
+          <h1>NFC Battle</h1>
+        </div>
+      </header>
+
+      <p id="lead" class="lead">正在開啟 App…</p>
+      <div class="status" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="status">若尚未安裝，稍後會前往下載頁面。</span>
+      </div>
+
+      <section id="desktopQr" class="desktop-qr" hidden>
+        <div class="qr-shell">
+          <div id="qrCode" class="qr-code" aria-live="polite">
+            <span class="qr-loading">正在產生 QR Code…</span>
+          </div>
+        </div>
+        <p class="qr-help">請使用手機相機掃描，再從手機開啟 App。</p>
+      </section>
+
+      <p class="link-label">目前連結</p>
+      <div class="link-box"><code id="link"></code></div>
+
+      <div id="mobileActions" class="actions">
+        <a id="openApp" class="btn primary" href="#">開啟 App</a>
+        <a id="openStore" class="btn secondary" href="#" rel="noreferrer">下載 App</a>
+      </div>
+      <p id="hint" class="hint">若沒有自動開啟，請使用上方按鈕。</p>
     </main>
 
     <script>
       const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=org.hitcon.nfcbattle";
-      const APP_STORE_URL = "https://apps.apple.com/app/idREPLACE_WITH_APP_STORE_ID";
+      const APP_STORE_URL = "https://testflight.apple.com/join/egpd7ZkE";
       const current = window.location.href;
 
       const linkNode = document.getElementById("link");
+      const leadNode = document.getElementById("lead");
       const statusNode = document.getElementById("status");
+      const desktopQrNode = document.getElementById("desktopQr");
+      const qrCodeNode = document.getElementById("qrCode");
+      const mobileActionsNode = document.getElementById("mobileActions");
+      const hintNode = document.getElementById("hint");
       const openAppBtn = document.getElementById("openApp");
       const openStoreBtn = document.getElementById("openStore");
 
@@ -84,16 +341,70 @@
 
       const ua = navigator.userAgent || "";
       const isAndroid = /Android/i.test(ua);
-      const isIOS = /iPhone|iPad|iPod/i.test(ua);
-      const storeUrl = isAndroid ? PLAY_STORE_URL : APP_STORE_URL;
-      openStoreBtn.href = storeUrl;
+      const isIPadOS = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+      const isIOS = /iPhone|iPad|iPod/i.test(ua) || isIPadOS;
 
-      setTimeout(() => {
-        if (document.visibilityState === "visible") {
-          statusNode.textContent = "App not opened yet. Redirecting to store...";
-          window.location.replace(storeUrl);
-        }
-      }, 1400);
+      function renderDesktopQrCode() {
+        const script = document.createElement("script");
+        script.src = "./vendor/zxing-browser.min.js";
+        script.onload = () => {
+          try {
+            const writer = new window.ZXingBrowser.BrowserQRCodeSvgWriter();
+            const size = Math.max(160, Math.round(qrCodeNode.getBoundingClientRect().width));
+            const svg = writer.write(current, size, size);
+            svg.setAttribute("role", "img");
+            svg.setAttribute("aria-label", "目前連結的 QR Code");
+            svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+            svg.setAttribute("shape-rendering", "crispEdges");
+            qrCodeNode.replaceChildren(svg);
+          } catch (error) {
+            showQrCodeError();
+          }
+        };
+        script.onerror = showQrCodeError;
+        document.head.appendChild(script);
+      }
+
+      function showQrCodeError() {
+        const message = document.createElement("span");
+        message.className = "qr-error";
+        message.textContent = "QR Code 產生失敗，請改用手機開啟下方連結。";
+        qrCodeNode.replaceChildren(message);
+      }
+
+      if (isAndroid || isIOS) {
+        const storeUrl = isAndroid ? PLAY_STORE_URL : APP_STORE_URL;
+        openStoreBtn.href = storeUrl;
+        openStoreBtn.textContent = isAndroid ? "前往 Google Play" : "前往 TestFlight";
+
+        let storeFallbackTimer = window.setTimeout(() => {
+          storeFallbackTimer = null;
+          if (document.visibilityState === "visible") {
+            statusNode.textContent = "App 尚未開啟，正在前往下載頁面…";
+            window.location.replace(storeUrl);
+          }
+        }, 1400);
+
+        const cancelStoreFallback = () => {
+          if (storeFallbackTimer !== null) {
+            window.clearTimeout(storeFallbackTimer);
+            storeFallbackTimer = null;
+          }
+        };
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "hidden") {
+            cancelStoreFallback();
+          }
+        });
+        window.addEventListener("pagehide", cancelStoreFallback, { once: true });
+      } else {
+        leadNode.textContent = "使用手機開啟 App";
+        statusNode.textContent = "請用手機掃描下方 QRCode";
+        hintNode.textContent = "掃描後若未自動開啟，請在手機瀏覽器選擇「開啟 App」。";
+        mobileActionsNode.hidden = true;
+        desktopQrNode.hidden = false;
+        renderDesktopQrCode();
+      }
     </script>
   </body>
 </html>

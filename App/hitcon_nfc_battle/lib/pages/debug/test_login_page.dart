@@ -327,7 +327,7 @@ class _TestLoginPageState extends State<TestLoginPage> {
     if (!mounted) {
       return;
     }
-    final String routeName = authService.isRegularUser
+    final String routeName = authService.usesUserFlow
         ? (setupComplete ? '/collection' : '/setup')
         : '/admin';
     Navigator.of(context).pushReplacementNamed(routeName);

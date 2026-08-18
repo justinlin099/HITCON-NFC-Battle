@@ -48,6 +48,7 @@ class NfcBattleApiClient {
     Map<String, dynamic>? body,
     Map<String, String>? query,
     Map<String, String>? headers,
+    String? apiBaseUrl,
   }) {
     return _request(
       'POST',
@@ -56,6 +57,7 @@ class NfcBattleApiClient {
       body: body,
       query: query,
       headers: headers,
+      apiBaseUrl: apiBaseUrl,
     );
   }
 
@@ -160,8 +162,9 @@ class NfcBattleApiClient {
     Map<String, dynamic>? body,
     Map<String, String>? query,
     Map<String, String>? headers,
+    String? apiBaseUrl,
   }) async {
-    final Uri uri = _buildUri(path, query: query);
+    final Uri uri = _buildUri(path, query: query, apiBaseUrl: apiBaseUrl);
     final HttpClient client = HttpClient();
     client.connectionTimeout = _requestTimeout;
 
@@ -187,8 +190,8 @@ class NfcBattleApiClient {
     }
   }
 
-  Uri _buildUri(String path, {Map<String, String>? query}) {
-    final Uri base = Uri.parse(AppConfig.apiBaseUrl);
+  Uri _buildUri(String path, {Map<String, String>? query, String? apiBaseUrl}) {
+    final Uri base = Uri.parse(apiBaseUrl ?? AppConfig.apiBaseUrl);
     if (base.scheme != 'https' ||
         base.host.isEmpty ||
         base.hasQuery ||

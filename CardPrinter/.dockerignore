@@ -1,0 +1,14 @@
+.env*
+.git
+.gitignore
+.codex-template-work
+.vendor-tmp
+__pycache__
+*.py[cod]
+.pytest_cache
+.coverage
+downloads
+tests
+README.md
+start.ps1
+stop.ps1

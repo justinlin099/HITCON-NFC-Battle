@@ -1,0 +1,9 @@
+.env*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+downloads/
+.codex-template-work/
+.vendor-tmp/

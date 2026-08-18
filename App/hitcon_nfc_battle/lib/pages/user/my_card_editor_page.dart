@@ -33,6 +33,31 @@ import '../../services/local_print_order_store.dart';
 import '../../services/nfc_battle_api_client.dart';
 import 'offline_retry_banner.dart';
 
+@visibleForTesting
+const int printArtworkResolutionMultiplier = 2;
+
+@visibleForTesting
+const int printArtworkWidthPx = 638 * printArtworkResolutionMultiplier;
+
+@visibleForTesting
+const int printArtworkHeightPx = 1011 * printArtworkResolutionMultiplier;
+
+@visibleForTesting
+const double printArtworkCornerRadiusFraction = 0.04;
+
+@visibleForTesting
+double printArtworkPixelRatio(double logicalWidth) {
+  if (!logicalWidth.isFinite || logicalWidth <= 0) {
+    throw ArgumentError.value(logicalWidth, 'logicalWidth');
+  }
+  return printArtworkWidthPx / logicalWidth;
+}
+
+@visibleForTesting
+double printArtworkCornerRadius(double cardWidth) {
+  return cardWidth * printArtworkCornerRadiusFraction;
+}
+
 typedef PixelGrid = List<List<Color?>>;
 
 @visibleForTesting
@@ -1851,8 +1876,8 @@ class _CardPrintPreviewScreen extends StatefulWidget {
 }
 
 class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
-  static const int _printWidthPx = 638;
-  static const int _printHeightPx = 1011;
+  static const int _printWidthPx = printArtworkWidthPx;
+  static const int _printHeightPx = printArtworkHeightPx;
 
   final AuthService _authService = AuthService();
   final LocalPrintOrderStore _printOrderStore = LocalPrintOrderStore();
@@ -2004,10 +2029,10 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
             return _authService.submitCardPrintOrder(
               artworkPng: artworkPng,
               metadata: const <String, dynamic>{
-                'format': 'EVOLIS_PRIMACY_CR80_300DPI_PNG',
-                'width_px': 638,
-                'height_px': 1011,
-                'dpi': 300,
+                'format': 'EVOLIS_PRIMACY_CR80_600DPI_PNG',
+                'width_px': _printWidthPx,
+                'height_px': _printHeightPx,
+                'dpi': 600,
                 'card_size': 'CR80 / ISO 7810 ID-1 / 53.98 x 85.60 mm',
                 'printer': 'Evolis Primacy OEM',
                 'orientation': 'portrait',
@@ -2046,7 +2071,7 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
       id: id,
       barcodeValue: barcodeValue,
       fileName: response['file_name'] as String? ?? 'card-print-$id.png',
-      format: response['format'] as String? ?? 'EVOLIS_PRIMACY_CR80_300DPI_PNG',
+      format: response['format'] as String? ?? 'EVOLIS_PRIMACY_CR80_600DPI_PNG',
     );
     final String? userId = _authService.currentUserId;
     final bool saved =
@@ -2073,7 +2098,7 @@ class _CardPrintPreviewScreenState extends State<_CardPrintPreviewScreen> {
       throw StateError('Print preview is not ready to capture.');
     }
 
-    final double pixelRatio = _printWidthPx / renderObject.size.width;
+    final double pixelRatio = printArtworkPixelRatio(renderObject.size.width);
     final ui.Image image = await renderObject.toImage(pixelRatio: pixelRatio);
     try {
       final ByteData? pngData = await image.toByteData(
@@ -2158,7 +2183,7 @@ class _PrintableCardPreview extends StatelessWidget {
     return PanasonicBrandingBuilder(
       forPrint: true,
       builder: (context, showPanasonicLogo) => ClipRRect(
-        borderRadius: BorderRadius.circular(width * 0.06),
+        borderRadius: BorderRadius.circular(printArtworkCornerRadius(width)),
         child: SizedBox(
           width: width,
           height: height,

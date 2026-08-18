@@ -107,6 +107,7 @@ const List<EmojiOption> emojiOptionsCatalog = <EmojiOption>[
   EmojiOption('\uD83C\uDF54', 'Burger'),
   EmojiOption('\uD83C\uDF5C', 'Ramen'),
   EmojiOption('\uD83C\uDF63', 'Sushi'),
+  EmojiOption('\uD83C\uDF6F', 'Honey'),
   EmojiOption('\uD83C\uDF66', 'Icecream'),
   EmojiOption('\uD83D\uDC31', 'Cat'),
   EmojiOption('\uD83D\uDC36', 'Dog'),

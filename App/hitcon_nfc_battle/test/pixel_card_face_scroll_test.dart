@@ -2,11 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hitcon_nfc_battle/config/app_config.dart';
+import 'package:hitcon_nfc_battle/pages/user/my_card_editor_page.dart';
 import 'package:hitcon_nfc_battle/pages/user/panasonic_support_mark.dart';
 import 'package:hitcon_nfc_battle/pages/user/pixel_card_face.dart';
 import 'package:hitcon_nfc_battle/pages/user/pixel_theme.dart';
 
 void main() {
+  test('print artwork uses the compact four-percent corner radius', () {
+    expect(printArtworkCornerRadiusFraction, 0.04);
+    expect(printArtworkCornerRadius(638), closeTo(25.52, 0.001));
+  });
+
   testWidgets('app and print Panasonic flags are independent', (
     WidgetTester tester,
   ) async {
@@ -75,7 +81,7 @@ void main() {
     );
   });
 
-  testWidgets('print preview capture has the CR80 server dimensions', (
+  testWidgets('print preview is rendered at twice the CR80 resolution', (
     WidgetTester tester,
   ) async {
     PixelTheme.active = PixelTheme.getPalette(PixelTheme.defaultScheme);
@@ -136,11 +142,14 @@ void main() {
 
     final RenderRepaintBoundary boundary =
         artworkKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-    final image = await boundary.toImage(pixelRatio: 638 / previewWidth);
+    final image = await boundary.toImage(
+      pixelRatio: printArtworkPixelRatio(previewWidth),
+    );
     addTearDown(image.dispose);
 
-    expect(image.width, 638);
-    expect(image.height, 1011);
+    expect(printArtworkResolutionMultiplier, 2);
+    expect(image.width, 1276);
+    expect(image.height, 2022);
     final Stack cardStack = tester
         .widgetList<Stack>(
           find.descendant(

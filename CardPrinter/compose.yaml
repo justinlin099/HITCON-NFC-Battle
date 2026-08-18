@@ -1,0 +1,31 @@
+services:
+  cardprinter:
+    build:
+      context: .
+    image: hitcon-card-printer:local
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    ports:
+      - "127.0.0.1:${CARDPRINTER_PORT:-18080}:8000"
+      - "127.0.0.1:${CARDPRINTER_COMPANION_PORT:-18081}:8001"
+    environment:
+      API_BASE_URL: "${API_BASE_URL:-https://nfc-battle-staging.hitcon2026.online}"
+      STAFF_JWT: "${STAFF_JWT:-}"
+      CARDPRINTER_ALLOWED_API_HOSTS: "${CARDPRINTER_ALLOWED_API_HOSTS:-}"
+      CARDPRINTER_ALLOW_HTTP_API: "${CARDPRINTER_ALLOW_HTTP_API:-false}"
+      CARDPRINTER_ALLOWED_WEB_HOSTS: "${CARDPRINTER_ALLOWED_WEB_HOSTS:-}"
+      CARDPRINTER_MAX_PNG_BYTES: "${CARDPRINTER_MAX_PNG_BYTES:-10485760}"
+      CARDPRINTER_COMPANION_HOST: "0.0.0.0"
+      CARDPRINTER_COMPANION_PORT: "8001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

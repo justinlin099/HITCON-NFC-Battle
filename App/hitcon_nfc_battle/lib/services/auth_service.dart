@@ -13,9 +13,55 @@ import 'ntag_security_service.dart';
 
 enum UserRole { admin, user, eventStaff, unknown }
 
+enum PrizeClaimType {
+  external('EXTERNAL'),
+  stamp('STAMP'),
+  ranking('RANKING');
+
+  const PrizeClaimType(this.apiValue);
+
+  final String apiValue;
+}
+
+enum StaffNtagUnlockApiTarget { production, staging }
+
+@visibleForTesting
+String staffNtagUnlockApiBaseUrl(StaffNtagUnlockApiTarget target) {
+  return switch (target) {
+    StaffNtagUnlockApiTarget.production => AppConfig.apiBaseUrl,
+    StaffNtagUnlockApiTarget.staging => AppConfig.staffUnlockStagingApiBaseUrl,
+  };
+}
+
 extension UserRoleCapabilities on UserRole {
   bool get canCollectCards =>
       this == UserRole.user || this == UserRole.eventStaff;
+
+  bool get usesUserFlow =>
+      this != UserRole.admin && this != UserRole.eventStaff;
+}
+
+@visibleForTesting
+UserRole userRoleFromValue(String? value) {
+  return switch ((value ?? '').trim().toUpperCase()) {
+    'ADMIN' => UserRole.admin,
+    'EVENT_STAFF' || 'STAFF' => UserRole.eventStaff,
+    'USER' || 'ATTENDEE' || 'SPONSOR' || 'COMMUNITY' => UserRole.user,
+    _ => UserRole.unknown,
+  };
+}
+
+@visibleForTesting
+Map<String, dynamic> prizeClaimRequestBody({
+  required String userId,
+  required String uid,
+  required PrizeClaimType type,
+}) {
+  return <String, dynamic>{
+    'user_id': userId,
+    'uid': uid,
+    'type': type.apiValue,
+  };
 }
 
 class AuthService {
@@ -291,6 +337,9 @@ class AuthService {
     required String uid,
     required String purpose,
     String? userId,
+    StaffNtagUnlockApiTarget staffApiTarget =
+        StaffNtagUnlockApiTarget.production,
+    String? stagingAuthToken,
   }) async {
     _lastNtagSecretError = null;
     if (!_ensureSession()) {
@@ -311,10 +360,21 @@ class AuthService {
           );
           return null;
         }
+        final String requestToken = switch (staffApiTarget) {
+          StaffNtagUnlockApiTarget.production => _jwtToken!,
+          StaffNtagUnlockApiTarget.staging => (stagingAuthToken ?? '').trim(),
+        };
+        if (requestToken.isEmpty) {
+          _setNtagSecretError(
+            'A Staging login token is required for the Staging STAFF API.',
+          );
+          return null;
+        }
         final Map<String, dynamic> result = await _api.post(
           '/staff/nfc-unlock-code',
-          token: _jwtToken!,
+          token: requestToken,
           body: <String, dynamic>{'user_id': targetUserId, 'uid': uid},
+          apiBaseUrl: staffNtagUnlockApiBaseUrl(staffApiTarget),
         );
         final NtagLockSecret? secret = _secretFromNfcTagKey(
           _jsonMap(result['data'])['unlock_code'],
@@ -767,6 +827,7 @@ class AuthService {
   Future<Map<String, dynamic>?> confirmPrizeClaim({
     required String tagUid,
     required String userId,
+    required PrizeClaimType type,
   }) async {
     if (!_ensureSession()) {
       return null;
@@ -782,10 +843,11 @@ class AuthService {
       final Map<String, dynamic> result = await _api.post(
         '/staff/prize-claims',
         token: _jwtToken!,
-        body: <String, dynamic>{
-          'user_id': normalizedUserId,
-          'uid': normalizedUid,
-        },
+        body: prizeClaimRequestBody(
+          userId: normalizedUserId,
+          uid: normalizedUid,
+          type: type,
+        ),
       );
       return <String, dynamic>{
         ..._jsonMap(result['data']),
@@ -794,7 +856,11 @@ class AuthService {
       };
     } catch (e) {
       if (e is ApiException && e.code == 'PRIZE_ALREADY_CLAIMED') {
-        return <String, dynamic>{'already_claimed': true, 'claim_code': ''};
+        return <String, dynamic>{
+          'type': type.apiValue,
+          'already_claimed': true,
+          'claim_code': '',
+        };
       }
       _log('Error claiming prize: $e');
       return null;
@@ -1234,22 +1300,7 @@ class AuthService {
   }
 
   void _setRoleFromString(String roleStr) {
-    switch (roleStr) {
-      case 'ADMIN':
-        _currentRole = UserRole.admin;
-        break;
-      case 'EVENT_STAFF':
-      case 'STAFF':
-        _currentRole = UserRole.eventStaff;
-        break;
-      case 'USER':
-      case 'ATTENDEE':
-        _currentRole = UserRole.user;
-        break;
-      default:
-        _currentRole = UserRole.unknown;
-        break;
-    }
+    _currentRole = userRoleFromValue(roleStr);
   }
 
   void _setRoleFromApiRole(String? role) {
@@ -1282,5 +1333,6 @@ class AuthService {
   bool get isAdmin => _currentRole == UserRole.admin;
   bool get isEventStaff => _currentRole == UserRole.eventStaff;
   bool get isRegularUser => _currentRole == UserRole.user;
+  bool get usesUserFlow => _currentRole.usesUserFlow;
   bool get canCollectCards => _currentRole.canCollectCards;
 }

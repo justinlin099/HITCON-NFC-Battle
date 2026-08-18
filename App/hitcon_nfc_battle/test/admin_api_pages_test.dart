@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hitcon_nfc_battle/config/app_config.dart';
 import 'package:hitcon_nfc_battle/l10n/app_localizations.dart';
 import 'package:hitcon_nfc_battle/pages/admin/admin_home_page.dart';
 import 'package:hitcon_nfc_battle/pages/admin/admin_pair_user_tag_page.dart';
@@ -11,6 +12,7 @@ import 'package:hitcon_nfc_battle/pages/admin/admin_scoreboard_control_page.dart
 import 'package:hitcon_nfc_battle/pages/user/pixel_theme.dart';
 import 'package:hitcon_nfc_battle/services/nfc_deep_link_service.dart';
 import 'package:hitcon_nfc_battle/services/nfc_session_controller.dart';
+import 'package:hitcon_nfc_battle/services/auth_service.dart';
 
 void main() {
   const MethodChannel nativeNfcChannel = MethodChannel(
@@ -70,6 +72,141 @@ void main() {
     await tester.pump();
 
     expect(find.text('請先輸入要配對的 User ID。'), findsOneWidget);
+  });
+
+  testWidgets('staff unlock can select production or staging API', (
+    WidgetTester tester,
+  ) async {
+    addTearDown(AppConfig.resetApiBaseUrlForTesting);
+    expect(
+      AppConfig.tryApplyRemoteApiBaseUrl('https://game.hitcon2026.online'),
+      isTrue,
+    );
+
+    await tester.pumpWidget(app(const AdminTagUnlockPage()));
+
+    expect(find.text('解鎖碼來源'), findsNWidgets(2));
+    expect(find.text('正式 API（線上設定）'), findsNWidgets(2));
+    expect(
+      find.textContaining('https://game.hitcon2026.online'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining(AppConfig.staffUnlockStagingApiBaseUrl),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        const ValueKey<String>('selected-staff-unlock-api-production'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('staff-unlock-api-staging')),
+    );
+    await tester.pump();
+
+    expect(find.text('登入 STAGING API'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('staging-login-token-field')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        const ValueKey<String>('selected-staff-unlock-api-production'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('confirm-staging-token')),
+    );
+    await tester.pump();
+    expect(find.text('請輸入 Staging 登入 Token。'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('staging-login-token-field')),
+      'staging-test-token',
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('confirm-staging-token')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('selected-staff-unlock-api-staging')),
+      findsOneWidget,
+    );
+    expect(find.text('STAGING API'), findsNWidgets(2));
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('staff-unlock-api-production')),
+    );
+    await tester.pump();
+    await tester.tap(
+      find.byKey(const ValueKey<String>('staff-unlock-api-staging')),
+    );
+    await tester.pump();
+
+    expect(find.text('登入 STAGING API'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const ValueKey<String>('staging-login-token-field')),
+          )
+          .controller
+          ?.text,
+      isEmpty,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('cancel-staging-token')),
+    );
+    await tester.pumpAndSettle();
+  });
+
+  test('staff unlock API targets resolve independently', () {
+    addTearDown(AppConfig.resetApiBaseUrlForTesting);
+    expect(
+      AppConfig.tryApplyRemoteApiBaseUrl('https://game.hitcon2026.online'),
+      isTrue,
+    );
+
+    expect(
+      staffNtagUnlockApiBaseUrl(StaffNtagUnlockApiTarget.production),
+      'https://game.hitcon2026.online',
+    );
+    expect(
+      staffNtagUnlockApiBaseUrl(StaffNtagUnlockApiTarget.staging),
+      AppConfig.staffUnlockStagingApiBaseUrl,
+    );
+  });
+
+  testWidgets('staff prize page lists stamp, ranking, and soldering prizes', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(app(const AdminPrizeClaimPage()));
+
+    expect(find.text('獎項類型'), findsNWidgets(2));
+    expect(find.text('STAMP PRIZE'), findsNWidgets(2));
+    expect(find.text('集滿 Sponsor 與 Community 印章的集章獎'), findsOneWidget);
+    expect(find.text('RANKING PRIZE'), findsOneWidget);
+    expect(find.text('排行榜結算獎項（需先凍結排行榜）'), findsOneWidget);
+    expect(find.text('EXTERNAL PRIZE'), findsOneWidget);
+    expect(find.text('焊接活動獎項'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('selected-prize-type-STAMP')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey<String>('prize-type-EXTERNAL')));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey<String>('selected-prize-type-EXTERNAL')),
+      findsOneWidget,
+    );
+    expect(find.text('EXTERNAL PRIZE'), findsNWidgets(2));
   });
 
   testWidgets('staff pairing owns NFC before starting the reader', (

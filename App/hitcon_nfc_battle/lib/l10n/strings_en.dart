@@ -493,6 +493,13 @@ const Map<String, String> appStringsEn = <String, String>{
   'waitingForTagShort': 'Waiting for Tag...',
   'claimScanPrompt':
       'Start scanning, then scan an attendee Tag to confirm the prize.',
+  'claimPrizeType': 'Prize type',
+  'stampPrizeClaim': 'STAMP PRIZE',
+  'stampPrizeClaimHint': 'Sponsor and Community stamp-collection prize',
+  'rankingPrizeClaim': 'RANKING PRIZE',
+  'rankingPrizeClaimHint': 'Final scoreboard prize (requires a frozen board)',
+  'externalPrizeClaim': 'EXTERNAL PRIZE',
+  'externalPrizeClaimHint': 'Soldering challenge prize',
   'scanAttendeeTag': 'Scan the attendee Tag.',
   'tagHasNoUserId': '(Tag has no user_id)',
   'claimFailed': 'Confirmation failed. Try again later.',
@@ -500,6 +507,18 @@ const Map<String, String> appStringsEn = <String, String>{
   'claimComplete': 'Prize claim confirmed.',
   'claimConfirmation': 'Prize confirmation',
   'claimCode': 'Claim code',
+  'unlockCodeApiSource': 'Unlock code source',
+  'productionApi': 'PRODUCTION API (REMOTE CONFIG)',
+  'productionApiHint':
+      'Use the API selected by the current remote config: {url}',
+  'stagingApi': 'STAGING API',
+  'stagingApiHint':
+      'Use the fixed testing API; a Staging login token is required when switching: {url}',
+  'stagingLoginTokenTitle': 'SIGN IN TO STAGING API',
+  'stagingLoginTokenDescription':
+      'Enter a Staging login token. It is kept temporarily and used only for unlock-code requests on this page.',
+  'stagingLoginTokenLabel': 'Staging login token',
+  'stagingLoginTokenRequired': 'Enter a Staging login token.',
   'scanTagToUnlock': 'Scan the NTAG that needs to be unlocked.',
   'holdTagToUnlock': 'Hold the NTAG to unlock near the phone.',
   'adminUnlockSecretFailed':

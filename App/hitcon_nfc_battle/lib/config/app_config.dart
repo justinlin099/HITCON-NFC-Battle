@@ -4,6 +4,11 @@ import 'achievement_config.dart';
 
 /// 應用程式設定
 class AppConfig {
+  /// STAFF NTAG unlock testing endpoint. This remains fixed even when the
+  /// runtime remote config points the rest of the app at production.
+  static const String staffUnlockStagingApiBaseUrl =
+      'https://nfc-battle-staging.hitcon2026.online';
+
   /// 打包時的後端 API 回退 URL。
   static const String bundledApiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
