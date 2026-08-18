@@ -136,11 +136,12 @@ info:
     activity must not change that stored snapshot unless staff explicitly
     resumes scoring and freezes again.
 servers:
-  - url: https://{devHost}/v1
-    description: Development API
-    variables:
-      devHost:
-        default: localhost
+  - url: https://nfc-battle-api.hitcon2026.online
+    description: Production API
+  - url: https://nfc-battle-staging.hitcon2026.online
+    description: Staging API
+  - url: http://localhost:8787
+    description: Local development API
 security:
   - bearerAuth: []
 tags:

@@ -100,7 +100,8 @@
 | **API 規格（企劃＋介面契約）** | [`Backend/Readme.md`](Backend/Readme.md) | 統一錯誤碼、JWT、遊戲邏輯、Staff 流程；**本 repo 僅見規格書，後端實作另庫／另部署**。 |
 | **Deep Link 託管** | [`App/hitcon_nfc_battle/deeplink-hosting/`](App/hitcon_nfc_battle/deeplink-hosting/) | Android App Links／iOS Universal Links 之 `assetlinks.json`、`apple-app-site-association`，以及 **`/b` 落地頁**（未安裝 App 時導向商店）。部署說明見 [`DEPLOY_SPACESHIP.md`](App/hitcon_nfc_battle/deeplink-hosting/DEPLOY_SPACESHIP.md)。 |
 
-**Production Base URL（規格書）**：`https://game.hitcon2026.online/v1`  
+**Production Base URL（規格書）**：`https://nfc-battle-api.hitcon2026.online`
+
 **開發／測試**：可改為 ngrok 或內網網域，仍須符合 JWT 與 HTTPS 驗證需求。
 
 ---
