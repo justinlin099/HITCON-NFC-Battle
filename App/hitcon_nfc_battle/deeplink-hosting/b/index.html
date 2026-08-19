@@ -336,7 +336,13 @@
       const openAppBtn = document.getElementById("openApp");
       const openStoreBtn = document.getElementById("openStore");
 
-      linkNode.textContent = current;
+      const currentUrl = new URL(current);
+      const hasLoginToken = ["token", "jwt", "access_token", "login_token"].some(
+        (key) => currentUrl.searchParams.has(key),
+      );
+      linkNode.textContent = hasLoginToken
+        ? `${currentUrl.origin}${currentUrl.pathname}?token=********`
+        : current;
       openAppBtn.href = current;
 
       const ua = navigator.userAgent || "";

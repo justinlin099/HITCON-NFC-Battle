@@ -35,20 +35,31 @@ Future<void> main() async {
   await SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
     DeviceOrientation.portraitUp,
   ]);
+  await NfcDeepLinkService.instance.initialize();
   runApp(const MyApp());
 }
 
 class _SessionGate extends StatefulWidget {
-  const _SessionGate();
+  const _SessionGate({required this.onRoutingComplete});
+
+  final VoidCallback onRoutingComplete;
 
   @override
   State<_SessionGate> createState() => _SessionGateState();
 }
 
 class _SessionGateState extends State<_SessionGate> {
+  StreamSubscription<String>? _loginTokenSubscription;
+  String? _incomingLoginToken;
+  bool _remoteConfigReady = false;
+  bool _hasNavigated = false;
+
   @override
   void initState() {
     super.initState();
+    _loginTokenSubscription = NfcDeepLinkService.instance.loginTokens.listen(
+      _handleLoginToken,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_restoreAndRoute());
     });
@@ -56,18 +67,23 @@ class _SessionGateState extends State<_SessionGate> {
 
   Future<void> _restoreAndRoute() async {
     await RemoteAppConfigService.instance.refresh(force: true);
-    if (!mounted) {
+    if (!mounted || _hasNavigated) {
+      return;
+    }
+    _remoteConfigReady = true;
+    if (_routePendingLogin()) {
       return;
     }
 
     final AuthService auth = AuthService();
     final bool restored = await auth.restoreSession();
-    if (!mounted) {
+    if (!mounted || _hasNavigated || _routePendingLogin()) {
       return;
     }
 
     if (!restored) {
-      Navigator.of(context).pushReplacement(
+      _completeInitialRouting();
+      Navigator.of(context).pushReplacement<void, void>(
         MaterialPageRoute<void>(builder: (_) => const TestLoginPage()),
       );
       return;
@@ -76,14 +92,59 @@ class _SessionGateState extends State<_SessionGate> {
     final String? userId = auth.currentUserId;
     final bool setupComplete =
         userId != null && await SetupService().isComplete(userId);
-    if (!mounted) {
+    if (!mounted || _hasNavigated || _routePendingLogin()) {
       return;
     }
 
     final String routeName = auth.usesUserFlow
         ? (setupComplete ? '/collection' : '/setup')
         : '/admin';
+    _completeInitialRouting();
     Navigator.of(context).pushReplacementNamed(routeName);
+  }
+
+  void _handleLoginToken(String token) {
+    _incomingLoginToken = token;
+    if (_remoteConfigReady && mounted && !_hasNavigated) {
+      _routePendingLogin();
+    }
+  }
+
+  bool _routePendingLogin() {
+    if (!mounted || _hasNavigated) {
+      return false;
+    }
+    final String token =
+        (_incomingLoginToken ??
+                NfcDeepLinkService.instance.takePendingLoginToken() ??
+                '')
+            .trim();
+    if (token.isEmpty) {
+      return false;
+    }
+    _incomingLoginToken = null;
+    NfcDeepLinkService.instance.takePendingLoginToken();
+    _completeInitialRouting();
+    Navigator.of(context).pushReplacement<void, void>(
+      MaterialPageRoute<void>(
+        builder: (_) => TestLoginPage(initialToken: token),
+      ),
+    );
+    return true;
+  }
+
+  void _completeInitialRouting() {
+    if (_hasNavigated) {
+      return;
+    }
+    _hasNavigated = true;
+    widget.onRoutingComplete();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_loginTokenSubscription?.cancel());
+    super.dispose();
   }
 
   @override
@@ -142,12 +203,17 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late final AutoNtagScanner _autoScanner;
+  StreamSubscription<String>? _loginTokenSubscription;
+  bool _initialRoutingComplete = false;
+  bool _loginLinkRouteOpen = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(NfcDeepLinkService.instance.initialize());
+    _loginTokenSubscription = NfcDeepLinkService.instance.loginTokens.listen(
+      _openLoginLink,
+    );
     _autoScanner = AutoNtagScanner(deepLinks: NfcDeepLinkService.instance);
     NfcDeepLinkService.instance.registerInAppScanStarter(_autoScanner.start);
   }
@@ -155,6 +221,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_loginTokenSubscription?.cancel());
     _autoScanner.dispose();
     super.dispose();
   }
@@ -194,13 +261,45 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       ],
       supportedLocales: AppLocalizations.supportedLocales,
       localeListResolutionCallback: resolveAppLocale,
-      home: const _SessionGate(),
+      home: _SessionGate(
+        onRoutingComplete: () {
+          _initialRoutingComplete = true;
+        },
+      ),
       routes: {
         '/home': (context) => const NTagReaderPage(),
         '/admin': (context) => const AdminHomePage(),
         '/collection': (context) => const CardCollectionPage(),
         '/setup': (context) => const SetupPage(),
       },
+    );
+  }
+
+  void _openLoginLink(String token) {
+    if (!_initialRoutingComplete || _loginLinkRouteOpen) {
+      return;
+    }
+    NfcDeepLinkService.instance.takePendingLoginToken();
+    final NavigatorState? navigator = _navigatorKey.currentState;
+    if (navigator == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _openLoginLink(token);
+        }
+      });
+      return;
+    }
+    _loginLinkRouteOpen = true;
+    unawaited(
+      navigator
+          .push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => TestLoginPage(initialToken: token),
+            ),
+          )
+          .whenComplete(() {
+            _loginLinkRouteOpen = false;
+          }),
     );
   }
 }

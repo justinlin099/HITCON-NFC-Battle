@@ -11,7 +11,7 @@ The app fetches this document when it starts and when it resumes:
   "allow_user_tag_unlock": true,
   "show_panasonic_logo": true,
   "show_panasonic_logo_on_print": true,
-  "manual_url": "https://github.com/justinlin099/HITCON-NFC-Battle#readme",
+  "manual_url": "https://github.com/justinlin099/HITCON-NFC-Battle/blob/main/App/hitcon_nfc_battle/docs/user_manual.md",
   "achievement_rules": {
     "sponsor_scout": {
       "enabled": true,

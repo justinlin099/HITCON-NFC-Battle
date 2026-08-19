@@ -34,8 +34,11 @@ class NfcDeepLinkService {
   final AppLinks _appLinks = AppLinks();
   final StreamController<NfcScanRequest> _requests =
       StreamController<NfcScanRequest>.broadcast();
+  final StreamController<String> _loginTokens =
+      StreamController<String>.broadcast();
 
   NfcScanRequest? _pending;
+  String? _pendingLoginToken;
   NfcScanRequest? _lastPublishedRequest;
   String? _expectedRescanUserId;
   Future<void> Function()? _startInAppScan;
@@ -48,7 +51,9 @@ class NfcDeepLinkService {
   bool _initialized = false;
 
   Stream<NfcScanRequest> get requests => _requests.stream;
+  Stream<String> get loginTokens => _loginTokens.stream;
   bool get hasPending => _pending != null;
+  bool get hasPendingLogin => _pendingLoginToken != null;
 
   void registerInAppScanStarter(Future<void> Function() startScan) {
     _startInAppScan = startScan;
@@ -128,19 +133,30 @@ class NfcDeepLinkService {
   }
 
   Future<void> acceptUri(Uri uri) async {
-    final bool validTarget =
+    final bool trustedTarget =
         uri.scheme.toLowerCase() == 'https' &&
         uri.host.toLowerCase() == 'game.hitcon2026.online' &&
         !uri.hasPort &&
         uri.userInfo.isEmpty &&
-        !uri.hasFragment &&
-        (uri.path == '/b' || uri.path == '/b/');
+        !uri.hasFragment;
+    if (!trustedTarget) {
+      return;
+    }
+
+    final bool collectionPath = uri.path == '/b' || uri.path == '/b/';
     final String userId = uri.queryParameters['u']?.trim() ?? '';
+    final String? loginToken = _readLoginToken(uri);
+    final bool loginLink = collectionPath && userId.isEmpty;
+    if (loginLink && loginToken != null) {
+      _publishLoginToken(loginToken, uri);
+      return;
+    }
+
     final bool validUserId =
         userId.isNotEmpty &&
         userId.length <= 128 &&
         !userId.contains(RegExp(r'[\x00-\x1F\x7F]'));
-    if (!validTarget || !validUserId) {
+    if (!collectionPath || !validUserId) {
       return;
     }
 
@@ -214,6 +230,49 @@ class NfcDeepLinkService {
     return request;
   }
 
+  String? takePendingLoginToken() {
+    final String? token = _pendingLoginToken;
+    _pendingLoginToken = null;
+    return token;
+  }
+
+  String? _readLoginToken(Uri uri) {
+    for (final String key in const <String>[
+      'token',
+      'jwt',
+      'access_token',
+      'login_token',
+    ]) {
+      final String token = uri.queryParameters[key]?.trim() ?? '';
+      if (_isValidJwtShape(token)) {
+        return token;
+      }
+    }
+    return null;
+  }
+
+  bool _isValidJwtShape(String token) {
+    if (token.isEmpty || token.length > 8192) {
+      return false;
+    }
+    return RegExp(
+      r'^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$',
+    ).hasMatch(token);
+  }
+
+  void _publishLoginToken(String token, Uri uri) {
+    final DateTime now = DateTime.now();
+    final String uriKey = uri.toString();
+    if (uriKey == _lastAcceptedUri &&
+        now.difference(_lastAcceptedUriAt) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastAcceptedUri = uriKey;
+    _lastAcceptedUriAt = now;
+    _pendingLoginToken = token;
+    _loginTokens.add(token);
+  }
+
   bool get _isTagMaintenanceSuppressed =>
       _tagMaintenanceDepth > 0 ||
       DateTime.now().isBefore(_suppressTagRequestsUntil);
@@ -223,9 +282,13 @@ class NfcDeepLinkService {
     _tagMaintenanceDepth = 0;
     _suppressTagRequestsUntil = DateTime.fromMillisecondsSinceEpoch(0);
     _pending = null;
+    _pendingLoginToken = null;
     _lastPublishedRequest = null;
+    _expectedRescanUserId = null;
     _lastRequestKey = '';
     _lastRequestAt = DateTime.fromMillisecondsSinceEpoch(0);
+    _lastAcceptedUri = '';
+    _lastAcceptedUriAt = DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   Future<_NfcLaunchData> _takeNativeLaunchData() async {

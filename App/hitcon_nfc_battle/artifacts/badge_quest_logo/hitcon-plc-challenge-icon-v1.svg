@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HITCON PLC challenge icon</title>
+  <desc id="desc">A minimal networked PLC running ladder logic and dispensing a drink.</desc>
+
+  <!-- MQTT traffic arriving at the controller. -->
+  <g fill="none" stroke-linecap="square">
+    <path d="M78 91C82 72 98 57 117 53M61 101C66 67 93 41 127 36"
+          stroke="#FFFFFF" stroke-width="15"/>
+    <path d="M78 91C82 72 98 57 117 53M61 101C66 67 93 41 127 36"
+          stroke="#FF17E9" stroke-width="6"/>
+  </g>
+  <circle cx="97" cy="82" r="13" fill="#FF17E9" stroke="#FFFFFF" stroke-width="6"/>
+
+  <!-- Industrial PLC module, deliberately not shaped like either physical activity PCB. -->
+  <rect x="54" y="92" width="330" height="328" rx="38"
+        fill="#0F0018" stroke="#FFFFFF" stroke-width="18"/>
+  <rect x="54" y="92" width="330" height="328" rx="38"
+        fill="none" stroke="#00F5FF" stroke-width="7"/>
+
+  <!-- Status indicators and terminal points. -->
+  <g stroke="#FFFFFF" stroke-width="5">
+    <circle cx="158" cy="139" r="11" fill="#00F5FF"/>
+    <circle cx="198" cy="139" r="11" fill="#FF17E9"/>
+    <circle cx="238" cy="139" r="11" fill="#FFD700"/>
+  </g>
+  <g fill="#0F0018" stroke="#FFFFFF" stroke-width="6">
+    <circle cx="82" cy="222" r="13"/>
+    <circle cx="82" cy="272" r="13"/>
+    <circle cx="82" cy="322" r="13"/>
+  </g>
+
+  <!-- One bold Ladder Logic rung: rails, normally-open contact, and output coil. -->
+  <path d="M124 184V344M330 184V344M124 246H180M220 246H278M324 246H330"
+        fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="square"/>
+  <path d="M124 184V344M330 184V344"
+        fill="none" stroke="#00F5FF" stroke-width="7" stroke-linecap="square"/>
+  <path d="M188 220V272M212 220V272"
+        stroke="#FF17E9" stroke-width="13" stroke-linecap="square"/>
+  <path d="M292 220C270 232 270 260 292 272M310 220C332 232 332 260 310 272"
+        fill="none" stroke="#FFD700" stroke-width="13" stroke-linecap="square"/>
+
+  <!-- PLC output port and pipe. -->
+  <circle cx="384" cy="302" r="22" fill="#0F0018" stroke="#FFFFFF" stroke-width="8"/>
+  <circle cx="384" cy="302" r="10" fill="#00F5FF"/>
+  <path d="M407 302H456V370H434"
+        fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="square" stroke-linejoin="miter"/>
+  <path d="M407 302H456V370H434"
+        fill="none" stroke="#FF17E9" stroke-width="8" stroke-linecap="square" stroke-linejoin="miter"/>
+
+  <!-- A single drink stream and cup keep the challenge outcome readable at small sizes. -->
+  <path d="M434 385C421 400 421 413 434 422C447 413 447 400 434 385Z" fill="#FFD700"/>
+  <path d="M397 421H481L468 479H410Z"
+        fill="#0F0018" stroke="#FFFFFF" stroke-width="13" stroke-linejoin="miter"/>
+  <path d="M397 421H481L468 479H410Z"
+        fill="none" stroke="#00F5FF" stroke-width="5" stroke-linejoin="miter"/>
+  <path d="M414 450H466" stroke="#FFD700" stroke-width="10" stroke-linecap="square"/>
+</svg>

@@ -13,7 +13,9 @@ import '../../services/setup_service.dart';
 import '../user/pixel_theme.dart';
 
 class TestLoginPage extends StatefulWidget {
-  const TestLoginPage({super.key});
+  const TestLoginPage({super.key, this.initialToken});
+
+  final String? initialToken;
 
   @override
   State<TestLoginPage> createState() => _TestLoginPageState();
@@ -26,13 +28,49 @@ class _TestLoginPageState extends State<TestLoginPage> {
 
   final TextEditingController _tokenController = TextEditingController();
   bool _isLoading = false;
+  bool _didStartAutomaticLogin = false;
   String _status = '';
+
+  @override
+  void initState() {
+    super.initState();
+    final String rawToken = widget.initialToken?.trim() ?? '';
+    if (rawToken.isNotEmpty) {
+      _didStartAutomaticLogin = true;
+      _tokenController.text = _extractToken(rawToken);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_loginWithRawToken(rawToken));
+        }
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant TestLoginPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final String rawToken = widget.initialToken?.trim() ?? '';
+    if (rawToken.isEmpty ||
+        rawToken == oldWidget.initialToken?.trim() ||
+        _isLoading) {
+      return;
+    }
+    _didStartAutomaticLogin = true;
+    _tokenController.text = _extractToken(rawToken);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(_loginWithRawToken(rawToken));
+      }
+    });
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_status.isEmpty) {
-      _status = context.l10n.tr('loginPrompt');
+      _status = context.l10n.tr(
+        _didStartAutomaticLogin ? 'signingIn' : 'loginPrompt',
+      );
     }
   }
 

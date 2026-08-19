@@ -7,6 +7,15 @@ This folder is a deploy-ready static site for:
 - App API routing config (`/.well-known/nfc-battle-app-config.json`)
 - Store fallback page (`/b`)
 
+The `/b` page supports two mutually exclusive App flows:
+
+- Card collection: `https://game.hitcon2026.online/b?u=<user_id>`
+- Token login: `https://game.hitcon2026.online/b?token=<JWT>`
+
+If both `u` and `token` are present, the App treats the link as a card
+collection link. Generate links with a URL builder so the query value is
+properly encoded.
+
 ## 1) Replace placeholders first
 
 ### `/.well-known/assetlinks.json`
@@ -58,6 +67,9 @@ After deploy, these URLs must return **200**:
 - Content type should be JSON for all three well-known files.
 - Keep `nfc-battle-app-config.json` on `Cache-Control: no-store`; the included
   Cloudflare Pages `_headers` file applies this automatically.
+- Keep `Referrer-Policy: no-referrer` on `/b` and do not add analytics that
+  capture query strings. Login JWTs should be short-lived because URLs may be
+  recorded by email security scanners, browsers, proxies, or access logs.
 
 ## 5) Switching the API without releasing a new app
 

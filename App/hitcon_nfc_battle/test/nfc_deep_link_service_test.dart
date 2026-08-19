@@ -75,4 +75,53 @@ void main() {
     expect(pending!.userId, 'attendee_002');
     expect(maintenanceModes, <bool>[true, false]);
   });
+
+  test('accepts a login token from the canonical b link', () async {
+    const String token =
+        'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhdHRlbmRlZV80In0.signature_123';
+    final Future<String> emittedToken = service.loginTokens.first;
+
+    await service.acceptUri(
+      Uri.https('game.hitcon2026.online', '/b', <String, String>{
+        'token': token,
+      }),
+    );
+
+    expect(await emittedToken, token);
+    expect(service.takePendingLoginToken(), token);
+    expect(service.takePending(), isNull);
+  });
+
+  test('keeps b links with a user id in the collection flow', () async {
+    const String token =
+        'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhdHRlbmRlZV80In0.signature_123';
+
+    await service.acceptUri(
+      Uri.https('game.hitcon2026.online', '/b', <String, String>{
+        'u': 'attendee_001',
+        'token': token,
+      }),
+    );
+
+    expect(service.takePendingLoginToken(), isNull);
+    final NfcScanRequest? pending = service.takePending();
+    expect(pending, isNotNull);
+    expect(pending!.userId, 'attendee_001');
+  });
+
+  test('rejects malformed login tokens and untrusted hosts', () async {
+    await service.acceptUri(
+      Uri.https('game.hitcon2026.online', '/b', <String, String>{
+        'token': 'not-a-jwt',
+      }),
+    );
+    await service.acceptUri(
+      Uri.https('example.com', '/b', <String, String>{
+        'token': 'header.payload.signature',
+      }),
+    );
+
+    expect(service.takePendingLoginToken(), isNull);
+    expect(service.takePending(), isNull);
+  });
 }

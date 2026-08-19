@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HITCON soldering experience icon</title>
+  <desc id="desc">A minimal PCB badge with a soldering iron touching a circuit pad.</desc>
+
+  <!-- Three connector pins shared with the Badge Quest icon. -->
+  <g fill="none" stroke-linecap="square">
+    <path d="M158 50V14M190 50V14M222 50V14" stroke="#FFFFFF" stroke-width="18"/>
+    <path d="M158 50V14M190 50V14M222 50V14" stroke="#00F5FF" stroke-width="7"/>
+  </g>
+
+  <!-- Physical badge silhouette: upper-left and lower-right cuts only. -->
+  <path d="M138 44H432V376L352 468H48V132Z"
+        fill="#0F0018" stroke="#FFFFFF" stroke-width="18" stroke-linejoin="miter"/>
+  <path d="M138 44H432V376L352 468H48V132Z"
+        fill="none" stroke="#00F5FF" stroke-width="7" stroke-linejoin="miter"/>
+
+  <!-- Minimal PCB traces and through-hole pads. -->
+  <g fill="none" stroke="#00F5FF" stroke-width="12" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M204 300H116V358H88"/>
+    <path d="M204 300V402H288"/>
+  </g>
+  <g fill="#0F0018" stroke="#FFFFFF" stroke-width="7">
+    <circle cx="116" cy="358" r="19"/>
+    <circle cx="288" cy="402" r="19"/>
+  </g>
+  <g fill="#00F5FF">
+    <circle cx="116" cy="358" r="8"/>
+    <circle cx="288" cy="402" r="8"/>
+  </g>
+
+  <!-- Soldering iron, angled from the upper-right toward the active pad. -->
+  <g transform="translate(332 154) rotate(45)">
+    <rect x="-34" y="-74" width="68" height="120" rx="18"
+          fill="#FF17E9" stroke="#FFFFFF" stroke-width="8"/>
+    <path d="M-22-40H22M-22-14H22" stroke="#0F0018" stroke-width="8" stroke-linecap="square"/>
+    <rect x="-40" y="38" width="80" height="30" rx="6"
+          fill="#0F0018" stroke="#FFFFFF" stroke-width="8"/>
+    <rect x="-11" y="68" width="22" height="76" fill="#FFFFFF"/>
+    <path d="M-14 144H14L0 180Z" fill="#FFD700" stroke="#FFFFFF" stroke-width="6" stroke-linejoin="miter"/>
+  </g>
+
+  <!-- Molten solder joint and a restrained heat/spark accent. -->
+  <circle cx="204" cy="300" r="30" fill="#0F0018" stroke="#FFFFFF" stroke-width="8"/>
+  <circle cx="204" cy="300" r="15" fill="#FFD700"/>
+  <path d="M204 262V246M232 272L244 260M176 272L164 260"
+        stroke="#FF17E9" stroke-width="8" stroke-linecap="square"/>
+</svg>
