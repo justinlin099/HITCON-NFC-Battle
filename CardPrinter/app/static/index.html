@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="HITCON NFC Battle Windows 卡片列印站"
+    />
+    <title>卡片列印站</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/vendor/zxing-browser.min.js" defer></script>
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主要內容</a>
+
+    <div class="page-shell">
+      <header class="site-header" aria-labelledby="page-title">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <div>
+            <p class="eyebrow">HITCON 2026 // NFC BATTLE</p>
+            <h1 id="page-title">卡片列印站</h1>
+          </div>
+        </div>
+
+        <div class="workstation-badges" aria-label="工作站狀態">
+          <span class="pixel-badge">WINDOWS</span>
+          <span class="pixel-badge pixel-badge--cyan">DOCKER</span>
+          <span id="config-badge" class="pixel-badge pixel-badge--muted">
+            設定載入中
+          </span>
+        </div>
+      </header>
+
+      <noscript>
+        <div class="noscript-warning" role="alert">
+          此工具需要 JavaScript 才能掃描條碼、預覽卡面與產生 Word 檔。
+        </div>
+      </noscript>
+
+      <main id="main-content" class="workspace" tabindex="-1">
+        <section class="control-stack" aria-labelledby="input-heading">
+          <article class="panel panel--controls">
+            <div class="panel-heading">
+              <span class="step-number" aria-hidden="true">01</span>
+              <div>
+                <p class="panel-kicker">LOAD ARTWORK</p>
+                <h2 id="input-heading">載入卡面</h2>
+              </div>
+            </div>
+
+            <form id="card-form" novalidate>
+              <div class="field-group">
+                <label for="card-token">列印短 Token</label>
+                <input
+                  id="card-token"
+                  name="token"
+                  type="text"
+                  inputmode="text"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  minlength="8"
+                  maxlength="32"
+                  pattern="[A-Za-z0-9_-]{8,32}"
+                  aria-describedby="token-help token-error"
+                  placeholder="例如 H26P-7K4M-92QD"
+                  required
+                />
+                <p id="token-help" class="field-help">
+                  可手動輸入，或使用筆電相機掃描 Code 128 條碼。
+                </p>
+                <p id="token-error" class="field-error" hidden></p>
+              </div>
+
+              <div id="jwt-field" class="field-group" hidden>
+                <label for="staff-jwt">STAFF JWT</label>
+                <div class="password-field">
+                  <input
+                    id="staff-jwt"
+                    name="staff-jwt"
+                    type="password"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    aria-describedby="jwt-help jwt-error"
+                    placeholder="貼上有效的 STAFF JWT"
+                  />
+                  <button
+                    id="toggle-jwt"
+                    class="icon-button"
+                    type="button"
+                    aria-label="顯示 STAFF JWT"
+                    aria-pressed="false"
+                  >
+                    顯示
+                  </button>
+                </div>
+                <p id="jwt-help" class="field-help field-help--security">
+                  僅保留在目前頁面的記憶體中，不會寫入瀏覽器儲存空間。
+                </p>
+                <p id="jwt-error" class="field-error" hidden></p>
+              </div>
+
+              <div class="button-grid">
+                <button id="load-card" class="button button--primary" type="submit">
+                  <span aria-hidden="true">&gt;</span>
+                  載入卡面預覽
+                </button>
+                <button
+                  id="scan-card"
+                  class="button button--secondary"
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-controls="camera-dialog"
+                >
+                  <span aria-hidden="true">[ ]</span>
+                  相機掃描條碼
+                </button>
+                <button
+                  id="scan-card-phone"
+                  class="button button--ghost phone-scan-button"
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-controls="phone-scanner-dialog"
+                >
+                  <span aria-hidden="true">[=]</span>
+                  用手機掃描
+                </button>
+              </div>
+            </form>
+
+            <div class="section-divider" aria-hidden="true">
+              <span></span><b>或</b><span></span>
+            </div>
+
+            <div class="local-file-block">
+              <div>
+                <h3>使用本機 PNG</h3>
+                <p>網路或條碼不可用時，可直接選擇已下載的卡面圖檔。</p>
+              </div>
+              <button id="choose-local-png" class="button button--ghost file-button" type="button">
+                選擇 PNG
+              </button>
+              <input
+                id="local-png"
+                type="file"
+                accept="image/png,.png"
+                tabindex="-1"
+                aria-label="選擇本機 PNG 卡面"
+              />
+            </div>
+          </article>
+
+          <article class="panel panel--status" aria-labelledby="status-heading">
+            <div class="status-led" aria-hidden="true"></div>
+            <div
+              id="operation-status"
+              class="status-copy"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              data-state="loading"
+            >
+              <p id="status-heading" class="status-title">正在讀取工作站設定</p>
+              <p id="status-detail">請稍候，正在確認 API 與校正模板。</p>
+            </div>
+          </article>
+
+          <details class="panel panel--details">
+            <summary>工作站設定</summary>
+            <dl id="config-details" class="config-list">
+              <div>
+                <dt>連線</dt>
+                <dd>讀取中…</dd>
+              </div>
+            </dl>
+          </details>
+        </section>
+
+        <section class="panel panel--preview" aria-labelledby="preview-heading">
+          <div class="panel-heading panel-heading--preview">
+            <span class="step-number" aria-hidden="true">02</span>
+            <div>
+              <p class="panel-kicker">VERIFY &amp; EXPORT</p>
+              <h2 id="preview-heading">確認並下載 Word</h2>
+            </div>
+            <span id="preview-state" class="preview-state">尚未載入</span>
+          </div>
+
+          <div id="preview-stage" class="preview-stage" tabindex="-1">
+            <div id="preview-empty" class="preview-empty">
+              <div class="empty-card" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <p>卡面預覽會顯示在這裡</p>
+              <small>掃描條碼或選擇 PNG 開始</small>
+            </div>
+            <img id="preview-image" alt="待列印卡片 PNG 預覽" hidden />
+          </div>
+
+          <div id="preview-meta" class="preview-meta" aria-live="polite">
+            <span id="preview-source">來源：—</span>
+            <span id="preview-dimensions">尺寸：—</span>
+          </div>
+
+          <div class="export-form">
+            <div class="field-group">
+              <label for="document-name">Word 檔名</label>
+              <div class="filename-field">
+                <input
+                  id="document-name"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  maxlength="80"
+                  pattern="[A-Za-z0-9_-]{1,80}"
+                  aria-describedby="filename-help filename-error"
+                  placeholder="hitcon-card-token"
+                  disabled
+                />
+                <span aria-hidden="true">.docx</span>
+              </div>
+              <p id="filename-help" class="field-help">
+                使用英文字母、數字、連字號或底線，方便 Windows 管理檔案。
+              </p>
+              <p id="filename-error" class="field-error" hidden></p>
+            </div>
+
+            <label class="confirm-row" for="preview-confirmed">
+              <input id="preview-confirmed" type="checkbox" disabled />
+              <span>
+                <b>我已確認卡面與方向正確</b>
+                <small>Word 會沿用校正模板的位置，不會重新置中。</small>
+              </span>
+            </label>
+
+            <button id="download-word" class="button button--download" type="button" disabled>
+              <span aria-hidden="true">↓</span>
+              下載校正 Word
+            </button>
+          </div>
+
+          <aside class="print-note" aria-label="列印提醒">
+            <strong>PRINT CHECK</strong>
+            <p>
+              下載後請用 Windows 版 Microsoft Word 開啟，維持原始頁面大小與 100% 比例列印；不要套用「符合頁面」。
+            </p>
+          </aside>
+        </section>
+      </main>
+
+      <footer>
+        <span>LOCAL WORKSTATION</span>
+        <span aria-hidden="true">//</span>
+        <span>憑證不寫入瀏覽器儲存空間</span>
+      </footer>
+    </div>
+
+    <dialog
+      id="camera-dialog"
+      class="camera-dialog"
+      aria-labelledby="camera-title"
+      aria-describedby="camera-instructions"
+    >
+      <div class="camera-shell">
+        <header class="camera-header">
+          <div>
+            <p class="panel-kicker">CODE 128 SCANNER</p>
+            <h2 id="camera-title">掃描列印條碼</h2>
+          </div>
+          <button id="close-camera" class="icon-button icon-button--close" type="button">
+            <span aria-hidden="true">×</span>
+            <span class="sr-only">關閉相機</span>
+          </button>
+        </header>
+
+        <p id="camera-instructions" class="camera-instructions">
+          將完整的橫向條碼放進綠色框線內，保持穩定並避免反光。模糊時先把顯示條碼的手機拿遠到約
+          25–40 公分，不要貼近筆電鏡頭。
+        </p>
+
+        <div class="camera-toolbar">
+          <div class="camera-select-field">
+            <label for="camera-select">相機</label>
+            <select id="camera-select" disabled>
+              <option value="">正在偵測相機…</option>
+            </select>
+          </div>
+          <button
+            id="refocus-camera"
+            class="button button--ghost button--compact"
+            type="button"
+            aria-describedby="camera-lens-hint"
+            disabled
+          >
+            重新對焦
+          </button>
+          <button id="switch-camera" class="button button--ghost button--compact" type="button" disabled>
+            切換相機
+          </button>
+        </div>
+
+        <div class="camera-lens-controls">
+          <div id="zoom-control" class="zoom-control" hidden>
+            <label for="camera-zoom">縮放</label>
+            <input
+              id="camera-zoom"
+              type="range"
+              min="1"
+              max="1"
+              step="0.1"
+              value="1"
+              aria-describedby="camera-lens-hint"
+              disabled
+            />
+            <output id="camera-zoom-value" for="camera-zoom">1.0×</output>
+          </div>
+          <p id="camera-lens-hint" class="camera-lens-hint" aria-live="polite"></p>
+        </div>
+
+        <div class="camera-viewport">
+          <video id="camera-video" autoplay muted playsinline></video>
+          <div class="scan-frame" aria-hidden="true">
+            <i></i><i></i><i></i><i></i>
+            <span></span>
+          </div>
+          <div id="camera-placeholder" class="camera-placeholder">
+            <span class="spinner" aria-hidden="true"></span>
+            <p>正在啟動相機…</p>
+          </div>
+        </div>
+
+        <div
+          id="camera-status"
+          class="camera-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          等待相機權限…
+        </div>
+
+        <button id="camera-done" class="button button--secondary camera-done" type="button">
+          關閉並手動輸入
+        </button>
+      </div>
+    </dialog>
+
+    <dialog
+      id="phone-scanner-dialog"
+      class="camera-dialog phone-scanner-dialog"
+      aria-labelledby="phone-scanner-title"
+      aria-describedby="phone-scanner-instructions"
+    >
+      <div class="camera-shell">
+        <header class="camera-header">
+          <div>
+            <p class="panel-kicker">USB / ADB</p>
+            <h2 id="phone-scanner-title">用手機掃描</h2>
+          </div>
+          <button id="close-phone-scanner" class="icon-button icon-button--close" type="button">
+            <span aria-hidden="true">×</span>
+            <span class="sr-only">關閉手機掃描</span>
+          </button>
+        </header>
+
+        <p id="phone-scanner-instructions" class="camera-instructions">
+          USB / ADB 已連線的手機會自動接上這次掃描；若未自動連線，再於手機輸入下方配對碼。
+        </p>
+
+        <div class="phone-pairing-panel">
+          <span>10 字配對碼（手動備援）</span>
+          <output id="phone-pairing-code" aria-live="polite">----------</output>
+          <small id="phone-pairing-expiry">正在建立配對工作…</small>
+        </div>
+
+        <div
+          id="phone-scanner-status"
+          class="camera-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          正在建立手機掃描工作…
+        </div>
+
+        <div class="phone-scanner-actions">
+          <button id="restart-phone-scanner" class="button button--ghost" type="button" disabled>
+            重新建立掃描工作
+          </button>
+          <button id="phone-scanner-done" class="button button--secondary" type="button">
+            關閉
+          </button>
+        </div>
+      </div>
+    </dialog>
+
+    <canvas id="scan-canvas" class="sr-only" aria-hidden="true"></canvas>
+  </body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>卡片列印站｜手機掃描</title>
+    <link rel="stylesheet" href="/static/phone-scanner.css" />
+    <script src="/vendor/zxing-browser.min.js" defer></script>
+    <script src="/static/phone-scanner.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="eyebrow">卡片列印站</span>
+        <h1>手機掃描器</h1>
+        <p>USB 連線會自動配對；未自動連線時可改用 Windows 配對碼。</p>
+      </header>
+
+      <section class="scanner" aria-labelledby="scanner-title">
+        <div class="scanner-heading">
+          <h2 id="scanner-title">Code 128</h2>
+          <span id="relay-state" class="badge" data-state="waiting">等待 Windows</span>
+        </div>
+
+        <form id="pairing-form" class="pairing-form">
+          <label for="pairing-code">手動備援：Windows 顯示的 10 字配對碼</label>
+          <div>
+            <input
+              id="pairing-code"
+              name="pairing-code"
+              type="text"
+              inputmode="text"
+              maxlength="12"
+              autocomplete="one-time-code"
+              autocapitalize="characters"
+              spellcheck="false"
+              aria-describedby="pairing-help pairing-error"
+              placeholder="例如 ABCDE-FGHJK"
+            />
+            <button id="pair-scanner" type="submit" disabled>配對</button>
+          </div>
+          <p id="pairing-help">英文字母不含 I、L、O、U；連字號可省略。</p>
+          <p id="pairing-error" class="field-error" role="alert" hidden></p>
+        </form>
+
+        <div class="video-stage">
+          <video id="camera-video" autoplay muted playsinline></video>
+          <div class="scan-frame" aria-hidden="true"><span></span></div>
+          <div id="camera-placeholder" class="placeholder">
+            <p>尚未啟動相機</p>
+          </div>
+        </div>
+
+        <p class="distance-hint">手機離條碼約 15–30 公分；畫面模糊就拿遠。</p>
+
+        <div class="controls">
+          <button id="start-camera" type="button" disabled>開始掃描</button>
+          <button id="refocus-camera" class="secondary" type="button" hidden>重新對焦</button>
+        </div>
+
+        <div id="zoom-control" class="zoom-control" hidden>
+          <label for="camera-zoom">縮放</label>
+          <input id="camera-zoom" type="range" min="1" max="1" step="0.1" value="1" />
+          <output id="camera-zoom-value" for="camera-zoom">1.0×</output>
+        </div>
+
+        <p id="scanner-status" class="status" role="status" aria-live="polite">
+          正在連線到 Windows…
+        </p>
+      </section>
+    </main>
+    <canvas id="scan-canvas" hidden aria-hidden="true"></canvas>
+  </body>
+</html>

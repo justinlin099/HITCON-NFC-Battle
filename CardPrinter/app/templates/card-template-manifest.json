@@ -1,0 +1,31 @@
+{
+  "templateSha256": "b78877fc7e7f2b8ea8413ec727c44e71de0b6066576d8c14697e3daddefb01a1",
+  "imagePart": "word/media/image1.png",
+  "imageRelationshipId": "rId6",
+  "documentXmlSha256": "f8a25f61771a5cf1c91ef5cd0eeb45f2fbf557295a03feae9b282fd38d4046a7",
+  "documentRelationshipsSha256": "8d7f9080612b38a10fb4240db44136fb44dd66c7abf6cc68a314fdab2e57fc12",
+  "page": {
+    "widthTwips": 3112,
+    "heightTwips": 4876,
+    "marginTwips": 57,
+    "widthMillimeters": 54.892222,
+    "heightMillimeters": 86.007222
+  },
+  "imageFrame": {
+    "widthEmu": 1895475,
+    "heightEmu": 2995295,
+    "widthMillimeters": 52.652083,
+    "heightMillimeters": 83.202639,
+    "horizontalOffsetEmu": 11430,
+    "horizontalOffsetMillimeters": 0.3175,
+    "relativeFromHorizontal": "margin",
+    "relativeFromVertical": "paragraph",
+    "geometry": "roundRect",
+    "geometryAdjustment": 4484
+  },
+  "sourceImage": {
+    "widthPixels": 456,
+    "heightPixels": 720,
+    "aspectRatio": 0.6333333333
+  }
+}

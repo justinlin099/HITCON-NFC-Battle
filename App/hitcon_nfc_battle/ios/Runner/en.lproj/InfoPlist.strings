@@ -1,0 +1,4 @@
+"NFCReaderUsageDescription" = "NFC is used to read and write NFC Tags.";
+"NSCameraUsageDescription" = "The camera is used to scan the login QR Code.";
+"NSLocationWhenInUseUsageDescription" = "When you select a photo, the image picker reads location information attached to it so the image can be processed correctly. This app does not use it to track your location.";
+"NSPhotoLibraryUsageDescription" = "Photo access is used to select an image and create your card.";

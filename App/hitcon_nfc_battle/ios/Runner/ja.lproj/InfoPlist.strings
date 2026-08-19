@@ -1,0 +1,4 @@
+"NFCReaderUsageDescription" = "NFCタグの読み取りと書き込みにNFCを使用します。";
+"NSCameraUsageDescription" = "ログイン用QRコードをスキャンするためにカメラを使用します。";
+"NSLocationWhenInUseUsageDescription" = "写真を選択する際、画像選択機能が写真に付加された位置情報を読み取り、画像を正しく処理します。このAppが位置情報を追跡に使用することはありません。";
+"NSPhotoLibraryUsageDescription" = "カード画像の選択と作成のために写真ライブラリにアクセスします。";

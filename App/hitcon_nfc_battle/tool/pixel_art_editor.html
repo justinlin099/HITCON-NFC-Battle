@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pixel Art Editor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #10131a;
+      --panel: #1c2430;
+      --panel-2: #263241;
+      --line: #445064;
+      --text: #f4f7fb;
+      --muted: #aeb8c7;
+      --accent: #ffd84d;
+      --cyan: #55d8ff;
+      --danger: #ff6b80;
+      --cell: #151a22;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      letter-spacing: 0;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 24px));
+      margin: 0 auto;
+      padding: 18px 0 24px;
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) 340px;
+      gap: 18px;
+    }
+
+    header {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 2px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.1;
+    }
+
+    .hint {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 2px solid var(--line);
+      box-shadow: 5px 5px 0 #000;
+    }
+
+    .workspace {
+      padding: 16px;
+      display: grid;
+      place-items: center;
+      min-height: 640px;
+    }
+
+    .grid-wrap {
+      width: min(580px, 100%);
+      aspect-ratio: 1;
+      padding: 10px;
+      background: #090b10;
+      border: 2px solid var(--line);
+    }
+
+    .grid {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      background: var(--line);
+      gap: 1px;
+      cursor: crosshair;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .cell {
+      background: var(--cell);
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .cell.on {
+      background: var(--accent);
+    }
+
+    .sidebar {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .group {
+      display: grid;
+      gap: 8px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    button,
+    select,
+    input[type="color"] {
+      height: 36px;
+      background: var(--panel-2);
+      color: var(--text);
+      border: 2px solid var(--line);
+      font: inherit;
+      font-size: 12px;
+    }
+
+    button {
+      padding: 0 11px;
+      cursor: pointer;
+      box-shadow: 3px 3px 0 #000;
+    }
+
+    button:active,
+    button.active {
+      transform: translate(2px, 2px);
+      box-shadow: 1px 1px 0 #000;
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    button.danger {
+      border-color: var(--danger);
+    }
+
+    select {
+      padding: 0 8px;
+      min-width: 92px;
+    }
+
+    input[type="color"] {
+      width: 48px;
+      padding: 2px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 230px;
+      resize: vertical;
+      background: #0b0f15;
+      color: var(--cyan);
+      border: 2px solid var(--line);
+      padding: 10px;
+      font: inherit;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre;
+    }
+
+    .preview-row {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+
+    canvas {
+      width: 96px;
+      height: 96px;
+      image-rendering: pixelated;
+      background: #0b0f15;
+      border: 2px solid var(--line);
+    }
+
+    .swatch {
+      width: 28px;
+      height: 28px;
+      border: 2px solid var(--line);
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+    .swatch.active {
+      border-color: var(--text);
+      box-shadow: 0 0 0 2px #000, 0 0 0 4px var(--accent);
+    }
+
+    @media (max-width: 860px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      .workspace {
+        min-height: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Pixel Art Editor</h1>
+        <p class="hint">Draw with left click or touch. Right click erases. Copy the Dart pattern when done.</p>
+      </div>
+    </header>
+
+    <section class="panel workspace">
+      <div class="grid-wrap">
+        <div id="grid" class="grid" aria-label="Pixel canvas"></div>
+      </div>
+    </section>
+
+    <aside class="panel sidebar">
+      <div class="group">
+        <div class="label">Canvas</div>
+        <div class="row">
+          <select id="size">
+            <option value="8">8 x 8</option>
+            <option value="12">12 x 12</option>
+            <option value="16" selected>16 x 16</option>
+            <option value="24">24 x 24</option>
+          </select>
+          <button id="clear" class="danger">Clear</button>
+          <button id="invert">Invert</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="label">Tool</div>
+        <div class="row">
+          <button id="draw" class="active">Draw</button>
+          <button id="erase">Erase</button>
+          <button id="mirror">Mirror X</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="label">Color</div>
+        <div class="row">
+          <input id="color" type="color" value="#ffd84d">
+          <button class="swatch active" data-color="#ffd84d" title="yellow"></button>
+          <button class="swatch" data-color="#55d8ff" title="cyan"></button>
+          <button class="swatch" data-color="#ff6b80" title="red"></button>
+          <button class="swatch" data-color="#f4f7fb" title="white"></button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="label">Preview</div>
+        <div class="preview-row">
+          <canvas id="preview" width="24" height="24"></canvas>
+          <div>
+            <button id="download">Export PNG</button>
+            <p class="hint">PNG exports at the selected grid size.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="label">Dart Pattern</div>
+        <textarea id="pattern" spellcheck="false"></textarea>
+        <div class="row">
+          <button id="copy">Copy Pattern</button>
+          <button id="load">Load From Text</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const gridEl = document.getElementById('grid');
+    const sizeEl = document.getElementById('size');
+    const drawBtn = document.getElementById('draw');
+    const eraseBtn = document.getElementById('erase');
+    const mirrorBtn = document.getElementById('mirror');
+    const clearBtn = document.getElementById('clear');
+    const invertBtn = document.getElementById('invert');
+    const colorEl = document.getElementById('color');
+    const patternEl = document.getElementById('pattern');
+    const preview = document.getElementById('preview');
+    const copyBtn = document.getElementById('copy');
+    const loadBtn = document.getElementById('load');
+    const downloadBtn = document.getElementById('download');
+    const swatches = [...document.querySelectorAll('.swatch')];
+
+    let size = Number(sizeEl.value);
+    let pixels = [];
+    let tool = 'draw';
+    let pointerDown = false;
+    let mirror = false;
+    let color = colorEl.value;
+
+    function emptyPixels(nextSize) {
+      return Array.from({ length: nextSize }, () => Array(nextSize).fill(false));
+    }
+
+    function setTool(nextTool) {
+      tool = nextTool;
+      drawBtn.classList.toggle('active', tool === 'draw');
+      eraseBtn.classList.toggle('active', tool === 'erase');
+    }
+
+    function setColor(nextColor) {
+      color = nextColor;
+      colorEl.value = nextColor;
+      document.documentElement.style.setProperty('--accent', nextColor);
+      swatches.forEach((swatch) => {
+        swatch.classList.toggle('active', swatch.dataset.color === nextColor);
+      });
+      render();
+    }
+
+    function buildGrid() {
+      gridEl.innerHTML = '';
+      gridEl.style.gridTemplateColumns = `repeat(${size}, 1fr)`;
+      for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size; x += 1) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.dataset.x = x;
+          cell.dataset.y = y;
+          gridEl.appendChild(cell);
+        }
+      }
+      render();
+    }
+
+    function paintCell(x, y, value) {
+      pixels[y][x] = value;
+      if (mirror) {
+        pixels[y][size - 1 - x] = value;
+      }
+    }
+
+    function applyPaint(event) {
+      const target = event.target.closest('.cell');
+      if (!target) return;
+      event.preventDefault();
+      const x = Number(target.dataset.x);
+      const y = Number(target.dataset.y);
+      const value = event.buttons === 2 ? false : tool === 'draw';
+      paintCell(x, y, value);
+      render();
+    }
+
+    function render() {
+      [...gridEl.children].forEach((cell) => {
+        const x = Number(cell.dataset.x);
+        const y = Number(cell.dataset.y);
+        cell.classList.toggle('on', pixels[y][x]);
+      });
+
+      patternEl.value = pixels
+        .map((row) => `          '${row.map((on) => (on ? '1' : '0')).join('')}',`)
+        .join('\n');
+
+      const ctx = preview.getContext('2d');
+      preview.width = size;
+      preview.height = size;
+      ctx.clearRect(0, 0, size, size);
+      ctx.fillStyle = '#0b0f15';
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = color;
+      for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size; x += 1) {
+          if (pixels[y][x]) ctx.fillRect(x, y, 1, 1);
+        }
+      }
+    }
+
+    function resizeCanvas(nextSize) {
+      const old = pixels;
+      const oldSize = size;
+      size = nextSize;
+      pixels = emptyPixels(size);
+      const copySize = Math.min(size, oldSize);
+      const oldOffset = Math.floor((oldSize - copySize) / 2);
+      const newOffset = Math.floor((size - copySize) / 2);
+      for (let y = 0; y < copySize; y += 1) {
+        for (let x = 0; x < copySize; x += 1) {
+          pixels[y + newOffset][x + newOffset] = old[y + oldOffset][x + oldOffset];
+        }
+      }
+      buildGrid();
+    }
+
+    function loadFromText() {
+      const rows = patternEl.value
+        .split('\n')
+        .map((line) => line.replace(/[^01]/g, ''))
+        .filter(Boolean);
+      if (!rows.length) return;
+      const nextSize = rows[0].length;
+      if (!rows.every((row) => row.length === nextSize) || rows.length !== nextSize) {
+        alert('Pattern must be square and contain only rows of 0/1.');
+        return;
+      }
+      sizeEl.value = String(nextSize);
+      size = nextSize;
+      pixels = rows.map((row) => [...row].map((char) => char === '1'));
+      buildGrid();
+    }
+
+    gridEl.addEventListener('contextmenu', (event) => event.preventDefault());
+    gridEl.addEventListener('pointerdown', (event) => {
+      pointerDown = true;
+      gridEl.setPointerCapture(event.pointerId);
+      applyPaint(event);
+    });
+    gridEl.addEventListener('pointermove', (event) => {
+      if (pointerDown) applyPaint(event);
+    });
+    gridEl.addEventListener('pointerup', () => {
+      pointerDown = false;
+    });
+    gridEl.addEventListener('pointercancel', () => {
+      pointerDown = false;
+    });
+
+    sizeEl.addEventListener('change', () => resizeCanvas(Number(sizeEl.value)));
+    drawBtn.addEventListener('click', () => setTool('draw'));
+    eraseBtn.addEventListener('click', () => setTool('erase'));
+    mirrorBtn.addEventListener('click', () => {
+      mirror = !mirror;
+      mirrorBtn.classList.toggle('active', mirror);
+    });
+    clearBtn.addEventListener('click', () => {
+      pixels = emptyPixels(size);
+      render();
+    });
+    invertBtn.addEventListener('click', () => {
+      pixels = pixels.map((row) => row.map((on) => !on));
+      render();
+    });
+    colorEl.addEventListener('input', () => setColor(colorEl.value));
+    swatches.forEach((swatch) => {
+      swatch.style.background = swatch.dataset.color;
+      swatch.addEventListener('click', () => setColor(swatch.dataset.color));
+    });
+    copyBtn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(patternEl.value);
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => {
+        copyBtn.textContent = 'Copy Pattern';
+      }, 900);
+    });
+    loadBtn.addEventListener('click', loadFromText);
+    downloadBtn.addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.download = `pixel-art-${size}x${size}.png`;
+      link.href = preview.toDataURL('image/png');
+      link.click();
+    });
+
+    pixels = emptyPixels(size);
+    buildGrid();
+  </script>
+</body>
+</html>

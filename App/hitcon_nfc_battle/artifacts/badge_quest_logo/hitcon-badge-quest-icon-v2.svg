@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HITCON Badge Quest icon</title>
+  <desc id="desc">A minimal PCB badge silhouette with an LED Q and a quest route.</desc>
+
+  <!-- Three connector pins from the physical badge. -->
+  <g fill="none" stroke-linecap="square">
+    <path d="M158 50V14M190 50V14M222 50V14" stroke="#FFFFFF" stroke-width="18"/>
+    <path d="M158 50V14M190 50V14M222 50V14" stroke="#00F5FF" stroke-width="7"/>
+  </g>
+
+  <!-- Exact asymmetric board language: upper-left and lower-right cuts only. -->
+  <path d="M138 44H432V376L352 468H48V132Z"
+        fill="#0F0018" stroke="#FFFFFF" stroke-width="18" stroke-linejoin="miter"/>
+  <path d="M138 44H432V376L352 468H48V132Z"
+        fill="none" stroke="#00F5FF" stroke-width="7" stroke-linejoin="miter"/>
+
+  <!-- Sparse LED matrix: a capital Q at small icon sizes. -->
+  <g fill="#00F5FF">
+    <circle cx="164" cy="144" r="12"/>
+    <circle cx="204" cy="144" r="12"/>
+    <circle cx="244" cy="144" r="12"/>
+    <circle cx="284" cy="144" r="12"/>
+    <circle cx="132" cy="176" r="12"/>
+    <circle cx="316" cy="176" r="12"/>
+    <circle cx="132" cy="216" r="12"/>
+    <circle cx="316" cy="216" r="12"/>
+    <circle cx="132" cy="256" r="12"/>
+    <circle cx="316" cy="256" r="12"/>
+    <circle cx="164" cy="288" r="12"/>
+    <circle cx="204" cy="288" r="12"/>
+    <circle cx="244" cy="288" r="12"/>
+    <circle cx="284" cy="288" r="12"/>
+  </g>
+
+  <!-- The Q tail becomes a PCB quest route with three checkpoints. -->
+  <path d="M252 268L300 316L270 350L326 406"
+        fill="none" stroke="#FF17E9" stroke-width="13"
+        stroke-linecap="square" stroke-linejoin="miter"/>
+  <g fill="#0F0018" stroke="#FFFFFF" stroke-width="6">
+    <circle cx="300" cy="316" r="15"/>
+    <circle cx="270" cy="350" r="15"/>
+    <circle cx="326" cy="406" r="15"/>
+  </g>
+  <g fill="#FF17E9">
+    <circle cx="300" cy="316" r="7"/>
+    <circle cx="270" cy="350" r="7"/>
+  </g>
+  <circle cx="326" cy="406" r="7" fill="#FFD700"/>
+
+  <!-- Minimal completion flag. -->
+  <path d="M326 405V358" stroke="#FFD700" stroke-width="8" stroke-linecap="square"/>
+  <path d="M330 358H374L354 378H330Z" fill="#FFD700"/>
+</svg>

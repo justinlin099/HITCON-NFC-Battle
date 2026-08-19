@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 817 576" role="img" aria-labelledby="title desc">
+  <title id="title">HITCON soldering experience icon</title>
+  <desc id="desc">A minimal curled-tail cat soldering-kit PCB with a soldering iron touching a circuit pad.</desc>
+
+  <!-- Silhouette of the soldering kit PCB: curled tail, round cat body, and fedora. -->
+  <path d="M390 205
+           C350 215 325 239 286 238
+           C246 236 218 210 181 190
+           C138 167 88 169 51 194
+           C14 219 -2 264 9 304
+           C20 343 53 368 89 373
+           C106 376 119 368 124 355
+           C130 338 118 321 100 315
+           C81 308 71 290 75 270
+           C81 241 108 218 139 218
+           C169 219 195 243 222 260
+           C253 280 291 286 322 272
+           C338 265 352 273 348 290
+           C335 334 324 375 328 420
+           C333 484 373 538 437 557
+           C501 576 576 555 628 508
+           C681 460 704 390 694 325
+           C687 274 668 236 644 207
+           C683 200 719 184 749 164
+           C761 156 759 148 744 141
+           C715 128 681 125 646 118
+           C635 80 627 43 598 20
+           C572 -2 538 0 507 16
+           C484 7 457 10 443 29
+           C427 51 434 78 421 105
+           C399 105 383 115 375 129
+           C369 139 371 148 378 154
+           C357 153 337 155 323 162
+           C312 168 318 178 331 184
+           C352 195 371 201 390 205Z"
+        fill="#0F0018" stroke="#FFFFFF" stroke-width="20" stroke-linejoin="round"/>
+  <path d="M390 205
+           C350 215 325 239 286 238
+           C246 236 218 210 181 190
+           C138 167 88 169 51 194
+           C14 219 -2 264 9 304
+           C20 343 53 368 89 373
+           C106 376 119 368 124 355
+           C130 338 118 321 100 315
+           C81 308 71 290 75 270
+           C81 241 108 218 139 218
+           C169 219 195 243 222 260
+           C253 280 291 286 322 272
+           C338 265 352 273 348 290
+           C335 334 324 375 328 420
+           C333 484 373 538 437 557
+           C501 576 576 555 628 508
+           C681 460 704 390 694 325
+           C687 274 668 236 644 207
+           C683 200 719 184 749 164
+           C761 156 759 148 744 141
+           C715 128 681 125 646 118
+           C635 80 627 43 598 20
+           C572 -2 538 0 507 16
+           C484 7 457 10 443 29
+           C427 51 434 78 421 105
+           C399 105 383 115 375 129
+           C369 139 371 148 378 154
+           C357 153 337 155 323 162
+           C312 168 318 178 331 184
+           C352 195 371 201 390 205Z"
+        fill="none" stroke="#00F5FF" stroke-width="8" stroke-linejoin="round"/>
+
+  <!-- The fedora band and brim follow the original kit-board artwork. -->
+  <path d="M421 105C484 126 557 130 646 118L676 132C579 160 482 164 384 136Z"
+        fill="#FF17E9" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M323 162C415 196 566 193 744 141"
+        fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"/>
+  <path d="M323 162C415 196 566 193 744 141"
+        fill="none" stroke="#00F5FF" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Three face traces retain the distinctive right edge of the physical PCB. -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M658 209L710 246M681 270L742 260M687 330L744 342"
+          stroke="#FFFFFF" stroke-width="18"/>
+    <path d="M658 209L710 246M681 270L742 260M687 330L744 342"
+          stroke="#00F5FF" stroke-width="7"/>
+  </g>
+
+  <!-- PCB traces and through-hole pads beneath the active solder joint. -->
+  <g fill="none" stroke="#00F5FF" stroke-width="13" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M465 365H405V430H370"/>
+    <path d="M465 365V470H530"/>
+  </g>
+  <g fill="#0F0018" stroke="#FFFFFF" stroke-width="8">
+    <circle cx="370" cy="430" r="20"/>
+    <circle cx="530" cy="470" r="20"/>
+  </g>
+  <g fill="#00F5FF">
+    <circle cx="370" cy="430" r="8"/>
+    <circle cx="530" cy="470" r="8"/>
+  </g>
+
+  <!-- Soldering iron angled into the board. -->
+  <g transform="translate(575 255) rotate(45)">
+    <rect x="-34" y="-72" width="68" height="108" rx="18"
+          fill="#FF17E9" stroke="#FFFFFF" stroke-width="9"/>
+    <path d="M-22-39H22M-22-13H22" stroke="#0F0018" stroke-width="8" stroke-linecap="square"/>
+    <rect x="-40" y="30" width="80" height="30" rx="6"
+          fill="#0F0018" stroke="#FFFFFF" stroke-width="9"/>
+    <rect x="-11" y="60" width="22" height="64" fill="#FFFFFF"/>
+    <path d="M-14 124H14L0 156Z" fill="#FFD700" stroke="#FFFFFF" stroke-width="6" stroke-linejoin="miter"/>
+  </g>
+
+  <!-- Molten solder bead at the exact tip contact. -->
+  <circle cx="465" cy="365" r="31" fill="#0F0018" stroke="#FFFFFF" stroke-width="9"/>
+  <circle cx="465" cy="365" r="16" fill="#FFD700"/>
+  <path d="M465 323V307M495 335L507 323M435 335L423 323"
+        stroke="#FF17E9" stroke-width="8" stroke-linecap="square"/>
+</svg>
