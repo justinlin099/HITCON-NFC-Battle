@@ -83,11 +83,11 @@ Hold your phone close to the NFC area on the back of the other attendee's Badge,
 
 ### 1.6 Collect Sponsor and Community cards and redeem a prize
 
-![The Sponsor and Community card collection reaches 10 out of 10, and the attendee visits the event team booth to redeem a prize](images/user_manual/published/quick-start-06-booth-cards.png)
+![The Sponsor and Community card collection reaches 25 out of 25, and the attendee visits the event team booth to redeem a prize](images/user_manual/published/quick-start-06-booth-cards.png)
 
 After interacting with staff at Sponsor or Community booths, tap their physical Badges to collect their cards. Progress is the combined number of unique identities from both categories. Once you reach the target shown in the App, bring your paired Badge to the event team booth for verification and prize redemption.
 
-> **Target reminder:** The App's default target is 10, but the final target and prize eligibility are determined by the current App screen, the server result, and on-site announcements.
+> **Target reminder:** The App's default target is 25, but the final target and prize eligibility are determined by the current App screen, the server result, and on-site announcements.
 
 ## 2. Before You Begin
 
@@ -305,7 +305,7 @@ For a visual guide, see “[Quick Start: Collect Sponsor and Community cards and
 
 - After interacting with staff at a Sponsor or Community booth, collect their card using their physical NFC Badge.
 - Stamp quest progress is the **combined number of unique Sponsor and Community identities**.
-- The App's default target for this event is 10 cards. The final requirement is the total shown in the App.
+- The App's default target for this event is 25 cards. The final requirement is the total shown in the App.
 - Scanning the same identity repeatedly does not count more than once.
 
 > On site, this is usually described as collecting cards from different booths, but the system actually counts unique Sponsor and Community user identities.

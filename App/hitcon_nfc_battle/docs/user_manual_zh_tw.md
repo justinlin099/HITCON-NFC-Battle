@@ -81,11 +81,11 @@
 
 ### 1.6 收集 Sponsor／Community 卡並兌獎
 
-![收集 Sponsor 與 Community 身分卡的進度達到 10／10，再到活動組攤位兌換獎品](images/user_manual/published/quick-start-06-booth-cards.png)
+![收集 Sponsor 與 Community 身分卡的進度達到 25／25，再到活動組攤位兌換獎品](images/user_manual/published/quick-start-06-booth-cards.png)
 
 和 Sponsor 或 Community 攤位人員互動後，感應他們的實體 Badge 收集卡片。進度是兩類不重複身分的合計；達到 App 顯示的目標後，帶著已配對的 Badge 到活動組攤位核對領獎。
 
-> **門檻提醒：** App 預設目標為 10，但最終門檻與兌獎資格以 App 當下畫面、伺服器結果及現場公告為準。
+> **門檻提醒：** App 預設目標為 25，但最終門檻與兌獎資格以 App 當下畫面、伺服器結果及現場公告為準。
 
 ## 2. 開始前的準備
 
@@ -303,7 +303,7 @@
 
 - 與 Sponsor 或 Community 身分的攤位人員互動後，使用實體 NFC Badge 收集其卡片。
 - 集章進度為兩種類型的**不重複身分卡合計**。
-- 本次 App 預設目標為 10 張；最終門檻以 App 畫面上的「目標」數字為準。
+- 本次 App 預設目標為 25 張；最終門檻以 App 畫面上的「目標」數字為準。
 - 重複掃描同一個身分不會重複計算。
 
 > 現場通常可理解為收集不同攤位卡片，但系統實際按「不同 Sponsor／Community 使用者身分」計數。
