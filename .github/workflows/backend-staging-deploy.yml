@@ -52,18 +52,28 @@ jobs:
       - name: Apply remote D1 migrations
         run: npm run db:migrate:staging
 
-      - name: Sync staging Worker secrets
+      - name: Prepare staging Worker secrets
         env:
           JWT_SECRET: ${{ secrets.STAGING_JWT_SECRET }}
           STAFF_DANGER_TOKEN: ${{ secrets.STAGING_STAFF_DANGER_TOKEN }}
         run: |
           test -n "$JWT_SECRET" || { echo "STAGING_JWT_SECRET is not configured"; exit 1; }
           test -n "$STAFF_DANGER_TOKEN" || { echo "STAGING_STAFF_DANGER_TOKEN is not configured"; exit 1; }
-          printf '%s' "$JWT_SECRET" | npx wrangler secret put JWT_SECRET --env staging
-          printf '%s' "$STAFF_DANGER_TOKEN" | npx wrangler secret put STAFF_DANGER_TOKEN --env staging
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            writeFileSync(process.argv[1], JSON.stringify({
+              JWT_SECRET: process.env.JWT_SECRET,
+              STAFF_DANGER_TOKEN: process.env.STAFF_DANGER_TOKEN,
+            }));
+          ' "$RUNNER_TEMP/backend-worker-secrets.json"
 
       - name: Deploy Worker
         run: |
           npm run deploy:staging -- \
+            --secrets-file "$RUNNER_TEMP/backend-worker-secrets.json" \
             --tag "$GITHUB_SHA" \
             --message "$GITHUB_REPOSITORY@$GITHUB_SHA ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+
+      - name: Remove temporary Worker secrets
+        if: always()
+        run: rm -f "$RUNNER_TEMP/backend-worker-secrets.json"
