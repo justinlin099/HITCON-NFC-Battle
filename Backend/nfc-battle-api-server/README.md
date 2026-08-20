@@ -39,6 +39,37 @@ npm test
 npm run typecheck
 ```
 
+## OpenAPI Documentation
+
+Swagger UI is served by each deployed API at `/docs/`:
+
+```txt
+https://nfc-battle-api.hitcon2026.online/docs/
+https://nfc-battle-staging.hitcon2026.online/docs/
+```
+
+The page and OpenAPI schema are public, but they do not bypass endpoint
+authentication. Protected requests still require a JWT, staff operations still
+require the `STAFF` role, and dangerous operations still require
+`STAFF_DANGER_TOKEN`.
+
+The hosted specification uses only the origin from which the page was loaded,
+so staging documentation sends requests to staging and production documentation
+sends requests to production. Swagger credentials are not persisted.
+
+The documentation assets are generated before `npm run dev` and every deploy.
+To rebuild them directly, run:
+
+```txt
+npm run docs:build
+```
+
+After starting the local Worker, open its `/docs/` path:
+
+```txt
+http://127.0.0.1:8787/docs/
+```
+
 ## Manual Load Test
 
 Manual k6 load-test scenarios live in [`scripts/k6/README.md`](./scripts/k6/README.md).

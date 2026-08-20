@@ -3,12 +3,13 @@
   "type": "module",
   "scripts": {
     "wrangler": "node scripts/wrangler-repo.mjs",
-    "dev": "node scripts/wrangler-repo.mjs dev",
-    "deploy": "node scripts/wrangler-repo.mjs deploy --minify",
-    "deploy:staging": "node scripts/wrangler-repo.mjs deploy --env staging --minify",
-    "deploy:production": "node scripts/wrangler-repo.mjs deploy --env production --minify",
+    "dev": "npm run docs:build && node scripts/wrangler-repo.mjs dev",
+    "deploy": "npm run docs:build && node scripts/wrangler-repo.mjs deploy --minify",
+    "deploy:staging": "npm run docs:build && node scripts/wrangler-repo.mjs deploy --env staging --minify",
+    "deploy:production": "npm run docs:build && node scripts/wrangler-repo.mjs deploy --env production --minify",
     "db:migrate:staging": "node scripts/wrangler-repo.mjs d1 migrations apply nfc-battle-api-server-staging --remote --env staging",
     "db:migrate:production": "node scripts/wrangler-repo.mjs d1 migrations apply nfc-battle-api-server --remote --env production",
+    "docs:build": "node scripts/build-openapi-docs.mjs",
     "load:k6": "node -e \"console.log('Choose a scenario: npm run load:k6:lazy-init or npm run load:k6:pair-tags')\"",
     "load:k6:lazy-init": "docker run --rm --env-file scripts/k6/.env -v \"$PWD:/work\" -w /work grafana/k6 run scripts/k6/lazy-initialization.js",
     "load:k6:lazy-init:local": "k6 run scripts/k6/lazy-initialization.js",
@@ -26,8 +27,10 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
+    "swagger-ui-dist": "5.32.14",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8",
-    "wrangler": "^4.98.0"
+    "wrangler": "^4.98.0",
+    "yaml": "2.9.0"
   }
 }
