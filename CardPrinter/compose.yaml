@@ -12,7 +12,8 @@ services:
       - "127.0.0.1:${CARDPRINTER_PORT:-18080}:8000"
       - "127.0.0.1:${CARDPRINTER_COMPANION_PORT:-18081}:8001"
     environment:
-      API_BASE_URL: "${API_BASE_URL:-https://nfc-battle-staging.hitcon2026.online}"
+      API_BASE_URL: "${API_BASE_URL:-https://nfc-battle-api.hitcon2026.online}"
+      REMOTE_CONFIG_URL: "${REMOTE_CONFIG_URL:-https://game.hitcon2026.online/.well-known/nfc-battle-app-config.json}"
       STAFF_JWT: "${STAFF_JWT:-}"
       CARDPRINTER_ALLOWED_API_HOSTS: "${CARDPRINTER_ALLOWED_API_HOSTS:-}"
       CARDPRINTER_ALLOW_HTTP_API: "${CARDPRINTER_ALLOW_HTTP_API:-false}"

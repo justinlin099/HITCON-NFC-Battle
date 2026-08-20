@@ -7,6 +7,7 @@ from app.scanner_relay import (
     ScannerCapabilityError,
     ScannerDeviceCapabilityError,
     ScannerRelay,
+    ScannerSessionAlreadyPairedError,
     ScannerSessionAlreadyUsedError,
     ScannerSessionNotFoundError,
 )
@@ -64,10 +65,11 @@ class ScannerRelayTests(unittest.TestCase):
         first_device = self.relay.create_device()
         old_session = self.relay.create_session()
         second_device = self.relay.create_device()
-        with self.assertRaises(ScannerSessionNotFoundError):
-            self.relay.session(old_session.session_id)
+        self.assertEqual(
+            self.relay.session(old_session.session_id).session_id,
+            old_session.session_id,
+        )
 
-        self.relay.create_session()
         for invalid in (
             first_device.device_capability,
             "é" * len(second_device.device_capability),
@@ -80,6 +82,41 @@ class ScannerRelayTests(unittest.TestCase):
             self.relay.claim_active_session(
                 device_capability=second_device.device_capability
             )
+
+    def test_device_reconnect_does_not_disrupt_paired_session(self) -> None:
+        first_device = self.relay.create_device()
+        session = self.relay.create_session()
+        grant = self.relay.claim_active_session(
+            device_capability=first_device.device_capability
+        )
+
+        with self.assertRaises(ScannerSessionAlreadyPairedError):
+            self.relay.create_device()
+
+        self.assertEqual(
+            self.relay.claim_active_session(
+                device_capability=first_device.device_capability
+            ),
+            grant,
+        )
+        self.assertEqual(
+            self.relay.session(session.session_id).session_id,
+            session.session_id,
+        )
+
+    def test_device_reconnect_requires_the_expected_active_session(self) -> None:
+        session = self.relay.create_session()
+        with self.assertRaises(ScannerSessionNotFoundError):
+            self.relay.create_device(expected_session_id="different-session-id")
+
+        device = self.relay.create_device(
+            expected_session_id=session.session_id
+        )
+        self.assertGreaterEqual(len(device.device_capability), 40)
+        self.assertEqual(
+            self.relay.session(session.session_id).session_id,
+            session.session_id,
+        )
 
     def test_create_submit_and_read_session(self) -> None:
         created = self.relay.create_session()

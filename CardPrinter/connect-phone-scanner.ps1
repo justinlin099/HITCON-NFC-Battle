@@ -6,15 +6,90 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$mainPublishedPort = $null
+$publishedPort = $null
+$helperRestartRequired = $false
+
+function Get-ComposePublishedPort {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ContainerPort,
+        [int]$Attempts = 12
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt += 1) {
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $portOutput = @(docker compose port cardprinter $ContainerPort 2>&1)
+            $portExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        if ($portExitCode -eq 0) {
+            foreach ($line in $portOutput) {
+                if ([string]$line -match ':(\d+)\s*$') {
+                    return [int]$Matches[1]
+                }
+            }
+        }
+        if ($attempt -lt $Attempts) {
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    throw "無法取得容器連接埠 $ContainerPort 的 Windows 對外連接埠。"
+}
+
+function Invoke-AdbCapture {
+    param(
+        [string[]]$AdbArguments,
+        [ValidateRange(250, 30000)][int]$TimeoutMilliseconds = 8000
+    )
+
+    foreach ($argument in $AdbArguments) {
+        if ($null -eq $argument -or [string]$argument -match '[\s"]') {
+            throw 'ADB 參數格式不安全。'
+        }
+    }
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $script:AdbPath
+    $startInfo.Arguments = $AdbArguments -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            return [pscustomobject]@{ ExitCode = -1; Output = @() }
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            try { $process.Kill() } catch {}
+            [void]$process.WaitForExit(1000)
+            return [pscustomobject]@{ ExitCode = -1; Output = @() }
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $output = @()
+        if ($stdout) { $output += @($stdout -split '\r?\n' | Where-Object { $_ }) }
+        if ($stderr) { $output += @($stderr -split '\r?\n' | Where-Object { $_ }) }
+        return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output }
+    } finally {
+        $process.Dispose()
+    }
+}
 
 function Invoke-Adb {
     param([string[]]$AdbArguments)
 
-    $result = & $script:AdbPath @AdbArguments
-    if ($LASTEXITCODE -ne 0) {
+    $capture = Invoke-AdbCapture -AdbArguments $AdbArguments
+    if ($capture.ExitCode -ne 0) {
         throw "ADB 指令失敗：adb $($AdbArguments -join ' ')"
     }
-    return $result
+    return $capture.Output
 }
 
 Push-Location -LiteralPath $PSScriptRoot
@@ -26,8 +101,9 @@ try {
     $script:AdbPath = $adbCommand.Source
 
     $deviceOutput = Invoke-Adb -AdbArguments @('devices', '-l')
-    $usbSerialOutput = & $script:AdbPath -d get-serialno 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $usbSerialResult = Invoke-AdbCapture -AdbArguments @('-d', 'get-serialno')
+    $usbSerialOutput = $usbSerialResult.Output
+    if ($usbSerialResult.ExitCode -ne 0) {
         if (($deviceOutput -join "`n") -match '\sunauthorized(?:\s|$)') {
             throw '手機尚未授權。請解鎖手機，並在「允許 USB 偵錯」視窗按允許。'
         }
@@ -41,15 +117,7 @@ try {
         throw "USB 手機序號是 $selectedSerial，與 -AndroidSerial $AndroidSerial 不符。"
     }
 
-    $publishedEndpoint = docker compose port cardprinter 8001 |
-        Select-Object -First 1
-    if ($LASTEXITCODE -ne 0 -or -not $publishedEndpoint) {
-        throw '無法取得手機掃描器連接埠。請先執行 .\start.ps1。'
-    }
-    $publishedPort = ($publishedEndpoint.Trim() -split ':')[-1]
-    if ($publishedPort -notmatch '^\d+$') {
-        throw 'Docker 回傳了無法辨識的手機掃描器連接埠。'
-    }
+    $publishedPort = Get-ComposePublishedPort -ContainerPort 8001
 
     try {
         $healthParameters = @{
@@ -61,15 +129,13 @@ try {
         throw '手機掃描器服務尚未就緒。請確認卡片列印站容器為 healthy。'
     }
 
-    $mainPublishedEndpoint = docker compose port cardprinter 8000 |
-        Select-Object -First 1
-    if ($LASTEXITCODE -ne 0 -or -not $mainPublishedEndpoint) {
-        throw '無法取得卡片列印站連接埠。請先執行 .\start.ps1。'
-    }
-    $mainPublishedPort = ($mainPublishedEndpoint.Trim() -split ':')[-1]
-    if ($mainPublishedPort -notmatch '^\d+$') {
-        throw 'Docker 回傳了無法辨識的卡片列印站連接埠。'
-    }
+    $mainPublishedPort = Get-ComposePublishedPort -ContainerPort 8000
+
+    # Keep the existing helper alive until all read-only preflight checks pass.
+    # From this point onward, always restart it in finally—even if a later ADB
+    # or phone-launch step fails.
+    $helperRestartRequired = $true
+    & (Join-Path $PSScriptRoot 'phone-scanner-helper.ps1') -Action Stop
 
     $reverseList = Invoke-Adb -AdbArguments @('-d', 'reverse', '--list')
     $existingTarget = $null
@@ -110,16 +176,28 @@ try {
     # HTTP request 或伺服器 log，手機頁面讀取後也會立刻清除。
     $connectionId = ([Guid]::NewGuid().ToString('N')).Substring(0, 12)
     $phoneUrl = "http://localhost:$DevicePort/?connection=$connectionId#device=$deviceCapability"
-    & $script:AdbPath @(
+    $openResult = Invoke-AdbCapture -TimeoutMilliseconds 10000 -AdbArguments @(
         '-d', 'shell', 'am', 'start', '-W', '-a',
         'android.intent.action.VIEW', '-d', $phoneUrl
-    ) | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    )
+    $phoneUrl = $null
+    if ($openResult.ExitCode -ne 0) {
         throw '無法在 USB 手機開啟掃描頁。'
     }
 
     Write-Host "手機掃描器已在 $selectedSerial 自動連線。" -ForegroundColor Green
     Write-Host '之後在 Windows 按「用手機掃描」即可，不必再輸入配對碼。'
 } finally {
+    if ($helperRestartRequired -and $mainPublishedPort -and $publishedPort) {
+        try {
+            & (Join-Path $PSScriptRoot 'phone-scanner-helper.ps1') `
+                -Action Start `
+                -MainPort $mainPublishedPort `
+                -CompanionPort $publishedPort `
+                -DevicePort $DevicePort
+        } catch {
+            Write-Warning "自動喚醒 helper 未能重新啟動：$($_.Exception.Message)"
+        }
+    }
     Pop-Location
 }

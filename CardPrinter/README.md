@@ -18,7 +18,7 @@ Copy-Item .env.example .env
 
 - `.env` 的 `STAFF_JWT` 留白：網頁會顯示密碼欄位；JWT 只留在目前頁面的記憶體，不寫入 `localStorage` 或 `sessionStorage`。
 - `.env` 設定 `STAFF_JWT`：頁面不再要求輸入，適合受控的單一工作站。請勿提交含真實憑證的 `.env`；本機 Docker 管理員仍可透過 container metadata 看到環境變數，因此預設的瀏覽器記憶體模式較安全。
-- 活動當天若 App 的 Remote Config 已切換 API，請同步更新 `.env` 的 `API_BASE_URL`；頁面「工作站設定」會顯示目前實際使用的 origin。
+- 啟動時會讀取 App 的公開 Remote Config，再建立可攜帶 STAFF JWT 的 API client；頁面「工作站設定」會顯示實際 API origin 與設定來源。`API_BASE_URL` 只是在 Remote Config 暫時無法讀取時使用的可信 production 備援。
 - 停止服務：執行 `.\stop.ps1`。
 
 也可以直接使用：
@@ -43,16 +43,26 @@ docker compose ps
 若筆電鏡頭近距離無法對焦，可以讓 Android 舊手機只負責掃碼，Windows 仍負責卡面核對與 Word 下載。
 
 1. 手機開啟「開發人員選項 → USB 偵錯」，用 USB 接到 Windows，並在手機上允許這台電腦。
-2. 先啟動卡片列印站，再執行：
+2. 使用 `.\start.ps1` 啟動卡片列印站。腳本會同時啟動目前 Windows 使用者的隱藏手機 helper；手機可以在啟動前或啟動後才插入。
+3. 在 Windows 網頁按「用手機掃描」。Helper 偵測到這次掃描工作後，才會建立 ADB reverse、喚醒手機並開啟掃描頁，不必輸入配對碼。
+4. 若 helper 無法啟動，才使用手動備援：
 
    ```powershell
    .\connect-phone-scanner.ps1
    ```
 
-3. 腳本會透過 ADB 在手機開啟掃描頁並自動連線。之後每張卡只要在 Windows 按「用手機掃描」，手機會自動取得這次工作，不必再輸入配對碼。
-4. 手機只會回傳符合格式的 Code 128 token；USB 連線憑證僅能領取掃描工作，不能存取 STAFF JWT、卡面 PNG、Word 檔或主站 API。畫面上的配對碼只保留給沒有 ADB 自動連線時手動備援。
+手機只會回傳符合格式的 Code 128 token；USB 連線憑證僅能領取掃描工作，不能存取 STAFF JWT、卡面 PNG、Word 檔或主站 API。畫面上的配對碼只保留給 helper／ADB 無法使用時手動備援。
 
-拔除 USB 後 ADB reverse 會失效。也可在拔線前執行 `.\disconnect-phone-scanner.ps1` 主動移除。腳本只接受一台 USB ADB 手機；若同時接了多台 Android 裝置，請先拔除其他裝置。可用 `-AndroidSerial <序號>` 額外確認選到的是預期手機。
+Helper 不會以系統管理員或 Windows Service 執行，因此會沿用目前使用者已授權的 ADB 金鑰。`stop.ps1` 與 `disconnect-phone-scanner.ps1` 會停止 helper，且只移除由本工具建立、目前仍指向 companion port 的 reverse；不會呼叫 `adb reverse --remove-all` 或停止全域 ADB server。腳本只接受一台 USB ADB 手機，Android emulator 不影響選取；若同時接了多台實體 Android 裝置，請先拔除其他裝置。
+
+Helper 狀態可用以下指令查看或控制：
+
+```powershell
+.\phone-scanner-helper.ps1 -Action Status
+.\phone-scanner-helper.ps1 -Action Stop
+```
+
+直接執行 `docker compose up` 只會啟動容器，不會啟動 Windows helper；要使用按鈕自動喚醒手機，請執行 `start.ps1`。若自訂了工作站連接埠，也應由 `start.ps1` 把實際連接埠傳給 helper。
 
 手機使用獨立的 companion listener（Windows loopback `18081`），該 listener 明確不提供 STAFF proxy、設定或 DOCX API。ADB 只把手機的 `localhost:18765` 轉到這個低權限 listener，不會把主站 `18080` 暴露給手機。
 
@@ -70,16 +80,17 @@ docker compose ps
 
 | 變數 | 預設值 | 說明 |
 | --- | --- | --- |
-| `API_BASE_URL` | `https://nfc-battle-staging.hitcon2026.online` | 與 App 相同的 API origin／base path |
+| `REMOTE_CONFIG_URL` | `https://game.hitcon2026.online/.well-known/nfc-battle-app-config.json` | App 的公開執行期設定；只接受這個固定 HTTPS 文件，啟動時讀取一次 |
+| `API_BASE_URL` | `https://nfc-battle-api.hitcon2026.online` | Remote Config 無法讀取時的 production API 備援 |
 | `STAFF_JWT` | 空白 | 選填；空白時由網頁逐次提供 |
 | `CARDPRINTER_PORT` | `18080` | Windows loopback port；可在 `.env` 自訂 |
 | `CARDPRINTER_COMPANION_PORT` | `18081` | ADB 手機掃描器的獨立 Windows loopback port |
 | `CARDPRINTER_MAX_PNG_BYTES` | `10485760` | PNG 上限，預設 10 MiB |
-| `CARDPRINTER_ALLOWED_API_HOSTS` | 空白 | 開發用的明確 host allow-list，逗號分隔 |
+| `CARDPRINTER_ALLOWED_API_HOSTS` | 空白 | 開發用的明確 host allow-list，逗號分隔；設定後會略過 Remote Config，使用 `API_BASE_URL` |
 | `CARDPRINTER_ALLOW_HTTP_API` | `false` | 僅搭配明確 allow-list 的本機開發 API 使用 |
 | `CARDPRINTER_ALLOWED_WEB_HOSTS` | 空白 | HTTPS reverse proxy 使用的額外瀏覽器 Host；一般本機使用請留白 |
 
-正式設定預設只接受 HTTPS 的 `hitcon2026.online` 或其子網域，避免 STAFF JWT 被轉送到任意主機；30x redirect 也會被拒絕。服務不會記錄 Authorization header，access log 會遮蔽列印 Token。
+Remote Config 請求不帶 STAFF JWT／Cookie，限制 4 秒與 16 KiB，且拒絕 redirect。遠端選出的 API 套用與 App 相同的規則：只接受 `hitcon2026.online` 或其子網域的 HTTPS／443 URL，以及不含歧義路徑的安全 base path；實際卡面下載也會拒絕 30x redirect，避免 STAFF JWT 被轉送。服務不會記錄 Authorization header，access log 會遮蔽列印 Token。
 
 ## 校正模板
 

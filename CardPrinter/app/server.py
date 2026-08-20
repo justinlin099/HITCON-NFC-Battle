@@ -8,7 +8,7 @@ no runtime package downloads.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from hashlib import sha256
 from http import HTTPStatus
@@ -41,9 +41,17 @@ from .scanner_relay import (
     ScannerDeviceGrant,
     ScannerPairingGrant,
     ScannerRelay,
+    ScannerSessionAlreadyPairedError,
     ScannerSessionAlreadyUsedError,
     ScannerSessionNotFoundError,
     ScannerSessionSnapshot,
+)
+from .remote_config import (
+    DEFAULT_REMOTE_CONFIG_URL,
+    OpenUrl as RemoteConfigOpenUrl,
+    RemoteConfigError,
+    fetch_remote_api_base_url,
+    validate_remote_config_url,
 )
 from .upstream import (
     DEFAULT_API_BASE_URL,
@@ -121,6 +129,8 @@ class Settings:
     port: int
     companion_host: str
     companion_port: int
+    remote_config_url: str = DEFAULT_REMOTE_CONFIG_URL
+    api_base_url_source: str = "fallback"
 
     @property
     def auth_mode(self) -> str:
@@ -177,6 +187,8 @@ class CardPrinterApplication:
         return {
             "authMode": self.settings.auth_mode,
             "apiBaseUrl": self.settings.api_base_url,
+            "apiBaseUrlSource": self.settings.api_base_url_source,
+            "remoteConfigUrl": self.settings.remote_config_url,
             "maxPngBytes": self.settings.max_png_bytes,
             "template": {
                 "sha256": self.template.sha256,
@@ -339,7 +351,16 @@ class CardPrinterRequestHandler(BaseHTTPRequestHandler):
                 return
 
             if target.path == "/api/scanner/devices":
-                device = self.application.scanner_relay.create_device()
+                expected_session_id = self.headers.get(
+                    "X-Scanner-Session-Id", ""
+                ).strip()
+                if expected_session_id and not SCANNER_SESSION_ROUTE.fullmatch(
+                    f"/api/scanner/sessions/{expected_session_id}"
+                ):
+                    raise ValueError("Scanner session id is invalid.")
+                device = self.application.scanner_relay.create_device(
+                    expected_session_id=expected_session_id or None
+                )
                 self._send_json(
                     HTTPStatus.CREATED,
                     {
@@ -592,6 +613,13 @@ class CardPrinterRequestHandler(BaseHTTPRequestHandler):
                 "這次手機掃描已收到條碼。",
             )
             return
+        if isinstance(error, ScannerSessionAlreadyPairedError):
+            self._send_error_json(
+                HTTPStatus.CONFLICT,
+                "scanner_session_paired",
+                "這次手機掃描工作已由另一個掃描器接手。",
+            )
+            return
         if isinstance(error, InvalidTokenError):
             self._send_error_json(
                 HTTPStatus.BAD_REQUEST,
@@ -837,6 +865,9 @@ class CompanionRequestHandler(CardPrinterRequestHandler):
                         "status": "ok",
                         "scanner": {
                             "available": active is not None,
+                            "sessionId": (
+                                active.session_id if active else None
+                            ),
                             "paired": active.paired if active else False,
                             "expiresInSeconds": (
                                 active.expires_in_seconds if active else 0
@@ -986,6 +1017,13 @@ class BoundedCompanionServer(ThreadingHTTPServer):
 def load_settings(environ: Optional[Mapping[str, str]] = None) -> Settings:
     source = os.environ if environ is None else environ
     api_base_url = source.get("API_BASE_URL", DEFAULT_API_BASE_URL).strip()
+    raw_remote_config_url = source.get(
+        "REMOTE_CONFIG_URL", DEFAULT_REMOTE_CONFIG_URL
+    ).strip()
+    try:
+        remote_config_url = validate_remote_config_url(raw_remote_config_url)
+    except RemoteConfigError as error:
+        raise ConfigurationError(str(error)) from None
     staff_jwt = source.get("STAFF_JWT", "").strip() or None
     raw_hosts = source.get("CARDPRINTER_ALLOWED_API_HOSTS", "")
     allowed_hosts = tuple(
@@ -995,6 +1033,10 @@ def load_settings(environ: Optional[Mapping[str, str]] = None) -> Settings:
         source.get("CARDPRINTER_ALLOW_HTTP_API", "false"),
         name="CARDPRINTER_ALLOW_HTTP_API",
     )
+    if allow_http_api and allowed_hosts is None:
+        raise ConfigurationError(
+            "CARDPRINTER_ALLOW_HTTP_API requires CARDPRINTER_ALLOWED_API_HOSTS."
+        )
     raw_web_hosts = source.get("CARDPRINTER_ALLOWED_WEB_HOSTS", "")
     allowed_web_hosts = tuple(
         dict.fromkeys(
@@ -1036,7 +1078,7 @@ def load_settings(environ: Optional[Mapping[str, str]] = None) -> Settings:
 
     # Validate once during startup instead of failing after the first scan.
     try:
-        UpstreamClient(
+        fallback_client = UpstreamClient(
             api_base_url,
             staff_jwt,
             allowed_hosts=allowed_hosts,
@@ -1045,6 +1087,16 @@ def load_settings(environ: Optional[Mapping[str, str]] = None) -> Settings:
         )
     except (InvalidBaseUrlError, ValueError) as error:
         raise ConfigurationError(str(error)) from None
+    api_base_url = fallback_client.base_url
+    explicit_development_override = allowed_hosts is not None
+    if (
+        not explicit_development_override
+        and api_base_url != DEFAULT_API_BASE_URL
+    ):
+        raise ConfigurationError(
+            "API_BASE_URL must use the production API unless an explicit "
+            "development host allow-list is configured."
+        )
 
     return Settings(
         api_base_url=api_base_url,
@@ -1057,6 +1109,38 @@ def load_settings(environ: Optional[Mapping[str, str]] = None) -> Settings:
         port=port,
         companion_host=companion_host,
         companion_port=companion_port,
+        remote_config_url=remote_config_url,
+        api_base_url_source=(
+            "override" if explicit_development_override else "fallback"
+        ),
+    )
+
+
+def resolve_remote_settings(
+    settings: Settings,
+    *,
+    opener: Optional[RemoteConfigOpenUrl] = None,
+) -> Settings:
+    """Resolve the App's current API before constructing ``UpstreamClient``."""
+
+    if settings.api_base_url_source == "override":
+        LOGGER.info("Explicit development API override selected; skipping Remote Config.")
+        return settings
+    try:
+        remote_api_base_url = fetch_remote_api_base_url(
+            settings.remote_config_url,
+            opener=opener,
+        )
+    except RemoteConfigError:
+        LOGGER.warning(
+            "Remote App config unavailable; using the configured API fallback."
+        )
+        return settings
+    LOGGER.info("Remote App config selected API %s", remote_api_base_url)
+    return replace(
+        settings,
+        api_base_url=remote_api_base_url,
+        api_base_url_source="remote",
     )
 
 
@@ -1274,7 +1358,7 @@ def main() -> int:
     server: Optional[ThreadingHTTPServer] = None
     companion_server: Optional[ThreadingHTTPServer] = None
     try:
-        settings = load_settings()
+        settings = resolve_remote_settings(load_settings())
         template = load_template_bundle()
         relay = ScannerRelay()
         server = create_server(

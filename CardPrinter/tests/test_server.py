@@ -22,6 +22,7 @@ from app.server import (
     create_server,
     load_settings,
     load_template_bundle,
+    resolve_remote_settings,
 )
 from app.scanner_relay import ScannerRelay
 from app.upstream import UpstreamHttpError
@@ -141,6 +142,95 @@ class SettingsTests(unittest.TestCase):
         ).public_config()
         self.assertEqual(public["authMode"], "server")
         self.assertNotIn("secret", json.dumps(public))
+
+    def test_remote_config_updates_api_and_public_source(self):
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def __init__(self):
+                self._body = BytesIO(
+                    json.dumps(
+                        {
+                            "schema": 1,
+                            "api_base_url": (
+                                "https://nfc-battle-api.hitcon2026.online"
+                            ),
+                        }
+                    ).encode("utf-8")
+                )
+
+            def read(self, size=-1):
+                return self._body.read(size)
+
+            def close(self):
+                pass
+
+        calls = []
+
+        def open_remote(request, *, timeout):
+            calls.append((request, timeout))
+            return Response()
+
+        resolved = resolve_remote_settings(
+            load_settings({"API_BASE_URL": "https://nfc-battle-api.hitcon2026.online"}),
+            opener=open_remote,
+        )
+        self.assertEqual(
+            resolved.api_base_url,
+            "https://nfc-battle-api.hitcon2026.online",
+        )
+        self.assertEqual(resolved.api_base_url_source, "remote")
+        public = CardPrinterApplication(
+            resolved,
+            load_template_bundle(),
+            upstream_client=FakeUpstream(valid_png()),
+        ).public_config()
+        self.assertEqual(public["apiBaseUrlSource"], "remote")
+        self.assertEqual(public["remoteConfigUrl"], resolved.remote_config_url)
+        self.assertEqual(len(calls), 1)
+
+    def test_remote_config_failure_preserves_validated_fallback_and_source(self):
+        def fail(request, *, timeout):
+            raise TimeoutError("offline")
+
+        original = load_settings(
+            {"API_BASE_URL": "https://nfc-battle-api.hitcon2026.online/"}
+        )
+        resolved = resolve_remote_settings(original, opener=fail)
+        self.assertIs(resolved, original)
+        self.assertEqual(
+            resolved.api_base_url,
+            "https://nfc-battle-api.hitcon2026.online",
+        )
+        self.assertEqual(resolved.api_base_url_source, "fallback")
+
+    def test_nonproduction_fallback_requires_explicit_development_override(self):
+        with self.assertRaisesRegex(ConfigurationError, "production API"):
+            load_settings(
+                {"API_BASE_URL": "https://nfc-battle-staging.hitcon2026.online"}
+            )
+
+        loaded = load_settings(
+            {
+                "API_BASE_URL": "http://127.0.0.1:9876",
+                "CARDPRINTER_ALLOWED_API_HOSTS": "127.0.0.1",
+                "CARDPRINTER_ALLOW_HTTP_API": "true",
+            }
+        )
+        resolved = resolve_remote_settings(loaded, opener=lambda *_args, **_kwargs: None)
+        self.assertIs(resolved, loaded)
+        self.assertEqual(resolved.api_base_url_source, "override")
+
+    def test_http_development_flag_requires_an_explicit_host_list(self):
+        with self.assertRaisesRegex(ConfigurationError, "requires"):
+            load_settings({"CARDPRINTER_ALLOW_HTTP_API": "true"})
+
+    def test_rejects_untrusted_remote_config_override_at_startup(self):
+        with self.assertRaises(ConfigurationError):
+            load_settings(
+                {"REMOTE_CONFIG_URL": "https://example.com/config.json"}
+            )
 
 
 class HttpApiTests(unittest.TestCase):
@@ -405,9 +495,20 @@ class HttpApiTests(unittest.TestCase):
     def test_usb_device_capability_is_isolated_and_replaceable(self):
         _, _, body = self.request("POST", "/api/scanner/devices")
         old_capability = json.loads(body)["device"]["capability"]
-        self.request("POST", "/api/scanner/sessions")
-        _, _, body = self.request("POST", "/api/scanner/devices")
+        _, _, session_body = self.request("POST", "/api/scanner/sessions")
+        session_id = json.loads(session_body)["session"]["id"]
+        _, _, body = self.request(
+            "POST",
+            "/api/scanner/devices",
+            headers={"X-Scanner-Session-Id": session_id},
+        )
         new_capability = json.loads(body)["device"]["capability"]
+
+        status, _, body = self.request(
+            "GET", f"/api/scanner/sessions/{session_id}"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["session"]["id"], session_id)
 
         for invalid in (
             old_capability,
@@ -428,6 +529,36 @@ class HttpApiTests(unittest.TestCase):
             "POST", "/api/scanner/devices"
         )
         self.assertEqual(status, 404)
+
+        status, _, body = self.companion_request(
+            "GET", "/api/scanner/sessions/active"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["scanner"]["sessionId"], session_id)
+
+        status, _, body = self.companion_request(
+            "GET",
+            "/api/scanner/device/session",
+            headers={"Authorization": f"Bearer {new_capability}"},
+        )
+        self.assertEqual(status, 200)
+        grant = json.loads(body)["scanner"]
+        self.assertEqual(grant["sessionId"], session_id)
+
+        status, _, body = self.request("POST", "/api/scanner/devices")
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(body)["code"], "scanner_session_paired")
+
+        status, _, body = self.companion_request(
+            "GET",
+            "/api/scanner/device/session",
+            headers={"Authorization": f"Bearer {new_capability}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            json.loads(body)["scanner"]["capability"],
+            grant["capability"],
+        )
 
     def test_phone_scanner_rejects_invalid_json_and_token(self):
         _, _, body = self.request("POST", "/api/scanner/sessions")

@@ -238,6 +238,17 @@
       config.authMode === "browser" ? "瀏覽器提供 STAFF JWT" : "伺服器管理 STAFF 憑證",
     );
     appendConfigRow("上游 API", config.apiBaseUrl || "由伺服器管理");
+    appendConfigRow(
+      "API 設定來源",
+      config.apiBaseUrlSource === "remote"
+        ? "App 遠端設定"
+        : config.apiBaseUrlSource === "override"
+          ? "本機開發覆寫"
+          : "本機備援設定",
+    );
+    if (config.remoteConfigUrl) {
+      appendConfigRow("App 遠端設定", config.remoteConfigUrl);
+    }
     if (Number.isFinite(config.maxPngBytes) && config.maxPngBytes > 0) {
       appendConfigRow("PNG 上限", `${(config.maxPngBytes / 1024 / 1024).toFixed(0)} MiB`);
     }
@@ -324,6 +335,11 @@
       workstationConfig = {
         authMode: payload.authMode,
         apiBaseUrl: typeof payload.apiBaseUrl === "string" ? payload.apiBaseUrl : "",
+        apiBaseUrlSource: ["remote", "override"].includes(payload.apiBaseUrlSource)
+          ? payload.apiBaseUrlSource
+          : "fallback",
+        remoteConfigUrl:
+          typeof payload.remoteConfigUrl === "string" ? payload.remoteConfigUrl : "",
         maxPngBytes:
           Number.isFinite(payload.maxPngBytes) && payload.maxPngBytes > 0
             ? payload.maxPngBytes

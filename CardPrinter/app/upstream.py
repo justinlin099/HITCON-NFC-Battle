@@ -10,12 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 import re
 
 
-DEFAULT_API_BASE_URL = "https://nfc-battle-staging.hitcon2026.online"
+DEFAULT_API_BASE_URL = "https://nfc-battle-api.hitcon2026.online"
 DEFAULT_TIMEOUT_SECONDS = 20.0
 DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 UPSTREAM_USER_AGENT = "HITCON-NFC-Battle-CardPrinter/1.0"
@@ -88,7 +88,12 @@ def validate_api_base_url(
     if not isinstance(value, str) or not value.strip():
         raise InvalidBaseUrlError("API base URL is invalid.")
     raw = value.strip()
-    if "?" in raw or "#" in raw or "\\" in raw:
+    if (
+        "?" in raw
+        or "#" in raw
+        or "\\" in raw
+        or any(character.isspace() or ord(character) < 32 for character in raw)
+    ):
         raise InvalidBaseUrlError("API base URL is invalid.")
 
     try:
@@ -103,6 +108,18 @@ def validate_api_base_url(
         raise InvalidBaseUrlError("API base URL is invalid.")
     if parsed.query or parsed.fragment:
         raise InvalidBaseUrlError("API base URL is invalid.")
+    for segment in parsed.path.split("/"):
+        decoded_segment = unquote(segment)
+        if (
+            decoded_segment in {".", ".."}
+            or "/" in decoded_segment
+            or "\\" in decoded_segment
+            or any(
+                character.isspace() or ord(character) < 32
+                for character in decoded_segment
+            )
+        ):
+            raise InvalidBaseUrlError("API base URL path is invalid.")
 
     explicit_hosts = None
     if allowed_hosts is not None:
@@ -125,6 +142,8 @@ def validate_api_base_url(
     )
     if scheme != "https" and not test_http_allowed:
         raise InvalidBaseUrlError("API base URL must use HTTPS.")
+    if scheme == "https" and parsed.port not in {None, 443}:
+        raise InvalidBaseUrlError("API base URL must use the default HTTPS port.")
 
     normalized_path = parsed.path.rstrip("/")
     return urlunsplit((scheme, parsed.netloc, normalized_path, "", ""))

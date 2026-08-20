@@ -4,6 +4,36 @@ param()
 $ErrorActionPreference = 'Stop'
 $projectDirectory = $PSScriptRoot
 
+function Get-ComposePublishedPort {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ContainerPort,
+        [int]$Attempts = 12
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt += 1) {
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $portOutput = @(docker compose port cardprinter $ContainerPort 2>&1)
+            $portExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        if ($portExitCode -eq 0) {
+            foreach ($line in $portOutput) {
+                if ([string]$line -match ':(\d+)\s*$') {
+                    return [int]$Matches[1]
+                }
+            }
+        }
+        if ($attempt -lt $Attempts) {
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    throw "無法取得容器連接埠 $ContainerPort 的 Windows 對外連接埠。"
+}
+
 Push-Location -LiteralPath $projectDirectory
 try {
     $dockerOsType = docker info --format '{{.OSType}}'
@@ -29,14 +59,18 @@ try {
         throw '無法讀取卡片列印站容器狀態。'
     }
 
-    $publishedEndpoint = docker compose port cardprinter 8000 |
-        Select-Object -First 1
-    if ($LASTEXITCODE -ne 0 -or -not $publishedEndpoint) {
-        throw '卡片列印站已啟動，但無法取得對外連接埠。'
-    }
-    $publishedPort = ($publishedEndpoint.Trim() -split ':')[-1]
+    $publishedPort = Get-ComposePublishedPort -ContainerPort 8000
+    $companionPublishedPort = Get-ComposePublishedPort -ContainerPort 8001
     Write-Host "卡片列印站已啟動：http://localhost:$publishedPort" -ForegroundColor Green
-    Write-Host '若要用 USB 舊手機掃描，請執行 .\connect-phone-scanner.ps1。'
+    try {
+        & (Join-Path $PSScriptRoot 'phone-scanner-helper.ps1') `
+            -Action Start `
+            -MainPort $publishedPort `
+            -CompanionPort $companionPublishedPort
+    } catch {
+        Write-Warning "USB 手機掃描自動喚醒未啟動：$($_.Exception.Message)"
+        Write-Host '仍可執行 .\connect-phone-scanner.ps1 使用手動備援。'
+    }
 } finally {
     Pop-Location
 }

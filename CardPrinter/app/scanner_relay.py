@@ -68,6 +68,10 @@ class ScannerSessionAlreadyUsedError(RuntimeError):
     """A scanner session already contains a token."""
 
 
+class ScannerSessionAlreadyPairedError(RuntimeError):
+    """A connected scanner already owns the active card session."""
+
+
 class InvalidScannerPairingCodeError(ValueError):
     """The phone supplied an invalid, stale, or already-used pairing code."""
 
@@ -107,22 +111,37 @@ class ScannerRelay:
         self._session: Optional[_ScannerSession] = None
         self._device: Optional[_ScannerDevice] = None
 
-    def create_device(self) -> ScannerDeviceGrant:
+    def create_device(
+        self, *, expected_session_id: Optional[str] = None
+    ) -> ScannerDeviceGrant:
         """Issue a low-privilege grant delivered only through ``adb shell``.
 
-        Reconnecting replaces the prior phone grant and clears any unfinished
-        card session.  The device grant can only claim a future scanner
-        session; it cannot fetch artwork or access workstation credentials.
+        Reconnecting replaces the prior phone grant.  An active unpaired card
+        session is intentionally retained so the Windows helper can react to
+        the operator pressing "use phone scanner" before it mints the device
+        grant.  A paired session is never disrupted by a reconnect attempt.
+        The device grant cannot fetch artwork or workstation credentials.
         """
 
         with self._lock:
             now = self._clock()
+            session, _ = self._current(now=now)
+            if expected_session_id is not None and (
+                session is None
+                or session.session_id != str(expected_session_id)
+            ):
+                raise ScannerSessionNotFoundError(
+                    "The expected scanner session is absent or expired."
+                )
+            if session is not None and session.scanner_capability is not None:
+                raise ScannerSessionAlreadyPairedError(
+                    "The active scanner session is already paired."
+                )
             self._device = _ScannerDevice(
                 device_id=token_urlsafe(18),
                 capability=token_urlsafe(32),
                 expires_at=now + self._device_seconds,
             )
-            self._session = None
             return ScannerDeviceGrant(
                 device_capability=self._device.capability,
                 expires_in_seconds=max(

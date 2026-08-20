@@ -88,6 +88,11 @@ class BaseUrlTests(unittest.TestCase):
             "https://hitcon2026.online?next=evil",
             "https://hitcon2026.online#fragment",
             "https://hitcon2026.online\\@evil.example",
+            "https://hitcon2026.online/a/%2e%2e/b",
+            "https://hitcon2026.online/a/%2F/b",
+            "https://hitcon2026.online:8443",
+            "https://hitcon2026.online/a/./b",
+            "https://hitcon2026.online/a/../b",
             "ftp://hitcon2026.online",
         )
         for url in invalid:
