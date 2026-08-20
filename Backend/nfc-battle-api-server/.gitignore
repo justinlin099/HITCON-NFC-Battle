@@ -1,6 +1,6 @@
 # prod
 dist/
-public/docs/
+public/admin/docs/
 
 # dev
 .yarn/

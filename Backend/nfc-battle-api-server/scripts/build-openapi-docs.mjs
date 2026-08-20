@@ -6,7 +6,8 @@ import { parse } from "yaml";
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceSpecPath = resolve(projectDir, "../openapi.yaml");
 const swaggerDistDir = resolve(projectDir, "node_modules/swagger-ui-dist");
-const outputDir = resolve(projectDir, "public/docs");
+const legacyOutputDir = resolve(projectDir, "public/docs");
+const outputDir = resolve(projectDir, "public/admin/docs");
 
 const sourceSpec = parse(await readFile(sourceSpecPath, "utf8"));
 sourceSpec.servers = [
@@ -16,6 +17,7 @@ sourceSpec.servers = [
   },
 ];
 
+await rm(legacyOutputDir, { recursive: true, force: true });
 await rm(outputDir, { recursive: true, force: true });
 await mkdir(outputDir, { recursive: true });
 

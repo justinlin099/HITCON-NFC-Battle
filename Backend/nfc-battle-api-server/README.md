@@ -41,11 +41,11 @@ npm run typecheck
 
 ## OpenAPI Documentation
 
-Swagger UI is served by each deployed API at `/docs/`:
+Swagger UI is served by each deployed API at `/admin/docs/`:
 
 ```txt
-https://nfc-battle-api.hitcon2026.online/docs/
-https://nfc-battle-staging.hitcon2026.online/docs/
+https://nfc-battle-api.hitcon2026.online/admin/docs/
+https://nfc-battle-staging.hitcon2026.online/admin/docs/
 ```
 
 The page and OpenAPI schema are public, but they do not bypass endpoint
@@ -64,10 +64,10 @@ To rebuild them directly, run:
 npm run docs:build
 ```
 
-After starting the local Worker, open its `/docs/` path:
+After starting the local Worker, open its `/admin/docs/` path:
 
 ```txt
-http://127.0.0.1:8787/docs/
+http://127.0.0.1:8787/admin/docs/
 ```
 
 ## Manual Load Test
