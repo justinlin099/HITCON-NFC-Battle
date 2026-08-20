@@ -2260,9 +2260,9 @@ components:
       value:
         status: success
         data:
-          stamp_threshold: 10
-          sponsor_count: 6
-          community_count: 5
+          stamp_threshold: 25
+          sponsor_count: 15
+          community_count: 10
           eligible_for_stamp_prize: true
 
     GetScoreboardResponse:
@@ -2366,5 +2366,5 @@ components:
           freeze_id: freeze_20260412_01
           scoring_cutoff_at: '2026-04-12T15:00:00Z'
           frozen_at: '2026-04-12T15:01:12Z'
-          stamp_threshold: 10
+          stamp_threshold: 25
           rank_threshold: 10

@@ -134,7 +134,7 @@ describe("NFC Battle API flow", () => {
     expect(stampMission.status).toBe(200);
     await expect(readJson(stampMission)).resolves.toMatchObject({
       data: {
-        stamp_threshold: 10,
+        stamp_threshold: 25,
         sponsor_count: 1,
         community_count: 1,
         eligible_for_stamp_prize: false,
@@ -191,7 +191,7 @@ describe("NFC Battle API flow", () => {
     await expect(readJson(freeze)).resolves.toMatchObject({
       data: {
         frozen: true,
-        stamp_threshold: 10,
+        stamp_threshold: 25,
         rank_threshold: 10,
       },
     });
