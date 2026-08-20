@@ -43,9 +43,9 @@ describe("NFC Battle API flow", () => {
       },
     });
 
-    await expect(pairTag(server, aliceAuth, "tag-alice")).resolves.toHaveProperty("status", 200);
-    await expect(pairTag(server, sponsorAuth, "tag-sponsor")).resolves.toHaveProperty("status", 200);
-    await expect(pairTag(server, communityAuth, "tag-community")).resolves.toHaveProperty(
+    await expect(pairTag(server, aliceAuth, "04:00:00:00:00:00:01")).resolves.toHaveProperty("status", 200);
+    await expect(pairTag(server, sponsorAuth, "04:00:00:00:00:00:06")).resolves.toHaveProperty("status", 200);
+    await expect(pairTag(server, communityAuth, "04:00:00:00:00:00:07")).resolves.toHaveProperty(
       "status",
       200,
     );
@@ -54,7 +54,7 @@ describe("NFC Battle API flow", () => {
     await server.request("/users/me", { headers: malloryAuth });
     const duplicatePair = await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: "tag-alice" }, malloryAuth),
+      await jsonRequest("POST", { physical_id: "04:00:00:00:00:00:01" }, malloryAuth),
     );
     expect(duplicatePair.status).toBe(409);
 
@@ -73,13 +73,13 @@ describe("NFC Battle API flow", () => {
       "/collection/scan",
       await jsonRequest(
         "POST",
-        { user_id: "sponsor-one", physical_id: "tag-community" },
+        { user_id: "sponsor-one", physical_id: "04:00:00:00:00:00:07" },
         aliceAuth,
       ),
     );
     expect(mismatchScan.status).toBe(403);
 
-    const sponsorScan = await scanTag(server, aliceAuth, "sponsor-one", "tag-sponsor");
+    const sponsorScan = await scanTag(server, aliceAuth, "sponsor-one", "04:00:00:00:00:00:06");
     expect(sponsorScan.status).toBe(200);
     await expect(readJson(sponsorScan)).resolves.toMatchObject({
       status: "success",
@@ -95,7 +95,7 @@ describe("NFC Battle API flow", () => {
       },
     });
 
-    const duplicateScan = await scanTag(server, aliceAuth, "sponsor-one", "tag-sponsor");
+    const duplicateScan = await scanTag(server, aliceAuth, "sponsor-one", "04:00:00:00:00:00:06");
     expect(duplicateScan.status).toBe(200);
     await expect(readJson(duplicateScan)).resolves.toMatchObject({
       data: {
@@ -103,7 +103,7 @@ describe("NFC Battle API flow", () => {
       },
     });
 
-    await scanTag(server, aliceAuth, "community-one", "tag-community");
+    await scanTag(server, aliceAuth, "community-one", "04:00:00:00:00:00:07");
 
     const unlockedProfile = await server.request("/users/sponsor-one", {
       headers: aliceAuth,

@@ -24,7 +24,13 @@ import {
 } from "./game-state";
 import { requireAuth } from "./auth";
 import { newFreezeId, nowIso } from "./ids";
-import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
+import {
+  hasOnlyKeys,
+  isPlainObject,
+  readJson,
+  requiredPhysicalTagId,
+  requiredString,
+} from "./request";
 import { errorResponse, success, successMessage } from "./responses";
 import { requireStaffDangerToken, requireStaffRole } from "./staff";
 import { getPrintCard } from "./print-card-store";
@@ -358,7 +364,7 @@ function validateUserTagRequest(value: unknown) {
   }
 
   const userId = requiredString(value, "user_id");
-  const physicalId = requiredString(value, "physical_id");
+  const physicalId = requiredPhysicalTagId(value, "physical_id");
   if (!userId || !physicalId) {
     return null;
   }
@@ -375,7 +381,7 @@ function validateUserUidRequest(value: unknown) {
   }
 
   const userId = requiredString(value, "user_id");
-  const uid = requiredString(value, "uid");
+  const uid = requiredPhysicalTagId(value, "uid");
   if (!userId || !uid) {
     return null;
   }
@@ -389,7 +395,7 @@ function validatePrizeClaimRequest(value: unknown) {
   }
 
   const userId = requiredString(value, "user_id");
-  const uid = requiredString(value, "uid");
+  const uid = requiredPhysicalTagId(value, "uid");
   const type = parsePrizeClaimType(value.type);
   if (!userId || !uid || !type) {
     return null;

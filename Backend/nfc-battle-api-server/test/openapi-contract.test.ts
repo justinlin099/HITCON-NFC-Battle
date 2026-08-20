@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { createTestServer, jsonRequest } from "./helpers";
 
 const CONTRACT_PATHS = [
@@ -74,6 +75,17 @@ describe("OpenAPI contract drift", () => {
 
   it("documents scoreboard invalid pagination as a bad request", () => {
     expect(readOpenApiOperationResponses("/scoreboard", "get")).toContain("400");
+  });
+
+  it("documents the physical NFC tag ID format", () => {
+    const schema = parse(readOpenApi()).components.schemas.PhysicalTagId;
+
+    expect(schema).toMatchObject({
+      type: "string",
+      minLength: 20,
+      maxLength: 20,
+      pattern: "^(?:[0-9A-Fa-f]{2}:){6}[0-9A-Fa-f]{2}$",
+    });
   });
 
   it("has mounted routes for every documented operation", async () => {

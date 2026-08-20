@@ -1271,6 +1271,14 @@ components:
       type: string
       enum: [ATTENDEE, STAFF, SPONSOR, COMMUNITY]
 
+    PhysicalTagId:
+      type: string
+      minLength: 20
+      maxLength: 20
+      pattern: '^(?:[0-9A-Fa-f]{2}:){6}[0-9A-Fa-f]{2}$'
+      description: Seven-byte physical NFC tag UID represented as colon-separated hexadecimal bytes. Inputs are normalized to uppercase.
+      example: '04:1A:2B:3C:4D:5E:6F'
+
     UserProfilePublicFull:
       type: object
       required:
@@ -1324,6 +1332,9 @@ components:
             physical_id:
               type: string
               nullable: true
+              minLength: 20
+              maxLength: 20
+              pattern: '^(?:[0-9A-F]{2}:){6}[0-9A-F]{2}$'
               description: First paired NFC card physical ID, ordered by pairing time and then UID. This is null before the user pairs an NFC card.
               example: '04:1A:2B:3C:4D:5E:6F'
             nfc_tag_key:
@@ -1562,9 +1573,7 @@ components:
       additionalProperties: false
       properties:
         physical_id:
-          type: string
-          description: Physical ID read from the NFC tag.
-          example: '04:1A:2B:3C:4D:5E:6F'
+          $ref: '#/components/schemas/PhysicalTagId'
 
     PairUserTagRequest:
       type: object
@@ -1576,9 +1585,9 @@ components:
           description: User ID that receives the additional paired NFC tag.
           example: kktix_hash_abc123
         physical_id:
-          type: string
+          allOf:
+            - $ref: '#/components/schemas/PhysicalTagId'
           description: Physical ID read from the additional NFC tag.
-          example: '04:FE:DC:BA:98:76:54'
 
     UnpairUserTagRequest:
       type: object
@@ -1590,9 +1599,9 @@ components:
           description: User ID whose NFC tag mapping should be removed.
           example: kktix_hash_abc123
         physical_id:
-          type: string
+          allOf:
+            - $ref: '#/components/schemas/PhysicalTagId'
           description: Physical ID of the NFC tag to unpair.
-          example: '04:1A:2B:3C:4D:5E:6F'
 
     CreatePrintCardResponse:
       type: object
@@ -1619,9 +1628,9 @@ components:
           type: string
           example: kktix_hash_abc123
         uid:
-          type: string
+          allOf:
+            - $ref: '#/components/schemas/PhysicalTagId'
           description: Physical NFC UID read from the attendee's tag.
-          example: '04:1A:2B:3C:4D:5E:6F'
         type:
           $ref: '#/components/schemas/PrizeClaimType'
 
@@ -1702,9 +1711,9 @@ components:
           type: string
           example: kktix_hash_abc123
         uid:
-          type: string
+          allOf:
+            - $ref: '#/components/schemas/PhysicalTagId'
           description: Physical NFC UID observed during the support workflow. It is contextual and is not ownership-validated against `nfc_tags`.
-          example: '04:1A:2B:3C:4D:5E:6F'
 
     GetNfcUnlockCodeResponse:
       type: object
@@ -1720,7 +1729,8 @@ components:
             user_id:
               type: string
             uid:
-              type: string
+              allOf:
+                - $ref: '#/components/schemas/PhysicalTagId'
               description: Echo of the contextual UID submitted in the request.
             unlock_code:
               type: string
@@ -1737,9 +1747,9 @@ components:
           description: User ID parsed from the scanned tag URL.
           example: kktix_hash_def456
         physical_id:
-          type: string
+          allOf:
+            - $ref: '#/components/schemas/PhysicalTagId'
           description: Physical ID read from the scanned NFC tag.
-          example: '04:99:88:77:66:55:44'
 
     ScanCollectionResponse:
       type: object

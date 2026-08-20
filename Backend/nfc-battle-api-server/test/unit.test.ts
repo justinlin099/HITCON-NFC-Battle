@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { authenticateJwt } from "../src/auth";
 import { isFreezingStale } from "../src/freeze";
+import { requiredPhysicalTagId } from "../src/request";
 import { calculateScore } from "../src/scoring";
 import type { AppBindings } from "../src/types";
 import { authHeaders, createTestServer, readJson, signJwt } from "./helpers";
@@ -88,6 +89,25 @@ describe("JWT authentication", () => {
     const token = await signJwt("kktix_hash_abc123", "ATTENDEE", { aud: "other-api" });
 
     await expect(authenticateJwt(`Bearer ${token}`, env)).rejects.toThrow();
+  });
+});
+
+describe("physical NFC tag IDs", () => {
+  it("normalizes valid seven-byte IDs to uppercase", () => {
+    expect(requiredPhysicalTagId({ physical_id: " 04:aa:bb:cc:dd:ee:ff " }, "physical_id"))
+      .toBe("04:AA:BB:CC:DD:EE:FF");
+  });
+
+  it("rejects malformed IDs", () => {
+    for (const physicalId of [
+      "",
+      "04:00:00:00:00:00",
+      "04:00:00:00:00:00:00:00",
+      "04-00-00-00-00-00-00",
+      "04:00:00:00:00:00:GG",
+    ]) {
+      expect(requiredPhysicalTagId({ physical_id: physicalId }, "physical_id")).toBeNull();
+    }
   });
 });
 

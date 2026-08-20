@@ -7,7 +7,7 @@ describe("tag pairing edge cases", () => {
 
     const response = await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: "tag-alice" }),
+      await jsonRequest("POST", { physical_id: "04:00:00:00:00:00:01" }),
     );
 
     expect(response.status).toBe(401);
@@ -23,7 +23,9 @@ describe("tag pairing edge cases", () => {
     for (const body of [
       {},
       { physical_id: "" },
-      { physical_id: "tag-alice", extra: "nope" },
+      { physical_id: "04:00:00:00:00:00" },
+      { physical_id: "not-a-tag" },
+      { physical_id: "04:00:00:00:00:00:01", extra: "nope" },
       { physical_id: 123 },
     ]) {
       const response = await server.request("/tags/pair", await jsonRequest("POST", body, aliceAuth));
@@ -39,7 +41,7 @@ describe("tag pairing edge cases", () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
 
-    const response = await pairTag(server, aliceAuth, "tag-alice");
+    const response = await pairTag(server, aliceAuth, "04:00:00:00:00:00:01");
 
     expect(response.status).toBe(404);
     await expect(readJson(response)).resolves.toMatchObject({
@@ -52,9 +54,9 @@ describe("tag pairing edge cases", () => {
     const aliceAuth = await authHeaders("alice");
     const malloryAuth = await authHeaders("mallory");
     await server.request("/users/me", { headers: aliceAuth });
-    expect((await pairTag(server, aliceAuth, "tag-alice")).status).toBe(200);
+    expect((await pairTag(server, aliceAuth, "04:00:00:00:00:00:01")).status).toBe(200);
 
-    const response = await pairTag(server, malloryAuth, "tag-alice");
+    const response = await pairTag(server, malloryAuth, "04:00:00:00:00:00:01");
 
     expect(response.status).toBe(404);
     await expect(readJson(response)).resolves.toMatchObject({
@@ -69,15 +71,15 @@ describe("tag pairing edge cases", () => {
     await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
 
-    expect((await pairTag(server, aliceAuth, "tag-alice")).status).toBe(200);
+    expect((await pairTag(server, aliceAuth, "04:00:00:00:00:00:01")).status).toBe(200);
 
-    const sameTag = await pairTag(server, bobAuth, "tag-alice");
+    const sameTag = await pairTag(server, bobAuth, "04:00:00:00:00:00:01");
     expect(sameTag.status).toBe(409);
     await expect(readJson(sameTag)).resolves.toMatchObject({
       code: "TAG_ALREADY_PAIRED",
     });
 
-    const sameUser = await pairTag(server, aliceAuth, "tag-alice-2");
+    const sameUser = await pairTag(server, aliceAuth, "04:00:00:00:00:00:02");
     expect(sameUser.status).toBe(409);
     await expect(readJson(sameUser)).resolves.toMatchObject({
       code: "TAG_ALREADY_PAIRED",

@@ -2,7 +2,13 @@ import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import { collectUserIfNew } from "./collection-store";
 import { recordPhishingEvent } from "./freeze-snapshot-store";
-import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
+import {
+  hasOnlyKeys,
+  isPlainObject,
+  readJson,
+  requiredPhysicalTagId,
+  requiredString,
+} from "./request";
 import { errorResponse, success, successMessage } from "./responses";
 import { getTagOwner } from "./tag-store";
 import type { AppEnv } from "./types";
@@ -78,7 +84,7 @@ function validateScanCollectionRequest(value: unknown) {
   }
 
   const userId = requiredString(value, "user_id");
-  const physicalId = requiredString(value, "physical_id");
+  const physicalId = requiredPhysicalTagId(value, "physical_id");
   if (!userId || !physicalId) {
     return null;
   }

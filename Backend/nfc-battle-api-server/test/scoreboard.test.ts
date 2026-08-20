@@ -62,9 +62,9 @@ describe("mission and scoreboard edge cases", () => {
     await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
     await server.request("/users/me", { headers: carolAuth });
-    expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
+    expect((await pairTag(server, carolAuth, "04:00:00:00:00:00:04")).status).toBe(200);
 
-    await scanTag(server, bobAuth, "carol", "tag-carol");
+    await scanTag(server, bobAuth, "carol", "04:00:00:00:00:00:04");
 
     const response = await server.request("/scoreboard?offset=1&limit=2", {
       headers: aliceAuth,
@@ -109,8 +109,8 @@ describe("mission and scoreboard edge cases", () => {
     await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
     await server.request("/users/me", { headers: carolAuth });
-    expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
-    expect((await scanTag(server, bobAuth, "carol", "tag-carol")).status).toBe(200);
+    expect((await pairTag(server, carolAuth, "04:00:00:00:00:00:04")).status).toBe(200);
+    expect((await scanTag(server, bobAuth, "carol", "04:00:00:00:00:00:04")).status).toBe(200);
 
     const cache = new MemoryCache();
     vi.stubGlobal("caches", { default: cache });
@@ -176,9 +176,9 @@ describe("mission and scoreboard edge cases", () => {
     await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
     await server.request("/users/me", { headers: carolAuth });
-    expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
-    expect((await scanTag(server, aliceAuth, "carol", "tag-carol")).status).toBe(200);
-    expect((await scanTag(server, bobAuth, "carol", "tag-carol")).status).toBe(200);
+    expect((await pairTag(server, carolAuth, "04:00:00:00:00:00:04")).status).toBe(200);
+    expect((await scanTag(server, aliceAuth, "carol", "04:00:00:00:00:00:04")).status).toBe(200);
+    expect((await scanTag(server, bobAuth, "carol", "04:00:00:00:00:00:04")).status).toBe(200);
 
     const phishing = await server.request(
       "/collection/phishing",
@@ -268,13 +268,13 @@ describe("mission and scoreboard edge cases", () => {
     await server.request("/users/me", { headers: bobAuth });
     await server.request("/users/me", { headers: carolAuth });
     await server.request("/users/me", { headers: daveAuth });
-    expect((await pairTag(server, bobAuth, "tag-bob")).status).toBe(200);
-    expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
-    expect((await pairTag(server, daveAuth, "tag-dave")).status).toBe(200);
+    expect((await pairTag(server, bobAuth, "04:00:00:00:00:00:03")).status).toBe(200);
+    expect((await pairTag(server, carolAuth, "04:00:00:00:00:00:04")).status).toBe(200);
+    expect((await pairTag(server, daveAuth, "04:00:00:00:00:00:05")).status).toBe(200);
 
-    expect((await scanTag(server, aliceAuth, "bob", "tag-bob")).status).toBe(200);
-    expect((await scanTag(server, aliceAuth, "carol", "tag-carol")).status).toBe(200);
-    expect((await scanTag(server, aliceAuth, "dave", "tag-dave")).status).toBe(200);
+    expect((await scanTag(server, aliceAuth, "bob", "04:00:00:00:00:00:03")).status).toBe(200);
+    expect((await scanTag(server, aliceAuth, "carol", "04:00:00:00:00:00:04")).status).toBe(200);
+    expect((await scanTag(server, aliceAuth, "dave", "04:00:00:00:00:00:05")).status).toBe(200);
 
     await server.db
       .prepare(
@@ -371,10 +371,11 @@ describe("mission and scoreboard edge cases", () => {
 
     for (let index = 0; index < 25; index += 1) {
       const sponsorId = `post-freeze-sponsor-${index}`;
+      const sponsorTagId = `04:00:00:00:00:01:${index.toString(16).toUpperCase().padStart(2, "0")}`;
       const sponsorAuth = await authHeaders(sponsorId, "SPONSOR");
       await server.request("/users/me", { headers: sponsorAuth });
-      expect((await pairTag(server, sponsorAuth, `tag-${sponsorId}`)).status).toBe(200);
-      expect((await scanTag(server, aliceAuth, sponsorId, `tag-${sponsorId}`)).status).toBe(200);
+      expect((await pairTag(server, sponsorAuth, sponsorTagId)).status).toBe(200);
+      expect((await scanTag(server, aliceAuth, sponsorId, sponsorTagId)).status).toBe(200);
     }
 
     const liveMission = await server.request("/missions/stamp", { headers: aliceAuth });

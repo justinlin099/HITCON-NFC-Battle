@@ -46,6 +46,8 @@ The app will then make a query to `GET /users/me`, triggering lazy initializatio
 
 The user will pick up a NFC tag, open the app, and scan the tag using the app. The app will use `POST /tags/pair` to link their profile to their first NFC tag's physical ID. Once the user has any paired physical ID, this self-service endpoint rejects additional pairings with `TAG_ALREADY_PAIRED`. A user may still have multiple paired physical IDs when staff adds them with `POST /staff/pair_user_tag`; each one resolves to the same user profile.
 
+Physical NFC tag IDs use a canonical seven-byte format: seven two-digit hexadecimal bytes separated by colons. API inputs are trimmed and normalized to uppercase before storage or comparison; malformed IDs are rejected with `BAD_REQUEST`.
+
 Also, the app will write a URL `https://game.hitcon2026.online/b?u={user_id}` to the tag. Again, this is hosted elsewhere. The URL will redirect the mobile device to open the app.
 
 After the app writes the URL to the tag, it will use the user's shared `nfc_tag_key` to lock the tag, so it is only readable. This will make sure the tag won't be accidentally overwritten. The app should keep the key so it can offer an unlock button after the conference. Every tag paired to the same user uses the same key and contains the same user URL.

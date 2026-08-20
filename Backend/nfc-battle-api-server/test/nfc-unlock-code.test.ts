@@ -14,14 +14,23 @@ describe("multiple NFC UIDs and staff unlock codes", () => {
     const server = await createTestServer();
     const alice = await initializeUser(server, "alice");
     const bob = await initializeUser(server, "bob");
-    await pairTag(server, alice.headers, "uid-alice-one");
-    await pairTag(server, alice.headers, "uid-alice-two");
+    const staffJwt = await authHeaders("staff", "STAFF");
+    expect((await pairTag(server, alice.headers, "04:00:00:00:00:00:0D")).status).toBe(200);
+    const additionalTag = await server.request(
+      "/staff/pair_user_tag",
+      await jsonRequest(
+        "POST",
+        { user_id: "alice", physical_id: "04:00:00:00:00:00:0E" },
+        staffJwt,
+      ),
+    );
+    expect(additionalTag.status).toBe(200);
 
     const aliceProfile = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: { physical_id: string; nfc_tag_key: string };
     };
-    expect(aliceProfile.data.physical_id).toBe("uid-alice-one");
-    expect((await scanTag(server, bob.headers, "alice", "uid-alice-two")).status).toBe(200);
+    expect(aliceProfile.data.physical_id).toBe("04:00:00:00:00:00:0D");
+    expect((await scanTag(server, bob.headers, "alice", "04:00:00:00:00:00:0E")).status).toBe(200);
 
     const recordingDb = new QueryRecordingDb(server.db);
     server.env.DB = recordingDb as unknown as D1Database;
@@ -30,13 +39,13 @@ describe("multiple NFC UIDs and staff unlock codes", () => {
       "/staff/nfc-unlock-code",
       await jsonRequest(
         "POST",
-        { user_id: "alice", uid: "uid-alice-two" },
-        await authHeaders("staff", "STAFF"),
+        { user_id: "alice", uid: "04:00:00:00:00:00:0E" },
+        staffJwt,
       ),
     );
     expect(unlock.status).toBe(200);
     await expect(readJson(unlock)).resolves.toMatchObject({
-      data: { user_id: "alice", uid: "uid-alice-two", unlock_code: aliceProfile.data.nfc_tag_key },
+      data: { user_id: "alice", uid: "04:00:00:00:00:00:0E", unlock_code: aliceProfile.data.nfc_tag_key },
     });
     expect(recordingDb.queries).toHaveLength(1);
     expect(recordingDb.queries[0]).toContain("SELECT nfc_tag_key FROM users");
@@ -53,7 +62,7 @@ describe("multiple NFC UIDs and staff unlock codes", () => {
       "/staff/nfc-unlock-code",
       await jsonRequest(
         "POST",
-        { user_id: "alice", uid: "changed-uid" },
+        { user_id: "alice", uid: "04:00:00:00:00:00:0C" },
         await authHeaders("staff", "STAFF"),
       ),
     );

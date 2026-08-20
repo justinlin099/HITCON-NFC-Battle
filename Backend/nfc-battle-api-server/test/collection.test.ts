@@ -7,7 +7,7 @@ describe("collection scan edge cases", () => {
 
     const response = await server.request(
       "/collection/scan",
-      await jsonRequest("POST", { user_id: "bob", physical_id: "tag-bob" }),
+      await jsonRequest("POST", { user_id: "bob", physical_id: "04:00:00:00:00:00:03" }),
     );
 
     expect(response.status).toBe(401);
@@ -23,10 +23,10 @@ describe("collection scan edge cases", () => {
     for (const body of [
       {},
       { user_id: "bob" },
-      { physical_id: "tag-bob" },
-      { user_id: "", physical_id: "tag-bob" },
+      { physical_id: "04:00:00:00:00:00:03" },
+      { user_id: "", physical_id: "04:00:00:00:00:00:03" },
       { user_id: "bob", physical_id: "" },
-      { user_id: "bob", physical_id: "tag-bob", extra: "nope" },
+      { user_id: "bob", physical_id: "04:00:00:00:00:00:03", extra: "nope" },
     ]) {
       const response = await server.request(
         "/collection/scan",
@@ -44,7 +44,7 @@ describe("collection scan edge cases", () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
 
-    const response = await scanTag(server, aliceAuth, "alice", "tag-alice");
+    const response = await scanTag(server, aliceAuth, "alice", "04:00:00:00:00:00:01");
 
     expect(response.status).toBe(400);
     await expect(readJson(response)).resolves.toMatchObject({
@@ -56,7 +56,7 @@ describe("collection scan edge cases", () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
 
-    const response = await scanTag(server, aliceAuth, "bob", "tag-bob");
+    const response = await scanTag(server, aliceAuth, "bob", "04:00:00:00:00:00:03");
 
     expect(response.status).toBe(404);
     await expect(readJson(response)).resolves.toMatchObject({
@@ -73,15 +73,15 @@ describe("collection scan edge cases", () => {
     await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
     await server.request("/users/me", { headers: carolAuth });
-    expect((await pairTag(server, carolAuth, "tag-carol")).status).toBe(200);
+    expect((await pairTag(server, carolAuth, "04:00:00:00:00:00:04")).status).toBe(200);
 
-    const unpairedTag = await scanTag(server, aliceAuth, "bob", "tag-bob");
+    const unpairedTag = await scanTag(server, aliceAuth, "bob", "04:00:00:00:00:00:03");
     expect(unpairedTag.status).toBe(403);
     await expect(readJson(unpairedTag)).resolves.toMatchObject({
       code: "PHYSICAL_ID_MISMATCH",
     });
 
-    const mismatchedTag = await scanTag(server, aliceAuth, "bob", "tag-carol");
+    const mismatchedTag = await scanTag(server, aliceAuth, "bob", "04:00:00:00:00:00:04");
     expect(mismatchedTag.status).toBe(403);
     await expect(readJson(mismatchedTag)).resolves.toMatchObject({
       code: "PHYSICAL_ID_MISMATCH",
@@ -95,9 +95,9 @@ describe("collection scan edge cases", () => {
 
     await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
-    expect((await pairTag(server, bobAuth, "tag-bob")).status).toBe(200);
+    expect((await pairTag(server, bobAuth, "04:00:00:00:00:00:03")).status).toBe(200);
 
-    const firstScan = await scanTag(server, aliceAuth, "bob", "tag-bob");
+    const firstScan = await scanTag(server, aliceAuth, "bob", "04:00:00:00:00:00:03");
     expect(firstScan.status).toBe(200);
     await expect(readJson(firstScan)).resolves.toMatchObject({
       data: {
@@ -111,7 +111,7 @@ describe("collection scan edge cases", () => {
         .first<{ collection_version: number }>(),
     ).resolves.toEqual({ collection_version: 1 });
 
-    const secondScan = await scanTag(server, aliceAuth, "bob", "tag-bob");
+    const secondScan = await scanTag(server, aliceAuth, "bob", "04:00:00:00:00:00:03");
     expect(secondScan.status).toBe(200);
     await expect(readJson(secondScan)).resolves.toMatchObject({
       data: {
@@ -135,13 +135,13 @@ describe("collection scan edge cases", () => {
     await server.request("/users/me", { headers: bobAuth });
     const pairResponse = await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: " tag-bob " }, bobAuth),
+      await jsonRequest("POST", { physical_id: " 04:aa:bb:cc:dd:ee:ff " }, bobAuth),
     );
     expect(pairResponse.status).toBe(200);
 
     const scanResponse = await server.request(
       "/collection/scan",
-      await jsonRequest("POST", { user_id: " bob ", physical_id: " tag-bob " }, aliceAuth),
+      await jsonRequest("POST", { user_id: " bob ", physical_id: " 04:aa:bb:cc:dd:ee:ff " }, aliceAuth),
     );
     expect(scanResponse.status).toBe(200);
     await expect(readJson(scanResponse)).resolves.toMatchObject({
@@ -155,6 +155,6 @@ describe("collection scan edge cases", () => {
       server.db
         .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'bob'")
         .first<{ physical_id: string }>(),
-    ).resolves.toEqual({ physical_id: "tag-bob" });
+    ).resolves.toEqual({ physical_id: "04:AA:BB:CC:DD:EE:FF" });
   });
 });

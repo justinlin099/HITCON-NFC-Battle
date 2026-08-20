@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
-import { hasOnlyKeys, isPlainObject, readJson, requiredString } from "./request";
+import { hasOnlyKeys, isPlainObject, readJson, requiredPhysicalTagId } from "./request";
 import { errorResponse, successMessage } from "./responses";
 import { pairTag } from "./tag-store";
 import type { AppEnv } from "./types";
@@ -45,7 +45,7 @@ function validatePairTagRequest(value: unknown) {
     return null;
   }
 
-  const physicalId = requiredString(value, "physical_id");
+  const physicalId = requiredPhysicalTagId(value, "physical_id");
   if (!physicalId) {
     return null;
   }

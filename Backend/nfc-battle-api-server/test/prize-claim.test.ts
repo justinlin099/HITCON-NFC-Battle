@@ -15,9 +15,9 @@ describe("staff prize claims", () => {
     const alice = await initializeUser(server, "alice");
     const bob = await initializeUser(server, "bob");
     const carol = await initializeUser(server, "carol");
-    await pairTag(server, alice.headers, "uid-alice");
-    await pairTag(server, bob.headers, "uid-bob");
-    await pairTag(server, carol.headers, "uid-carol");
+    await pairTag(server, alice.headers, "04:00:00:00:00:00:08");
+    await pairTag(server, bob.headers, "04:00:00:00:00:00:09");
+    await pairTag(server, carol.headers, "04:00:00:00:00:00:0A");
 
     const dangerHeaders = {
       ...(await authHeaders("staff", "STAFF")),
@@ -44,7 +44,7 @@ describe("staff prize claims", () => {
       "/staff/prize-claims",
       await jsonRequest(
         "POST",
-        { user_id: "alice", uid: "uid-alice", type: "RANKING" },
+        { user_id: "alice", uid: "04:00:00:00:00:00:08", type: "RANKING" },
         staffJwt,
       ),
     );
@@ -52,7 +52,7 @@ describe("staff prize claims", () => {
 
     const claimCarol = async (type: "RANKING") => server.request(
       "/staff/prize-claims",
-      await jsonRequest("POST", { user_id: "carol", uid: "uid-carol", type }, staffJwt),
+      await jsonRequest("POST", { user_id: "carol", uid: "04:00:00:00:00:00:0A", type }, staffJwt),
     );
     expect((await claimCarol("RANKING")).status).toBe(200);
 
@@ -64,7 +64,7 @@ describe("staff prize claims", () => {
       "/staff/prize-claims",
       await jsonRequest(
         "POST",
-        { user_id: "bob", uid: "uid-bob", type: "STAMP" },
+        { user_id: "bob", uid: "04:00:00:00:00:00:09", type: "STAMP" },
         staffJwt,
       ),
     );
@@ -75,7 +75,7 @@ describe("staff prize claims", () => {
   it("claims the stamp prize during the event after the live stamp threshold is met", async () => {
     const server = await createTestServer();
     const alice = await initializeUser(server, "alice");
-    await pairTag(server, alice.headers, "uid-alice");
+    await pairTag(server, alice.headers, "04:00:00:00:00:00:08");
 
     for (let index = 0; index < 25; index += 1) {
       const sponsorId = `sponsor-${index}`;
@@ -96,7 +96,7 @@ describe("staff prize claims", () => {
       "/staff/prize-claims",
       await jsonRequest(
         "POST",
-        { user_id: "alice", uid: "uid-alice", type: "STAMP" },
+        { user_id: "alice", uid: "04:00:00:00:00:00:08", type: "STAMP" },
         staffJwt,
       ),
     );

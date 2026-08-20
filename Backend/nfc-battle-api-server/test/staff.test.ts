@@ -83,7 +83,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: "alice",
-          physical_id: "tag-alice",
+          physical_id: "04:00:00:00:00:00:01",
         },
         await authHeaders("attendee", "ATTENDEE"),
       ),
@@ -99,7 +99,7 @@ describe("staff scoreboard edge cases", () => {
     const alice = await initializeUser(server, "alice");
     const bob = await initializeUser(server, "bob");
     const staffJwt = await authHeaders("staff", "STAFF");
-    await pairTag(server, alice.headers, "tag-alice-old");
+    await pairTag(server, alice.headers, "04:00:00:00:00:00:0F");
 
     const before = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
@@ -108,7 +108,7 @@ describe("staff scoreboard edge cases", () => {
         collection_version: number;
       };
     };
-    expect(before.data.physical_id).toBe("tag-alice-old");
+    expect(before.data.physical_id).toBe("04:00:00:00:00:00:0F");
 
     const update = await server.request(
       "/staff/pair_user_tag",
@@ -116,7 +116,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: " alice ",
-          physical_id: " tag-alice-new ",
+          physical_id: " 04:00:00:00:00:00:10 ",
         },
         staffJwt,
       ),
@@ -125,7 +125,7 @@ describe("staff scoreboard edge cases", () => {
 
     await expect(
       server.db
-        .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = 'tag-alice-old'")
+        .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = '04:00:00:00:00:00:0F'")
         .first<{ user_id: string }>(),
     ).resolves.toEqual({ user_id: "alice" });
     await expect(
@@ -134,10 +134,10 @@ describe("staff scoreboard edge cases", () => {
         .first<{ count: number }>(),
     ).resolves.toEqual({ count: 2 });
 
-    const oldTagScan = await scanTag(server, bob.headers, "alice", "tag-alice-old");
+    const oldTagScan = await scanTag(server, bob.headers, "alice", "04:00:00:00:00:00:0F");
     expect(oldTagScan.status).toBe(200);
 
-    const newTagScan = await scanTag(server, bob.headers, "alice", "tag-alice-new");
+    const newTagScan = await scanTag(server, bob.headers, "alice", "04:00:00:00:00:00:10");
     expect(newTagScan.status).toBe(200);
 
     const firstPairedTag = await server.db
@@ -184,7 +184,7 @@ describe("staff scoreboard edge cases", () => {
     const server = await createTestServer();
     const alice = await initializeUser(server, "alice");
     const staffJwt = await authHeaders("staff", "STAFF");
-    await pairTag(server, alice.headers, "tag-alice");
+    await pairTag(server, alice.headers, "04:00:00:00:00:00:01");
 
     const update = await server.request(
       "/staff/pair_user_tag",
@@ -192,7 +192,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: "alice",
-          physical_id: "tag-alice",
+          physical_id: "04:00:00:00:00:00:01",
         },
         staffJwt,
       ),
@@ -209,8 +209,8 @@ describe("staff scoreboard edge cases", () => {
     const alice = await initializeUser(server, "alice");
     const bob = await initializeUser(server, "bob");
     const staffJwt = await authHeaders("staff", "STAFF");
-    await pairTag(server, alice.headers, "tag-alice");
-    await pairTag(server, bob.headers, "tag-bob");
+    await pairTag(server, alice.headers, "04:00:00:00:00:00:01");
+    await pairTag(server, bob.headers, "04:00:00:00:00:00:03");
 
     const update = await server.request(
       "/staff/pair_user_tag",
@@ -218,7 +218,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: "alice",
-          physical_id: "tag-bob",
+          physical_id: "04:00:00:00:00:00:03",
         },
         staffJwt,
       ),
@@ -232,12 +232,12 @@ describe("staff scoreboard edge cases", () => {
       server.db
         .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'alice'")
         .first<{ physical_id: string }>(),
-    ).resolves.toEqual({ physical_id: "tag-alice" });
+    ).resolves.toEqual({ physical_id: "04:00:00:00:00:00:01" });
     await expect(
       server.db
         .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'bob'")
         .first<{ physical_id: string }>(),
-    ).resolves.toEqual({ physical_id: "tag-bob" });
+    ).resolves.toEqual({ physical_id: "04:00:00:00:00:00:03" });
   });
 
   it("returns a tag conflict if another request pairs the tag during the write", async () => {
@@ -245,10 +245,10 @@ describe("staff scoreboard edge cases", () => {
     const alice = await initializeUser(server, "alice");
     await initializeUser(server, "bob");
     const staffJwt = await authHeaders("staff", "STAFF");
-    await pairTag(server, alice.headers, "tag-alice");
+    await pairTag(server, alice.headers, "04:00:00:00:00:00:01");
     server.env.DB = new PairTagDuringReplacementWriteDb(
       server.db,
-      "tag-race",
+      "04:00:00:00:00:00:13",
       "bob",
     ) as unknown as D1Database;
 
@@ -258,7 +258,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: "alice",
-          physical_id: "tag-race",
+          physical_id: "04:00:00:00:00:00:13",
         },
         staffJwt,
       ),
@@ -272,12 +272,12 @@ describe("staff scoreboard edge cases", () => {
       server.db
         .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'alice'")
         .first<{ physical_id: string }>(),
-    ).resolves.toEqual({ physical_id: "tag-alice" });
+    ).resolves.toEqual({ physical_id: "04:00:00:00:00:00:01" });
     await expect(
       server.db
         .prepare("SELECT physical_id FROM nfc_tags WHERE user_id = 'bob'")
         .first<{ physical_id: string }>(),
-    ).resolves.toEqual({ physical_id: "tag-race" });
+    ).resolves.toEqual({ physical_id: "04:00:00:00:00:00:13" });
   });
 
   it("rejects invalid or unknown staff tag update requests", async () => {
@@ -288,9 +288,9 @@ describe("staff scoreboard edge cases", () => {
       null,
       "nope",
       {},
-      { user_id: "", physical_id: "tag-alice" },
+      { user_id: "", physical_id: "04:00:00:00:00:00:01" },
       { user_id: "alice", physical_id: "" },
-      { user_id: "alice", physical_id: "tag-alice", extra: true },
+      { user_id: "alice", physical_id: "04:00:00:00:00:00:01", extra: true },
     ]) {
       const response = await server.request(
         "/staff/pair_user_tag",
@@ -309,7 +309,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: "missing",
-          physical_id: "tag-missing",
+          physical_id: "04:00:00:00:00:00:14",
         },
         staffJwt,
       ),
@@ -325,12 +325,12 @@ describe("staff scoreboard edge cases", () => {
     const alice = await initializeUser(server, "alice");
     const bob = await initializeUser(server, "bob");
     const staffJwt = await authHeaders("staff", "STAFF");
-    expect((await pairTag(server, alice.headers, "tag-alice-first")).status).toBe(200);
+    expect((await pairTag(server, alice.headers, "04:00:00:00:00:00:11")).status).toBe(200);
     const additionalTag = await server.request(
       "/staff/pair_user_tag",
       await jsonRequest(
         "POST",
-        { user_id: "alice", physical_id: "tag-alice-second" },
+        { user_id: "alice", physical_id: "04:00:00:00:00:00:12" },
         staffJwt,
       ),
     );
@@ -344,7 +344,7 @@ describe("staff scoreboard edge cases", () => {
         collection_version: number;
       };
     };
-    expect(before.data.physical_id).toBe("tag-alice-first");
+    expect(before.data.physical_id).toBe("04:00:00:00:00:00:11");
 
     const response = await server.request(
       "/staff/unpair_user_tag",
@@ -352,7 +352,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: " alice ",
-          physical_id: " tag-alice-first ",
+          physical_id: " 04:00:00:00:00:00:11 ",
         },
         staffJwt,
       ),
@@ -365,21 +365,21 @@ describe("staff scoreboard edge cases", () => {
     });
     await expect(
       server.db
-        .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = 'tag-alice-first'")
+        .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = '04:00:00:00:00:00:11'")
         .first(),
     ).resolves.toBeNull();
     await expect(
       server.db
-        .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = 'tag-alice-second'")
+        .prepare("SELECT user_id FROM nfc_tags WHERE physical_id = '04:00:00:00:00:00:12'")
         .first<{ user_id: string }>(),
     ).resolves.toEqual({ user_id: "alice" });
 
-    const oldTagScan = await scanTag(server, bob.headers, "alice", "tag-alice-first");
+    const oldTagScan = await scanTag(server, bob.headers, "alice", "04:00:00:00:00:00:11");
     expect(oldTagScan.status).toBe(403);
     await expect(readJson(oldTagScan)).resolves.toMatchObject({
       code: "PHYSICAL_ID_MISMATCH",
     });
-    expect((await scanTag(server, bob.headers, "alice", "tag-alice-second")).status).toBe(200);
+    expect((await scanTag(server, bob.headers, "alice", "04:00:00:00:00:00:12")).status).toBe(200);
 
     const after = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
@@ -390,7 +390,7 @@ describe("staff scoreboard edge cases", () => {
       };
     };
     expect(after.data).toMatchObject({
-      physical_id: "tag-alice-second",
+      physical_id: "04:00:00:00:00:00:12",
       nfc_tag_key: before.data.nfc_tag_key,
       profile_version: before.data.profile_version,
       collection_version: before.data.collection_version,
@@ -402,7 +402,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: "alice",
-          physical_id: "tag-alice-second",
+          physical_id: "04:00:00:00:00:00:12",
         },
         staffJwt,
       ),
@@ -441,7 +441,7 @@ describe("staff scoreboard edge cases", () => {
           "POST",
           {
             user_id: "alice",
-            physical_id: "tag-missing",
+            physical_id: "04:00:00:00:00:00:14",
           },
           staffJwt,
         ),
@@ -459,7 +459,7 @@ describe("staff scoreboard edge cases", () => {
     await initializeUser(server, "alice");
     const bob = await initializeUser(server, "bob");
     const staffJwt = await authHeaders("staff", "STAFF");
-    await pairTag(server, bob.headers, "tag-bob");
+    await pairTag(server, bob.headers, "04:00:00:00:00:00:03");
 
     const response = await server.request(
       "/staff/unpair_user_tag",
@@ -467,7 +467,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: "alice",
-          physical_id: "tag-bob",
+          physical_id: "04:00:00:00:00:00:03",
         },
         staffJwt,
       ),
@@ -478,7 +478,7 @@ describe("staff scoreboard edge cases", () => {
       code: "PHYSICAL_ID_MISMATCH",
     });
     await expect(
-      server.db.prepare("SELECT user_id FROM nfc_tags WHERE physical_id = 'tag-bob'").first(),
+      server.db.prepare("SELECT user_id FROM nfc_tags WHERE physical_id = '04:00:00:00:00:00:03'").first(),
     ).resolves.toEqual({ user_id: "bob" });
   });
 
@@ -490,9 +490,9 @@ describe("staff scoreboard edge cases", () => {
       null,
       "nope",
       {},
-      { user_id: "", physical_id: "tag-alice" },
+      { user_id: "", physical_id: "04:00:00:00:00:00:01" },
       { user_id: "alice", physical_id: "" },
-      { user_id: "alice", physical_id: "tag-alice", extra: true },
+      { user_id: "alice", physical_id: "04:00:00:00:00:00:01", extra: true },
     ]) {
       const response = await server.request(
         "/staff/unpair_user_tag",
@@ -511,7 +511,7 @@ describe("staff scoreboard edge cases", () => {
         "POST",
         {
           user_id: "missing",
-          physical_id: "tag-missing",
+          physical_id: "04:00:00:00:00:00:14",
         },
         staffJwt,
       ),

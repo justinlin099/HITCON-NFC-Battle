@@ -78,13 +78,13 @@ describe("user profile behavior", () => {
 
     const bobPair = await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: "tag-bob" }, bobAuth),
+      await jsonRequest("POST", { physical_id: "04:00:00:00:00:00:03" }, bobAuth),
     );
     expect(bobPair.status).toBe(200);
 
     const aliceScanBob = await server.request(
       "/collection/scan",
-      await jsonRequest("POST", { user_id: "bob", physical_id: "tag-bob" }, aliceAuth),
+      await jsonRequest("POST", { user_id: "bob", physical_id: "04:00:00:00:00:00:03" }, aliceAuth),
     );
     expect(aliceScanBob.status).toBe(200);
 
@@ -302,20 +302,20 @@ describe("user profile behavior", () => {
 
     await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: "tag-bob" }, bobAuth),
+      await jsonRequest("POST", { physical_id: "04:00:00:00:00:00:03" }, bobAuth),
     );
     await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: "tag-carol" }, carolAuth),
+      await jsonRequest("POST", { physical_id: "04:00:00:00:00:00:04" }, carolAuth),
     );
 
     await server.request(
       "/collection/scan",
-      await jsonRequest("POST", { user_id: "bob", physical_id: "tag-bob" }, aliceAuth),
+      await jsonRequest("POST", { user_id: "bob", physical_id: "04:00:00:00:00:00:03" }, aliceAuth),
     );
     await server.request(
       "/collection/scan",
-      await jsonRequest("POST", { user_id: "carol", physical_id: "tag-carol" }, bobAuth),
+      await jsonRequest("POST", { user_id: "carol", physical_id: "04:00:00:00:00:00:04" }, bobAuth),
     );
 
     const batch = await server.request(
@@ -435,19 +435,19 @@ describe("user profile behavior", () => {
 
     await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: "tag-bob" }, bobAuth),
+      await jsonRequest("POST", { physical_id: "04:00:00:00:00:00:03" }, bobAuth),
     );
     await server.request(
       "/tags/pair",
-      await jsonRequest("POST", { physical_id: "tag-carol" }, carolAuth),
+      await jsonRequest("POST", { physical_id: "04:00:00:00:00:00:04" }, carolAuth),
     );
     await server.request(
       "/collection/scan",
-      await jsonRequest("POST", { user_id: "bob", physical_id: "tag-bob" }, aliceAuth),
+      await jsonRequest("POST", { user_id: "bob", physical_id: "04:00:00:00:00:00:03" }, aliceAuth),
     );
     await server.request(
       "/collection/scan",
-      await jsonRequest("POST", { user_id: "carol", physical_id: "tag-carol" }, bobAuth),
+      await jsonRequest("POST", { user_id: "carol", physical_id: "04:00:00:00:00:00:04" }, bobAuth),
     );
 
     const versionCases = [

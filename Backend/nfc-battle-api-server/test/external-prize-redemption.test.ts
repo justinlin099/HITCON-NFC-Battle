@@ -62,7 +62,7 @@ describe("external prize claims", () => {
     const staffAuth = await authHeaders("staff", "STAFF");
 
     await initializeUser(server, "alice");
-    await pairTag(server, aliceAuth, "uid-alice");
+    await pairTag(server, aliceAuth, "04:00:00:00:00:00:08");
 
     const before = await server.request("/staff/prize-claims/alice?type=EXTERNAL", {
       headers: staffAuth,
@@ -83,7 +83,7 @@ describe("external prize claims", () => {
       "/staff/prize-claims",
       await jsonRequest(
         "POST",
-        { user_id: "alice", uid: "uid-alice", type: "EXTERNAL" },
+        { user_id: "alice", uid: "04:00:00:00:00:00:08", type: "EXTERNAL" },
         staffAuth,
       ),
     );
@@ -128,7 +128,7 @@ describe("external prize claims", () => {
       "/staff/prize-claims",
       await jsonRequest(
         "POST",
-        { user_id: "alice", uid: "uid-alice", type: "EXTERNAL" },
+        { user_id: "alice", uid: "04:00:00:00:00:00:08", type: "EXTERNAL" },
         staffAuth,
       ),
     );
@@ -143,13 +143,13 @@ describe("external prize claims", () => {
     const staffAuth = await authHeaders("staff", "STAFF");
 
     await initializeUser(server, "alice");
-    await pairTag(server, await authHeaders("alice"), "uid-alice");
+    await pairTag(server, await authHeaders("alice"), "04:00:00:00:00:00:08");
 
     const response = await server.request(
       "/staff/prize-claims",
       await jsonRequest(
         "POST",
-        { user_id: "alice", uid: "wrong-uid", type: "EXTERNAL" },
+        { user_id: "alice", uid: "04:00:00:00:00:00:0B", type: "EXTERNAL" },
         staffAuth,
       ),
     );
