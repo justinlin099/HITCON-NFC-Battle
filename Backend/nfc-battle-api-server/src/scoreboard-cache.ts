@@ -2,7 +2,7 @@ import type { GameStateRow } from "./game-state";
 import type { LiveUserScores } from "./collection-store";
 
 const CACHE_VERSION = "2";
-const OPEN_TTL_SECONDS = 2;
+const OPEN_TTL_SECONDS = 10;
 const FROZEN_TTL_SECONDS = 60;
 
 export interface ScoreboardRanking {
