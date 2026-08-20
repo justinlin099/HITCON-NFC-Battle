@@ -71,4 +71,7 @@ jobs:
           printf '%s' "$STAFF_DANGER_TOKEN" | npx wrangler secret put STAFF_DANGER_TOKEN --env production
 
       - name: Deploy Worker
-        run: npm run deploy:${{ inputs.environment }}
+        run: |
+          npm run deploy:${{ inputs.environment }} -- \
+            --tag "$GITHUB_SHA" \
+            --message "$GITHUB_REPOSITORY@$GITHUB_SHA ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
