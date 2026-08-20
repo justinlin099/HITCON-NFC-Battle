@@ -427,8 +427,11 @@ paths:
       description: |
         Called at the reception desk after the user picks up a tag and scans it
         with the app. The user must already be initialized with `GET /users/me`
-        before pairing. A user may pair more than one UID; every paired UID
-        resolves to the same profile and shared NFC unlock code. The app also writes
+        before pairing. This self-service endpoint pairs only the user's first
+        UID and returns `TAG_ALREADY_PAIRED` if either the user or physical ID
+        already has a pairing. Staff may add more UIDs with
+        `POST /staff/pair_user_tag`; every paired UID resolves to the same
+        profile and shared NFC unlock code. The app also writes
         `https://game.hitcon2026.online/b?u={user_id}` to the tag, then locks
         the tag so it is read-only and cannot be accidentally overwritten.
 

@@ -62,7 +62,7 @@ describe("tag pairing edge cases", () => {
     });
   });
 
-  it("rejects a duplicate UID but lets one user pair multiple UIDs", async () => {
+  it("rejects a duplicate UID and prevents users from self-pairing additional UIDs", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
     const bobAuth = await authHeaders("bob");
@@ -78,10 +78,14 @@ describe("tag pairing edge cases", () => {
     });
 
     const sameUser = await pairTag(server, aliceAuth, "tag-alice-2");
-    expect(sameUser.status).toBe(200);
+    expect(sameUser.status).toBe(409);
+    await expect(readJson(sameUser)).resolves.toMatchObject({
+      code: "TAG_ALREADY_PAIRED",
+      message: "This user or NFC tag already has a pairing.",
+    });
 
     await expect(
       server.db.prepare("SELECT COUNT(*) AS count FROM nfc_tags").first<{ count: number }>(),
-    ).resolves.toEqual({ count: 2 });
+    ).resolves.toEqual({ count: 1 });
   });
 });

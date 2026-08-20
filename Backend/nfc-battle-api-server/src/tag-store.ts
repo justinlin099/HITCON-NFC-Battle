@@ -24,7 +24,12 @@ export async function pairTag(db: D1Database, physicalId: string, userId: string
     .prepare(
       `
       INSERT OR IGNORE INTO nfc_tags (physical_id, user_id, paired_at, locked_at)
-      VALUES (?1, ?2, ?3, ?3)
+      SELECT ?1, ?2, ?3, ?3
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM nfc_tags
+        WHERE user_id = ?2
+      )
       `,
     )
     .bind(physicalId, userId, timestamp)

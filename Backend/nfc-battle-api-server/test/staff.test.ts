@@ -325,8 +325,16 @@ describe("staff scoreboard edge cases", () => {
     const alice = await initializeUser(server, "alice");
     const bob = await initializeUser(server, "bob");
     const staffJwt = await authHeaders("staff", "STAFF");
-    await pairTag(server, alice.headers, "tag-alice-first");
-    await pairTag(server, alice.headers, "tag-alice-second");
+    expect((await pairTag(server, alice.headers, "tag-alice-first")).status).toBe(200);
+    const additionalTag = await server.request(
+      "/staff/pair_user_tag",
+      await jsonRequest(
+        "POST",
+        { user_id: "alice", physical_id: "tag-alice-second" },
+        staffJwt,
+      ),
+    );
+    expect(additionalTag.status).toBe(200);
 
     const before = await readJson(await server.request("/users/me", { headers: alice.headers })) as {
       data: {
