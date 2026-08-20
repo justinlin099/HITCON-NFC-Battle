@@ -10,4 +10,4 @@ Source files remain unchanged:
 - Achievement badges: `assets/images/achievement_badges/`
 - App screenshots: the full-size PNG files in this directory
 
-Published widths are 180 px for the icon, 620 px for Quick Start comics, 560 px for printing comics, 360 px for App screenshots, and 120 px for achievement badges. Regenerate the derivatives whenever a source image changes.
+Published widths are 180 px for the icon, 620 px for Quick Start comics, 560 px for printing comics, 360 px for App screenshots, and 120 px for achievement badges. `app-icon-rounded.png` preserves the published icon artwork and applies a 32 px transparent corner radius for the manual header. Regenerate the derivatives whenever a source image changes.

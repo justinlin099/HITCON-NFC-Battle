@@ -2,7 +2,7 @@
 
 Language: [繁體中文](user_manual_zh_tw.md) | **English**
 
-![HITCON NFC Battle App icon](images/user_manual/published/app-icon.png)
+![HITCON NFC Battle App icon with rounded corners](images/user_manual/published/app-icon-rounded.png)
 
 > Audience: General attendees (ATTENDEE)  
 > Last updated: 2026-08-20  
