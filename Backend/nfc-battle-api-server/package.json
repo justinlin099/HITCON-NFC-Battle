@@ -20,17 +20,20 @@
     "load:fixture:seed:staging": "node scripts/wrangler-repo.mjs d1 execute nfc-battle-api-server-staging --remote --file ./scripts/k6/fixtures/seed-full.sql",
     "cf-typegen": "node scripts/wrangler-repo.mjs types --env-interface CloudflareBindings",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "npm run test:node && npm run test:worker",
+    "test:node": "vitest run --exclude 'test/worker/**'",
+    "test:worker": "vitest run --config vitest.worker.config.ts"
   },
   "dependencies": {
     "hono": "^4.12.23"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.0.0",
     "@types/node": "^25.9.2",
     "swagger-ui-dist": "5.32.14",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8",
-    "wrangler": "^4.98.0",
+    "wrangler": "4.98.0",
     "yaml": "2.9.0"
   }
 }

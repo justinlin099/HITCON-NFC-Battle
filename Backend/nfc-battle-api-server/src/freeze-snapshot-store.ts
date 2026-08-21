@@ -66,23 +66,6 @@ export async function getPrizeClaim(
     .first<PrizeClaimRow>();
 }
 
-export async function getPrizeClaimsVersion(db: D1Database) {
-  const state = await db
-    .prepare("SELECT version FROM prize_claims_state WHERE id = 1")
-    .first<{ version: number }>();
-
-  return state?.version ?? 0;
-}
-
-export interface FrozenScoreboardRow {
-  rank: number;
-  user_id: string;
-  display_name: string;
-  emoji_icon: string;
-  final_score: number;
-  external_prize: number;
-}
-
 export async function recordPhishingEvent(
   db: D1Database,
   victimUserId: string,
@@ -94,13 +77,12 @@ export async function recordPhishingEvent(
       INSERT INTO phishing_events (
         event_id,
         victim_user_id,
-        attacker_user_id,
-        created_at
+        attacker_user_id
       )
-      VALUES (?1, ?2, ?3, ?4)
+      VALUES (?1, ?2, ?3)
       `,
     )
-    .bind(newId("phishing"), victimUserId, attackerUserId, nowIso())
+    .bind(newId("phishing"), victimUserId, attackerUserId)
     .run();
 }
 
@@ -259,38 +241,4 @@ export async function getPrizeResult(db: D1Database, freezeId: string, userId: s
     )
     .bind(freezeId, userId)
     .first<PrizeResultRow>();
-}
-
-export async function getFrozenScoreboardRows(
-  db: D1Database,
-  freezeId: string,
-  offset: number,
-  limit: number,
-) {
-  const { results } = await db
-    .prepare(
-      `
-      SELECT
-        prize_results.rank,
-        users.user_id,
-        users.display_name,
-        users.emoji_icon,
-        prize_results.final_score,
-        CASE WHEN external_prize_claims.user_id IS NULL THEN 0 ELSE 1 END AS external_prize
-      FROM prize_results
-      INNER JOIN users ON users.user_id = prize_results.user_id
-      LEFT JOIN prize_claims AS external_prize_claims
-        ON external_prize_claims.user_id = prize_results.user_id
-        AND external_prize_claims.type = 'EXTERNAL'
-        AND external_prize_claims.freeze_id = ''
-      WHERE prize_results.freeze_id = ?1
-      ORDER BY prize_results.rank ASC
-      LIMIT ?2
-      OFFSET ?3
-      `,
-    )
-    .bind(freezeId, limit, offset)
-    .all<FrozenScoreboardRow>();
-
-  return results;
 }

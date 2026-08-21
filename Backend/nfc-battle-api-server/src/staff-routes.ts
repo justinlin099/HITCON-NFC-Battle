@@ -1,13 +1,9 @@
 import { Hono } from "hono";
 import {
   claimPrize,
-  deletePrizeSnapshot,
   EXTERNAL_PRIZE_FREEZE_ID,
   getPrizeClaim,
   getPrizeResult,
-  markPhishingEventsApplied,
-  unmarkPhishingEventsApplied,
-  writePrizeSnapshot,
   type PrizeClaimType,
 } from "./freeze-snapshot-store";
 import { isFreezingStale } from "./freeze";
@@ -15,11 +11,6 @@ import { RANK_THRESHOLD, STAMP_THRESHOLD } from "./game-config";
 import { getStampCounts } from "./collection-store";
 import {
   getGameState,
-  markScoreboardFrozen,
-  markScoreboardResumeInProgress,
-  resetScoreboardToOpen,
-  rollbackScoreboardFreeze,
-  startScoreboardFreeze,
   type GameStateRow,
 } from "./game-state";
 import { requireAuth } from "./auth";
@@ -32,6 +23,7 @@ import {
   requiredString,
 } from "./request";
 import { errorResponse, success, successMessage } from "./responses";
+import { getScoreboardCoordinator } from "./scoreboard-coordinator-service";
 import { requireStaffDangerToken, requireStaffRole } from "./staff";
 import { getPrintCard } from "./print-card-store";
 import type { AppEnv } from "./types";
@@ -283,59 +275,44 @@ staffRoutes.post("/freeze_scoreboard", requireStaffDangerToken, async (c) => {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
-  if (!(await startScoreboardFreeze(c.env.DB, freezeId, startedAt, scoringCutoffAt))) {
-    return errorResponse(c, 409, "SCOREBOARD_ALREADY_FROZEN", "Scoreboard is already frozen.");
-  }
-
   try {
-    await writePrizeSnapshot(c.env.DB, freezeId, scoringCutoffAt);
-    await markPhishingEventsApplied(c.env.DB, freezeId, scoringCutoffAt);
-    const frozenAt = await transitionToFrozen(c.env.DB, freezeId);
+    const result = await getScoreboardCoordinator(c.env).freeze(
+      freezeId,
+      startedAt,
+      scoringCutoffAt,
+    );
+    if (result.status === "ALREADY_FROZEN") {
+      return errorResponse(c, 409, "SCOREBOARD_ALREADY_FROZEN", "Scoreboard is already frozen.");
+    }
+    if (result.status === "FAILED") {
+      const error = new Error(result.message);
+      console.error("Failed to freeze scoreboard.", error);
+      return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+    }
 
     return success(c, {
       frozen: true,
       freeze_id: freezeId,
       scoring_cutoff_at: scoringCutoffAt,
-      frozen_at: frozenAt,
+      frozen_at: result.frozen_at,
       stamp_threshold: STAMP_THRESHOLD,
       rank_threshold: RANK_THRESHOLD,
     });
   } catch (error) {
     console.error("Failed to freeze scoreboard.", error);
-    await rollbackFailedFreeze(c.env.DB, freezeId);
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 });
 
 staffRoutes.post("/resume_scoreboard", requireStaffDangerToken, async (c) => {
-  const state = await getGameState(c.env.DB);
-  const staleFreezing = isFreezingStale(
-    state.state,
-    state.freeze_started_at,
-    state.freeze_timeout_seconds,
-  );
-
-  if (state.state !== "FROZEN" && !staleFreezing) {
+  const result = await getScoreboardCoordinator(c.env).resume();
+  if (result.status === "NOT_FROZEN") {
     return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
   }
-
-  if (state.freeze_id) {
-    if (state.state === "FROZEN") {
-      const resumeStarted = await markScoreboardResumeInProgress(
-        c.env.DB,
-        state.freeze_id,
-        nowIso(),
-      );
-      if (!resumeStarted) {
-        return errorResponse(c, 409, "SCOREBOARD_NOT_FROZEN", "Scoreboard is not frozen yet.");
-      }
-    }
-
-    await deletePrizeSnapshot(c.env.DB, state.freeze_id);
-    await unmarkPhishingEventsApplied(c.env.DB, state.freeze_id);
+  if (result.status === "FAILED") {
+    console.error("Failed to resume scoreboard.", new Error(result.message));
+    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
-
-  await resetScoreboardToOpen(c.env.DB, nowIso());
 
   return successMessage(c, "Scoreboard resumed.");
 });
@@ -437,28 +414,6 @@ async function prizeClaimFreezeId(db: D1Database, type: PrizeClaimType) {
 
   const state = await getGameState(db);
   return state.state === "FROZEN" && state.freeze_id ? state.freeze_id : null;
-}
-
-async function rollbackFailedFreeze(db: D1Database, freezeId: string) {
-  const timestamp = nowIso();
-  await deletePrizeSnapshot(db, freezeId);
-  await unmarkPhishingEventsApplied(db, freezeId);
-  await rollbackScoreboardFreeze(db, freezeId, timestamp);
-}
-
-async function transitionToFrozen(db: D1Database, freezeId: string) {
-  const timestamp = nowIso();
-  const transitioned = await markScoreboardFrozen(db, freezeId, timestamp);
-  if (!transitioned) {
-    throw new Error("Failed to transition scoreboard to FROZEN.");
-  }
-
-  const state = await getGameState(db);
-  if (state.state !== "FROZEN" || state.freeze_id !== freezeId || state.frozen_at !== timestamp) {
-    throw new Error("Scoreboard FROZEN transition did not persist.");
-  }
-
-  return timestamp;
 }
 
 async function readOptionalFreezeRequest(request: Request) {

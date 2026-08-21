@@ -3,6 +3,13 @@ import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import app from "../src/index";
+import {
+  ScoreboardCoordinatorService,
+  getScoreboardCoordinator,
+  type ScoreboardCoordinatorScheduler,
+  type ScoreboardCoordinatorStorage,
+  type StoredCoordinatorState,
+} from "../src/scoreboard-coordinator-service";
 import type { AppBindings, UserRole } from "../src/types";
 
 const JWT_SECRET = "test-secret";
@@ -111,6 +118,34 @@ class TestRateLimit {
   }
 }
 
+class TestScoreboardStorage implements ScoreboardCoordinatorStorage {
+  private state: StoredCoordinatorState = {
+    control: undefined,
+    snapshot: undefined,
+    pending_snapshot: undefined,
+  };
+
+  async readState() {
+    return { ...this.state };
+  }
+
+  async writeState(update: Partial<StoredCoordinatorState>) {
+    this.state = { ...this.state, ...update };
+  }
+}
+
+class TestScoreboardScheduler implements ScoreboardCoordinatorScheduler {
+  scheduledDelayMs: number | null = null;
+
+  async schedule(delayMs: number) {
+    this.scheduledDelayMs = delayMs;
+  }
+
+  async stop() {
+    this.scheduledDelayMs = null;
+  }
+}
+
 export interface TestServer {
   env: AppBindings;
   db: D1Database;
@@ -147,11 +182,23 @@ export async function createTestServer(): Promise<TestServer> {
     PRINT_CARD_USER_RATE_LIMITER: new TestRateLimit(5) as unknown as RateLimit,
     PRINT_CARD_GLOBAL_RATE_LIMITER: new TestRateLimit(300) as unknown as RateLimit,
     PRINT_CARD_MAX_UPLOAD_BYTES: "4194304",
+    SCOREBOARD_REFRESH_SECONDS: "10",
     JWT_SECRET,
     STAFF_DANGER_TOKEN: "test-staff-token",
     JWT_ISSUER,
     JWT_AUDIENCE,
-  } satisfies AppBindings;
+  } as AppBindings;
+
+  const scoreboardCoordinator = new ScoreboardCoordinatorService(
+    () => env,
+    new TestScoreboardStorage(),
+    new TestScoreboardScheduler(),
+  );
+  env.SCOREBOARD_COORDINATOR = {
+    getByName() {
+      return scoreboardCoordinator;
+    },
+  } as unknown as AppBindings["SCOREBOARD_COORDINATOR"];
 
   return {
     env,
@@ -169,6 +216,10 @@ export async function createTestServer(): Promise<TestServer> {
       return response;
     },
   };
+}
+
+export async function refreshScoreboard(server: TestServer) {
+  await getScoreboardCoordinator(server.env).refreshNow();
 }
 
 export async function authHeaders(userId: string, role: UserRole = "ATTENDEE") {

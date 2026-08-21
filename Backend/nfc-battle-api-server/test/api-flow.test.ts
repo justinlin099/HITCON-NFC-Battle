@@ -5,6 +5,7 @@ import {
   jsonRequest,
   pairTag,
   readJson,
+  refreshScoreboard,
   scanTag,
   staffHeaders,
 } from "./helpers";
@@ -141,6 +142,7 @@ describe("NFC Battle API flow", () => {
       },
     });
 
+    await refreshScoreboard(server);
     const scoreboard = await server.request("/scoreboard?limit=2", { headers: aliceAuth });
     expect(scoreboard.status).toBe(200);
     const scoreboardBody = await readJson(scoreboard) as {

@@ -1,19 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   authHeaders,
   createTestServer,
   jsonRequest,
   pairTag,
   readJson,
+  refreshScoreboard,
   scanTag,
   staffHeaders,
 } from "./helpers";
 
 describe("mission and scoreboard edge cases", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("returns zero stamp progress for a newly initialized user", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
@@ -65,6 +62,7 @@ describe("mission and scoreboard edge cases", () => {
     expect((await pairTag(server, carolAuth, "04:00:00:00:00:00:04")).status).toBe(200);
 
     await scanTag(server, bobAuth, "carol", "04:00:00:00:00:00:04");
+    await refreshScoreboard(server);
 
     const response = await server.request("/scoreboard?offset=1&limit=2", {
       headers: aliceAuth,
@@ -100,7 +98,7 @@ describe("mission and scoreboard edge cases", () => {
     ]);
   });
 
-  it("shares a cached live rank snapshot across users while continuing to check state", async () => {
+  it("serves one stored live snapshot across users without recalculating it", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
     const bobAuth = await authHeaders("bob");
@@ -112,10 +110,9 @@ describe("mission and scoreboard edge cases", () => {
     expect((await pairTag(server, carolAuth, "04:00:00:00:00:00:04")).status).toBe(200);
     expect((await scanTag(server, bobAuth, "carol", "04:00:00:00:00:00:04")).status).toBe(200);
 
-    const cache = new MemoryCache();
-    vi.stubGlobal("caches", { default: cache });
     const recordingDb = new QueryRecordingDb(server.db);
     server.env.DB = recordingDb as unknown as D1Database;
+    await refreshScoreboard(server);
 
     const aliceResponse = await server.request("/scoreboard/me", { headers: aliceAuth });
     const bobResponse = await server.request("/scoreboard/me", { headers: bobAuth });
@@ -149,7 +146,7 @@ describe("mission and scoreboard edge cases", () => {
       },
     });
     expect(recordingDb.rankingQueryCount).toBe(1);
-    expect(recordingDb.gameStateQueryCount).toBe(4);
+    expect(recordingDb.gameStateQueryCount).toBe(2);
 
     await server.db
       .prepare(
@@ -160,12 +157,13 @@ describe("mission and scoreboard edge cases", () => {
         `,
       )
       .run();
+    await refreshScoreboard(server);
 
     const freezing = await server.request("/scoreboard/me", { headers: aliceAuth });
     expect(freezing.status).toBe(409);
     await expect(readJson(freezing)).resolves.toMatchObject({ code: "SCOREBOARD_FREEZING" });
     expect(recordingDb.rankingQueryCount).toBe(1);
-    expect(recordingDb.gameStateQueryCount).toBe(5);
+    expect(recordingDb.gameStateQueryCount).toBe(3);
   });
 
   it("applies the phishing penalty to live scores and ranks", async () => {
@@ -185,6 +183,7 @@ describe("mission and scoreboard edge cases", () => {
       await jsonRequest("POST", { victim: "alice", attacker: "bob" }, aliceAuth),
     );
     expect(phishing.status).toBe(200);
+    await refreshScoreboard(server);
 
     const response = await server.request("/scoreboard?limit=2", { headers: aliceAuth });
     expect(response.status).toBe(200);
@@ -211,17 +210,16 @@ describe("mission and scoreboard edge cases", () => {
     });
   });
 
-  it("caches live rankings by page while continuing to check scoreboard state", async () => {
+  it("serves arbitrary pages from one stored snapshot", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
     const bobAuth = await authHeaders("bob");
     await server.request("/users/me", { headers: aliceAuth });
     await server.request("/users/me", { headers: bobAuth });
 
-    const cache = new MemoryCache();
-    vi.stubGlobal("caches", { default: cache });
     const recordingDb = new QueryRecordingDb(server.db);
     server.env.DB = recordingDb as unknown as D1Database;
+    await refreshScoreboard(server);
 
     const first = await server.request("/scoreboard?offset=0&limit=2", { headers: aliceAuth });
     const second = await server.request("/scoreboard?offset=0&limit=2", { headers: bobAuth });
@@ -229,13 +227,13 @@ describe("mission and scoreboard edge cases", () => {
     expect(second.status).toBe(200);
     expect(await readJson(second)).toEqual(await readJson(first));
     expect(recordingDb.rankingQueryCount).toBe(1);
-    expect(recordingDb.gameStateQueryCount).toBe(4);
+    expect(recordingDb.gameStateQueryCount).toBe(2);
 
     const differentPage = await server.request("/scoreboard?offset=0&limit=1", {
       headers: aliceAuth,
     });
     expect(differentPage.status).toBe(200);
-    expect(recordingDb.rankingQueryCount).toBe(2);
+    expect(recordingDb.rankingQueryCount).toBe(1);
 
     await server.db
       .prepare(
@@ -246,13 +244,29 @@ describe("mission and scoreboard edge cases", () => {
         `,
       )
       .run();
+    await refreshScoreboard(server);
 
     const freezing = await server.request("/scoreboard?offset=0&limit=2", {
       headers: aliceAuth,
     });
     expect(freezing.status).toBe(409);
     await expect(readJson(freezing)).resolves.toMatchObject({ code: "SCOREBOARD_FREEZING" });
-    expect(recordingDb.rankingQueryCount).toBe(2);
+    expect(recordingDb.rankingQueryCount).toBe(1);
+  });
+
+  it("returns a retryable error until the first snapshot is published", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    await server.request("/users/me", { headers: aliceAuth });
+
+    const unavailable = await server.request("/scoreboard", { headers: aliceAuth });
+    expect(unavailable.status).toBe(409);
+    await expect(readJson(unavailable)).resolves.toMatchObject({
+      code: "SCOREBOARD_READ_INCONSISTENT",
+    });
+
+    await refreshScoreboard(server);
+    expect((await server.request("/scoreboard", { headers: aliceAuth })).status).toBe(200);
   });
 
   it("uses the freeze cutoff and keeps frozen scoreboard and prize snapshots immutable", async () => {
@@ -446,11 +460,12 @@ describe("mission and scoreboard edge cases", () => {
           state = 'FREEZING',
           freeze_id = 'freeze_in_progress',
           freeze_started_at = '2026-04-12T15:00:00.000Z',
-          scoring_cutoff_at = '2026-04-12T15:00:00.000Z'
+          scoring_cutoff_at = '2999-04-12T15:00:00.000Z'
         WHERE id = 1
         `,
       )
       .run();
+    await refreshScoreboard(server);
 
     const response = await server.request("/scoreboard", { headers: aliceAuth });
 
@@ -466,18 +481,6 @@ async function staffDangerHeaders() {
     ...(await authHeaders("staff", "STAFF")),
     ...staffHeaders(),
   };
-}
-
-class MemoryCache {
-  private readonly responses = new Map<string, Response>();
-
-  async match(request: Request) {
-    return this.responses.get(request.url)?.clone();
-  }
-
-  async put(request: Request, response: Response) {
-    this.responses.set(request.url, response.clone());
-  }
 }
 
 class QueryRecordingDb {

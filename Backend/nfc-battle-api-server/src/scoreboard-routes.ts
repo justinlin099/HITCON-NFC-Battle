@@ -1,37 +1,18 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import {
-  getLiveCollectionScoreRows,
-  getLiveUserScores,
-  type LiveUserScore,
-  type LiveUserScores,
-} from "./collection-store";
-import {
-  getFrozenScoreboardRows,
-  getPrizeClaimsVersion,
-  getPrizeResult,
-} from "./freeze-snapshot-store";
-import {
   PHISHING_PENALTY,
   RANK_THRESHOLD,
   SCORE_PER_COLLECTION,
 } from "./game-config";
-import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { limitUserRequests } from "./rate-limit";
-import { calculateScore } from "./scoring";
 import { errorResponse, success } from "./responses";
-import {
-  getCachedLiveUserScores,
-  getCachedScoreboardRankings,
-  putCachedLiveUserScores,
-  putCachedScoreboardRankings,
-  type ScoreboardRanking,
-} from "./scoreboard-cache";
+import { getScoreboardCoordinator } from "./scoreboard-coordinator-service";
+import { getScoreboardPresentations } from "./scoreboard-store";
 import type { AppEnv } from "./types";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
-const MAX_CONSISTENT_READ_ATTEMPTS = 2;
 
 const scoreboard = new Hono<AppEnv>();
 
@@ -43,165 +24,79 @@ scoreboard.get("/", limitUserRequests("SCOREBOARD_READ_RATE_LIMITER", "GET /scor
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
   }
 
-  for (let attempt = 0; attempt < MAX_CONSISTENT_READ_ATTEMPTS; attempt += 1) {
-    const state = await getGameState(c.env.DB);
-    if (state.state === "FREEZING") {
-      return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
-    }
-
-    const prizeClaimsVersion = await getPrizeClaimsVersion(c.env.DB);
-
-    const cachedRankings = await getCachedScoreboardRankings(
-      c.req.url,
-      state,
-      pagination.offset,
-      pagination.limit,
-      prizeClaimsVersion,
-    );
-    const rankings = cachedRankings ?? (
-      state.state === "FROZEN" && state.freeze_id
-        ? await getFrozenRankings(c.env.DB, state.freeze_id, pagination.offset, pagination.limit)
-        : await getLiveRankings(c.env.DB, pagination.offset, pagination.limit)
-    );
-
-    const latestState = await getGameState(c.env.DB);
-    if (!isSameGameStateSnapshot(state, latestState)) {
-      continue;
-    }
-
-    if (!cachedRankings) {
-      c.executionCtx.waitUntil(
-        putCachedScoreboardRankings(
-          c.req.url,
-          state,
-          pagination.offset,
-          pagination.limit,
-          rankings,
-          prizeClaimsVersion,
-        ),
-      );
-    }
-
-    return success(c, {
-      offset: pagination.offset,
-      limit: pagination.limit,
-      rank_threshold: RANK_THRESHOLD,
-      frozen: state.state === "FROZEN",
-      freeze_id: state.state === "FROZEN" ? state.freeze_id : null,
-      scoring_cutoff_at: state.state === "FROZEN" ? state.scoring_cutoff_at : null,
-      rankings,
-    });
+  const result = await getScoreboardCoordinator(c.env).readPage(
+    pagination.offset,
+    pagination.limit,
+  );
+  if (result.status === "FREEZING") {
+    return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
+  }
+  if (result.status === "UNAVAILABLE") {
+    return scoreboardUnavailable(c);
   }
 
-  return errorResponse(
-    c,
-    409,
-    "SCOREBOARD_READ_INCONSISTENT",
-    "Scoreboard state changed while reading. Please retry.",
+  const presentations = await getScoreboardPresentations(
+    c.env.DB,
+    result.entries.map((entry) => entry.user_id),
   );
+  const rankings = result.entries.flatMap((entry) => {
+    const presentation = presentations.get(entry.user_id);
+    return presentation
+      ? [{
+          rank: entry.rank,
+          user_id: entry.user_id,
+          display_name: presentation.display_name,
+          emoji_icon: presentation.emoji_icon,
+          score: entry.score,
+          external_prize: presentation.external_prize,
+        }]
+      : [];
+  });
+
+  return success(c, {
+    offset: pagination.offset,
+    limit: pagination.limit,
+    rank_threshold: RANK_THRESHOLD,
+    frozen: result.frozen,
+    freeze_id: result.freeze_id,
+    scoring_cutoff_at: result.scoring_cutoff_at,
+    rankings,
+  });
 });
 
 scoreboard.get("/me", limitUserRequests("MY_SCOREBOARD_READ_RATE_LIMITER", "GET /scoreboard/me"), async (c) => {
   const authUser = c.get("authUser");
+  const result = await getScoreboardCoordinator(c.env).readUser(authUser.userId);
 
-  for (let attempt = 0; attempt < MAX_CONSISTENT_READ_ATTEMPTS; attempt += 1) {
-    const state = await getGameState(c.env.DB);
-    if (state.state === "FREEZING") {
-      return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
-    }
-
-    let cachedLiveScores: LiveUserScores | null = null;
-    let liveScores: LiveUserScores | null = null;
-    let scoreDetails: (Omit<LiveUserScore, "rank"> & { rank: number | null }) | null;
-    let scorePerCollection = SCORE_PER_COLLECTION;
-    let phishingPenalty = PHISHING_PENALTY;
-    if (state.state === "FROZEN" && state.freeze_id) {
-      const result = await getPrizeResult(c.env.DB, state.freeze_id, authUser.userId);
-      scorePerCollection = result?.score_per_collection ?? SCORE_PER_COLLECTION;
-      phishingPenalty = result?.phishing_penalty ?? PHISHING_PENALTY;
-      scoreDetails = result
-        ? {
-            rank: result.rank,
-            score: result.final_score,
-            num_of_collection: result.num_of_collection,
-            num_of_phishing: result.num_of_phishing,
-          }
-        : null;
-    } else {
-      cachedLiveScores = state.state === "OPEN"
-        ? await getCachedLiveUserScores(c.req.url)
-        : null;
-      liveScores = cachedLiveScores ?? await getLiveUserScores(c.env.DB);
-      scoreDetails = Object.prototype.hasOwnProperty.call(liveScores, authUser.userId)
-        ? liveScores[authUser.userId]
-        : null;
-    }
-
-    const latestState = await getGameState(c.env.DB);
-    if (!isSameGameStateSnapshot(state, latestState)) {
-      continue;
-    }
-
-    if (state.state === "OPEN" && cachedLiveScores === null && liveScores !== null) {
-      c.executionCtx.waitUntil(putCachedLiveUserScores(c.req.url, liveScores));
-    }
-
-    return success(c, {
-      rank: scoreDetails?.rank ?? null,
-      score: scoreDetails?.score ?? null,
-      num_of_collection: scoreDetails?.num_of_collection ?? null,
-      num_of_phishing: scoreDetails?.num_of_phishing ?? null,
-      score_per_collection: scorePerCollection,
-      phishing_penalty: phishingPenalty,
-      frozen: state.state === "FROZEN",
-      freeze_id: state.state === "FROZEN" ? state.freeze_id : null,
-      scoring_cutoff_at: state.state === "FROZEN" ? state.scoring_cutoff_at : null,
-    });
+  if (result.status === "FREEZING") {
+    return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
+  }
+  if (result.status === "UNAVAILABLE") {
+    return scoreboardUnavailable(c);
   }
 
-  return errorResponse(
-    c,
-    409,
-    "SCOREBOARD_READ_INCONSISTENT",
-    "Scoreboard state changed while reading. Please retry.",
-  );
+  return success(c, {
+    rank: result.entry?.rank ?? null,
+    score: result.entry?.score ?? null,
+    num_of_collection: result.entry?.num_of_collection ?? null,
+    num_of_phishing: result.entry?.num_of_phishing ?? null,
+    score_per_collection: result.entry?.score_per_collection ?? SCORE_PER_COLLECTION,
+    phishing_penalty: result.entry?.phishing_penalty ?? PHISHING_PENALTY,
+    frozen: result.frozen,
+    freeze_id: result.freeze_id,
+    scoring_cutoff_at: result.scoring_cutoff_at,
+  });
 });
 
 export default scoreboard;
 
-async function getLiveRankings(
-  db: D1Database,
-  offset: number,
-  limit: number,
-): Promise<ScoreboardRanking[]> {
-  const results = await getLiveCollectionScoreRows(db, offset, limit);
-
-  return results.map((item) => ({
-    rank: item.rank,
-    user_id: item.user_id,
-    display_name: item.display_name,
-    emoji_icon: item.emoji_icon,
-    score: calculateScore(item.num_of_collection, item.num_of_phishing),
-    external_prize: item.external_prize === 1,
-  }));
-}
-
-async function getFrozenRankings(
-  db: D1Database,
-  freezeId: string,
-  offset: number,
-  limit: number,
-): Promise<ScoreboardRanking[]> {
-  const results = await getFrozenScoreboardRows(db, freezeId, offset, limit);
-
-  return results.map((item) => ({
-    rank: item.rank,
-    user_id: item.user_id,
-    display_name: item.display_name,
-    emoji_icon: item.emoji_icon,
-    score: item.final_score,
-    external_prize: item.external_prize === 1,
-  }));
+function scoreboardUnavailable(c: Parameters<typeof errorResponse>[0]) {
+  return errorResponse(
+    c,
+    409,
+    "SCOREBOARD_READ_INCONSISTENT",
+    "Scoreboard data is temporarily unavailable. Please retry.",
+  );
 }
 
 function parsePagination(rawOffset: string | undefined, rawLimit: string | undefined) {

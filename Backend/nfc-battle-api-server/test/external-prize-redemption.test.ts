@@ -6,6 +6,7 @@ import {
   jsonRequest,
   pairTag,
   readJson,
+  refreshScoreboard,
   staffHeaders,
 } from "./helpers";
 
@@ -63,6 +64,7 @@ describe("external prize claims", () => {
 
     await initializeUser(server, "alice");
     await pairTag(server, aliceAuth, "04:00:00:00:00:00:08");
+    await refreshScoreboard(server);
 
     const before = await server.request("/staff/prize-claims/alice?type=EXTERNAL", {
       headers: staffAuth,

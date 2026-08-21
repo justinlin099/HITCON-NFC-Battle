@@ -5,8 +5,17 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "nfc-battle-api-server",
-	"main": "src/index.ts",
+	"main": "src/worker.ts",
 	"compatibility_date": "2026-06-07",
+	"migrations": [
+		{
+			"tag": "v1_scoreboard_coordinator",
+			"new_sqlite_classes": ["ScoreboardCoordinator"]
+		}
+	],
+	"triggers": {
+		"crons": ["* * * * *"]
+	},
 	"assets": {
 		"binding": "ASSETS",
 		"directory": "./public"
@@ -37,6 +46,14 @@
 			"database_id": "00000000-0000-0000-0000-000000000000"
 		}
 	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "SCOREBOARD_COORDINATOR",
+				"class_name": "ScoreboardCoordinator"
+			}
+		]
+	},
 	"r2_buckets": [
 		{
 			"binding": "PRINT_CARD_IMAGES",
@@ -128,7 +145,8 @@
 	"vars": {
 		"JWT_ISSUER": "hitcon-2026",
 		"JWT_AUDIENCE": "nfc-battle-api-server",
-		"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304"
+		"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304",
+		"SCOREBOARD_REFRESH_SECONDS": "10"
 	},
 	"env": {
 		"staging": {
@@ -146,6 +164,14 @@
 					"database_id": "40de2dc1-acc7-4540-8dc7-bb74bace4977"
 				}
 			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "SCOREBOARD_COORDINATOR",
+						"class_name": "ScoreboardCoordinator"
+					}
+				]
+			},
 			"r2_buckets": [
 				{
 					"binding": "PRINT_CARD_IMAGES",
@@ -237,7 +263,8 @@
 			"vars": {
 				"JWT_ISSUER": "hitcon-2026-staging",
 				"JWT_AUDIENCE": "nfc-battle-api-server-staging",
-				"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304"
+				"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304",
+				"SCOREBOARD_REFRESH_SECONDS": "10"
 			}
 		},
 		"production": {
@@ -255,6 +282,14 @@
 					"database_id": "133fa8c1-bb61-4383-91b2-ff4ccfa88ead"
 				}
 			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "SCOREBOARD_COORDINATOR",
+						"class_name": "ScoreboardCoordinator"
+					}
+				]
+			},
 			"r2_buckets": [
 				{
 					"binding": "PRINT_CARD_IMAGES",
@@ -346,7 +381,8 @@
 			"vars": {
 				"JWT_ISSUER": "hitcon-2026",
 				"JWT_AUDIENCE": "nfc-battle-api-server",
-				"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304"
+				"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304",
+				"SCOREBOARD_REFRESH_SECONDS": "10"
 			}
 		}
 	}

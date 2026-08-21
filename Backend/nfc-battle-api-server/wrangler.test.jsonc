@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nfc-battle-api-server-test",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "migrations": [
+    {
+      "tag": "v1_scoreboard_coordinator",
+      "new_sqlite_classes": ["ScoreboardCoordinator"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "nfc-battle-api-server-test",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SCOREBOARD_COORDINATOR",
+        "class_name": "ScoreboardCoordinator"
+      }
+    ]
+  },
+  "vars": {
+    "JWT_ISSUER": "hitcon-2026-test",
+    "JWT_AUDIENCE": "nfc-battle-api-server-test",
+    "JWT_SECRET": "test-secret",
+    "STAFF_DANGER_TOKEN": "test-staff-token",
+    "PRINT_CARD_MAX_UPLOAD_BYTES": "4194304",
+    "SCOREBOARD_REFRESH_SECONDS": "10"
+  }
+}

@@ -39,6 +39,21 @@ npm test
 npm run typecheck
 ```
 
+`npm test` runs both the Node route suite and a local Workers-runtime suite for
+the scoreboard Durable Object, including alarms and persisted-state eviction.
+
+## Scoreboard Coordinator
+
+The `ScoreboardCoordinator` Durable Object is the source of truth for the
+published live or frozen score/rank snapshot. While scoring is open, its alarm
+targets the interval configured by `SCOREBOARD_REFRESH_SECONDS` (10 seconds in
+all current environments). The cron trigger runs once per minute as a watchdog
+that restarts refresh work after an alarm or object failure. Attendee scoreboard
+requests read the latest stored snapshot and do not recalculate global ranks.
+
+The Durable Object class migration is applied by Worker deployment through
+[`wrangler.jsonc`](./wrangler.jsonc); it is separate from the D1 migrations.
+
 ## OpenAPI Documentation
 
 Swagger UI is served by each deployed API at `/admin/docs/`:

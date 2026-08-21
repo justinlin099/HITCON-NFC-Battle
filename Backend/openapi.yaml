@@ -78,6 +78,14 @@ info:
     penalty is applied to the phishing victim. This formula may be finalized or
     changed in the future.
 
+    While scoring is `OPEN`, a single coordinator periodically publishes a
+    stored live score snapshot. The configured refresh interval is a
+    best-effort target, currently 10 seconds, so new collection and phishing
+    events appear after the next successful refresh. Scoreboard reads never
+    recalculate the global ranking. Display names, emoji icons, and external
+    prize claims remain live presentation data and do not change stored scores
+    or ranks.
+
     A scoreboard can stay in `FREEZING` only until the configured
     `freeze_timeout`. After that, the freeze is stale and staff may recover it
     with `POST /staff/resume_scoreboard`.
@@ -118,17 +126,16 @@ info:
 
     The following endpoints are available in `OPEN` and `FROZEN`, but rejected
     in `FREEZING`:
-    - `GET /scoreboard`; returns live scores in `OPEN`, returns the stored
-      freeze snapshot in `FROZEN`, and is rejected in `FREEZING` with
-      `SCOREBOARD_FREEZING` error.
-    - `GET /scoreboard/me`; returns the authenticated user's live rank and
-      score breakdown in `OPEN`, returns their rank and score breakdown from
-      the stored freeze snapshot in `FROZEN`, and is rejected in `FREEZING`
-      with `SCOREBOARD_FREEZING` error.
+    - `GET /scoreboard`; returns the latest stored live snapshot in `OPEN`,
+      returns the stored freeze snapshot in `FROZEN`, and is rejected in
+      `FREEZING` with `SCOREBOARD_FREEZING` error.
+    - `GET /scoreboard/me`; returns the authenticated user's rank and score
+      breakdown from the latest stored live snapshot in `OPEN`, returns their
+      values from the stored freeze snapshot in `FROZEN`, and is rejected in
+      `FREEZING` with `SCOREBOARD_FREEZING` error.
 
-    If the scoreboard state changes during a consistent read by either
-    endpoint, it is rejected with `SCOREBOARD_READ_INCONSISTENT` and clients
-    should retry.
+    If no valid stored snapshot is temporarily available, either endpoint is
+    rejected with `SCOREBOARD_READ_INCONSISTENT` and clients should retry.
 
     The following endpoints are state transition operations:
     - `POST /staff/freeze_scoreboard`: accepted only in `OPEN`; rejected in
@@ -616,9 +623,12 @@ paths:
       description: |
         Returns the global scoreboard using offset/limit pagination.
 
-        In `OPEN`, this endpoint returns live scores using the current
-        provisional formula: `score = 10 * num_of_collection - 10 *
-        num_of_phishing`. The phishing penalty is applied to the victim.
+        In `OPEN`, this endpoint returns a page from the latest periodically
+        published live snapshot. The refresh interval is a best-effort target,
+        currently 10 seconds. Scores use the provisional formula: `score = 10
+        * num_of_collection - 10 * num_of_phishing`. The phishing penalty is
+        applied to the victim. Separate page requests may observe different
+        snapshot generations if a refresh occurs between them.
 
         In `FREEZING`, this endpoint is rejected because a consistent snapshot
         is being calculated.
@@ -630,7 +640,7 @@ paths:
         live `external_prize` flag, which does not affect score, rank,
         or the freeze snapshot.
 
-        If the scoreboard state changes during a consistent read, the endpoint
+        If no valid stored snapshot is temporarily available, the endpoint
         returns `SCOREBOARD_READ_INCONSISTENT` and clients should retry.
       parameters:
         - in: query
@@ -665,7 +675,7 @@ paths:
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '409':
-          description: Scoreboard is freezing, or the read saw a transient scoreboard state change.
+          description: Scoreboard is freezing, or no valid stored snapshot is temporarily available.
           content:
             application/json:
               schema:
@@ -683,11 +693,12 @@ paths:
       summary: Get my current rank
       description: |
         Returns the authenticated user's global rank, score, collection count,
-        phishing count, and scoring constants. In `OPEN`, these values use live
-        data; in `FROZEN`, they use the stored scoreboard snapshot. Score fields
-        are null when the authenticated subject has no scoreboard entry. This
-        endpoint is rejected while the scoreboard is `FREEZING` or if its state
-        changes during the read.
+        phishing count, and scoring constants. In `OPEN`, these values use the
+        latest periodically published live snapshot; in `FROZEN`, they use the
+        stored freeze snapshot. Score fields are null when the authenticated
+        subject has no scoreboard entry. This endpoint is rejected while the
+        scoreboard is `FREEZING` or while no valid stored snapshot is
+        temporarily available.
       responses:
         '200':
           description: Current rank loaded.
@@ -701,7 +712,7 @@ paths:
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '409':
-          description: Scoreboard is freezing, or the read saw a transient scoreboard state change.
+          description: Scoreboard is freezing, or no valid stored snapshot is temporarily available.
           content:
             application/json:
               schema:
@@ -1267,7 +1278,7 @@ components:
             code: SCOREBOARD_NOT_FROZEN
             message: Scoreboard is not frozen yet.
     ScoreboardReadInconsistentError:
-      description: Scoreboard state changed during a consistent read; clients should retry.
+      description: Scoreboard data is temporarily unavailable; clients should retry.
       content:
         application/json:
           schema:
@@ -1275,7 +1286,7 @@ components:
           example:
             status: error
             code: SCOREBOARD_READ_INCONSISTENT
-            message: Scoreboard state changed while reading. Please retry.
+            message: Scoreboard data is temporarily unavailable. Please retry.
     PayloadTooLargeError:
       description: Request body exceeds the endpoint's size limit.
       content:
@@ -2434,7 +2445,7 @@ components:
       value:
         status: error
         code: SCOREBOARD_READ_INCONSISTENT
-        message: Scoreboard state changed while reading. Please retry.
+        message: Scoreboard data is temporarily unavailable. Please retry.
 
     GetScoreboardStatusResponse:
       value:
