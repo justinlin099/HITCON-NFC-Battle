@@ -9,6 +9,7 @@ import {
   requiredPhysicalTagId,
   requiredString,
 } from "./request";
+import { limitUserRequests } from "./rate-limit";
 import { errorResponse, success, successMessage } from "./responses";
 import { getTagOwner } from "./tag-store";
 import type { AppEnv } from "./types";
@@ -21,7 +22,7 @@ const collection = new Hono<AppEnv>();
 
 collection.use("*", requireAuth);
 
-collection.post("/scan", async (c) => {
+collection.post("/scan", limitUserRequests("COLLECTION_SCAN_RATE_LIMITER", "POST /collection/scan"), async (c) => {
   const authUser = c.get("authUser");
 
   const request = validateScanCollectionRequest(await readJson(c));
@@ -51,7 +52,7 @@ collection.post("/scan", async (c) => {
   });
 });
 
-collection.post("/phishing", async (c) => {
+collection.post("/phishing", limitUserRequests("PHISHING_RECORD_RATE_LIMITER", "POST /collection/phishing"), async (c) => {
   const authUser = c.get("authUser");
 
   const request = validatePhishingRequest(await readJson(c));

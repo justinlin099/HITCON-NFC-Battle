@@ -99,6 +99,18 @@ class TestR2Bucket {
   }
 }
 
+class TestRateLimit {
+  private readonly counts = new Map<string, number>();
+
+  constructor(private readonly limitValue: number) {}
+
+  async limit({ key }: { key: string }) {
+    const count = (this.counts.get(key) ?? 0) + 1;
+    this.counts.set(key, count);
+    return { success: count <= this.limitValue };
+  }
+}
+
 export interface TestServer {
   env: AppBindings;
   db: D1Database;
@@ -118,7 +130,23 @@ export async function createTestServer(): Promise<TestServer> {
     DB: db,
     ASSETS: {} as Fetcher,
     PRINT_CARD_IMAGES: new TestR2Bucket() as unknown as R2Bucket,
-    PRINT_CARD_MAX_UPLOAD_BYTES: "5242880",
+    AUTH_HEALTH_RATE_LIMITER: new TestRateLimit(10) as unknown as RateLimit,
+    MY_PROFILE_READ_RATE_LIMITER: new TestRateLimit(20) as unknown as RateLimit,
+    MY_PROFILE_UPDATE_RATE_LIMITER: new TestRateLimit(10) as unknown as RateLimit,
+    MY_PRIZE_READ_RATE_LIMITER: new TestRateLimit(20) as unknown as RateLimit,
+    MY_BOOTSTRAP_RATE_LIMITER: new TestRateLimit(3) as unknown as RateLimit,
+    USER_BATCH_READ_RATE_LIMITER: new TestRateLimit(20) as unknown as RateLimit,
+    USER_PROFILE_READ_RATE_LIMITER: new TestRateLimit(30) as unknown as RateLimit,
+    USER_COLLECTION_READ_RATE_LIMITER: new TestRateLimit(5) as unknown as RateLimit,
+    TAG_PAIR_RATE_LIMITER: new TestRateLimit(5) as unknown as RateLimit,
+    COLLECTION_SCAN_RATE_LIMITER: new TestRateLimit(30) as unknown as RateLimit,
+    PHISHING_RECORD_RATE_LIMITER: new TestRateLimit(3) as unknown as RateLimit,
+    STAMP_MISSION_READ_RATE_LIMITER: new TestRateLimit(60) as unknown as RateLimit,
+    SCOREBOARD_READ_RATE_LIMITER: new TestRateLimit(20) as unknown as RateLimit,
+    MY_SCOREBOARD_READ_RATE_LIMITER: new TestRateLimit(20) as unknown as RateLimit,
+    PRINT_CARD_USER_RATE_LIMITER: new TestRateLimit(5) as unknown as RateLimit,
+    PRINT_CARD_GLOBAL_RATE_LIMITER: new TestRateLimit(300) as unknown as RateLimit,
+    PRINT_CARD_MAX_UPLOAD_BYTES: "4194304",
     JWT_SECRET,
     STAFF_DANGER_TOKEN: "test-staff-token",
     JWT_ISSUER,

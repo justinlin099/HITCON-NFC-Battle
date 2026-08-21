@@ -8,11 +8,11 @@ A valid value for user's role:
 
 A user's data contains:
 * user ID (the hashed KKTIX user ID or whatever provided by JWT's issuer)
-* display name
+* display name, stored at no more than 100 UTF-8 bytes
 * user role
-* emoji icon
-* bio
-* pixel_avatar_base64: a base64-encoded 48x48 pixel avatar image
+* emoji icon, stored at no more than 64 UTF-8 bytes
+* bio, stored at no more than 4096 UTF-8 bytes
+* pixel_avatar_base64: an empty string or base64-encoded PNG no larger than 256 KiB after decoding; the API does not enforce image dimensions
 * first paired NFC tag physical ID, used as a backwards-compatible signal that the user has at least one paired tag
 * nfc_tag_key: a 6-byte key, encoded as a 12-character lowercase hex string, shared by all of the user's NFC tags and used to lock or unlock them
 * profile version
@@ -22,7 +22,7 @@ The collection table records which user IDs a user has previously scanned. A col
 
 `profile_version` and `collection_version` are integer versions stored on the user row. `profile_version` changes when profile fields change. `collection_version` changes only when that user's own collection changes. For example, when Alice scans Bob, Alice's `collection_version` changes, but Alice's `profile_version`, Bob's `profile_version` and `collection_version` do not change.
 
-The current `stamp_threshold` is 25. A user who collects at least 25 sponsor plus community stamps can win the stamp prize.
+The current `stamp_threshold` is 20. A user who collects at least 20 sponsor plus community stamps can win the stamp prize.
 
 The `rank_threshold` should be a configurable variable or a constant. The top ranked users can win a prize at the end of the conference.
 
@@ -34,13 +34,15 @@ The `freeze_timeout` should be a configurable variable or a constant, indicating
 
 JWT verification is simple: the backend verifies the token with a shared secret and HMAC. The JWT must contain `sub`, `exp`, `iss`, `aud`, and `role`. The JWT subject (`sub`) is the user's ID. The `role` claim is used for fast role lookup, so the backend does not need to query the database just to check the caller's role.
 
+Authenticated attendee endpoints are rate-limited per user and per endpoint over a 60-second window. Cache bootstrap and phishing allow 3 requests; tag pairing and collection browsing allow 5; authenticated health and profile updates allow 10; self-profile, prize, batch, and scoreboard reads allow 20; profile lookups and NFC scans allow 30; and stamp mission reads allow 60. `POST /print-cards` allows 5 attempts per user and 300 attempts per serving Cloudflare location. A rejected request returns `429 RATE_LIMITED` with `Retry-After: 60`. Cloudflare applies these counters independently at each location, so they are intended for abuse and quota protection rather than exact global accounting. Staff operations under `/staff/*` are not rate-limited by this policy.
+
 ## Before Conference Starts
 
 The user will receive an email, containing a link like `https://game.hitcon2026.online/b?whatever={whatever_related_to_the_user}`. This is hosted elsewhere, and will redirect to app store to download the mobile app.
 
 After downloading the app, the user will somehow setup the app, and somehow the app will obtain their JWT token.
 
-The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. The app should call it before pairing tags, scanning, recording phishing events, or using cache/bootstrap APIs that expect the authenticated user row to already exist. `POST /print-cards` can also lazy-initialize a user so the app can submit a print job directly with a valid JWT. The self-profile response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts.
+The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. The app should call it before pairing tags, scanning, recording phishing events, uploading a print-card image, or using cache/bootstrap APIs that expect the authenticated user row to already exist. The self-profile response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts. That endpoint silently truncates overlong text at UTF-8 character boundaries, rejects malformed or oversized non-empty PNG avatars, and limits the complete JSON body to 512 KiB.
 
 ## When Conference Starts, at Reception Desk
 
@@ -58,7 +60,7 @@ The user can still use `PATCH /users/me` to update their profile at any time.
 
 ### Printing and Pairing NFC Cards
 
-The app can call `POST /print-cards` with the user's JWT and one PNG image. The API stores the PNG in protected object storage, stores its opaque object metadata in D1, and returns a short token. The app renders that token as a barcode for the printing workflow. This endpoint may lazy-initialize the user when their JWT is valid. Each new upload replaces that user's previous print-card request: the old metadata and PNG object are replaced, the old R2 object is deleted, and the previous barcode token stops working.
+The app can call `POST /print-cards` with an initialized user's JWT and one PNG image. The default 4 MiB image limit allows a standard 85.5 mm by 54 mm card rendered at up to 300 DPI, including reasonable encoding room. The complete multipart request may use up to 64 KiB beyond the image limit. Upload attempts are limited to five per user and three hundred per serving Cloudflare location per minute. The API stores the PNG in protected object storage, stores its opaque object metadata in D1, and returns a short token. The app renders that token as a barcode for the printing workflow. Each new upload replaces that user's previous print-card request: the old metadata and PNG object are replaced, the old R2 object is deleted, and the previous barcode token stops working.
 
 After scanning the barcode, staff can call `GET /staff/print-cards/{short_token}` with a JWT whose `role` is `STAFF` to download the original PNG for printing.
 

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import { hasOnlyKeys, isPlainObject, readJson, requiredPhysicalTagId } from "./request";
+import { limitUserRequests } from "./rate-limit";
 import { errorResponse, successMessage } from "./responses";
 import { pairTag } from "./tag-store";
 import type { AppEnv } from "./types";
@@ -12,7 +13,7 @@ const tags = new Hono<AppEnv>();
 
 tags.use("*", requireAuth);
 
-tags.post("/pair", async (c) => {
+tags.post("/pair", limitUserRequests("TAG_PAIR_RATE_LIMITER", "POST /tags/pair"), async (c) => {
   const authUser = c.get("authUser");
 
   const request = validatePairTagRequest(await readJson(c));

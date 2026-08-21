@@ -36,11 +36,19 @@ info:
     the user row. `profile_version` changes when profile fields change.
     `collection_version` changes only when that user's own collection changes.
 
-    `GET /users/me` lazy-initializes a user profile. `POST /print-cards` also
-    lazy-initializes so an attendee can create a print job directly from a
-    valid JWT. The app should call `GET /users/me` before pairing tags,
-    scanning, recording phishing events, or using cache/bootstrap APIs that
+    `GET /users/me` is the only endpoint that lazy-initializes a user profile.
+    The app should call it before pairing tags, scanning, recording phishing
+    events, uploading a print-card image, or using cache/bootstrap APIs that
     expect the authenticated user row to already exist.
+
+    Authenticated attendee endpoints are rate-limited per JWT subject and per
+    endpoint over a 60-second window. Limits range from 3 requests for cache
+    bootstrap to 60 requests for stamp mission reads. Print-card
+    uploads additionally allow 300 attempts per serving Cloudflare location.
+    Rejected requests return `429 RATE_LIMITED` with `Retry-After: 60`.
+    Cloudflare applies these counters independently at each location, so they
+    are abuse and quota controls rather than exact global accounting. Staff
+    operations under `/staff/*` are excluded from this policy.
 
     `nfc_tag_key` is a per-user random 6-byte key encoded as a 12-character
     lowercase hex string. It is returned only in self-profile responses
@@ -175,6 +183,8 @@ paths:
                   $ref: '#/components/examples/GetMyUnpairedProfileResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
     patch:
       tags: [Users]
       summary: Update my profile
@@ -184,6 +194,12 @@ paths:
         `display_name`, `emoji_icon`, `bio`, and `pixel_avatar_base64`. If the
         submitted fields are identical to the stored profile, the server returns
         the current profile without incrementing `profile_version`.
+
+        Text fields are truncated without error at UTF-8 character boundaries:
+        `display_name` to 100 bytes, `emoji_icon` to 64 bytes, and `bio` to
+        4096 bytes. A non-empty avatar must be a base64-encoded PNG whose
+        decoded size does not exceed 256 KiB. Image dimensions are not checked.
+        The complete JSON request body must not exceed 512 KiB.
       requestBody:
         required: true
         content:
@@ -209,6 +225,10 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/me/prize:
     get:
       tags: [Users]
@@ -243,6 +263,8 @@ paths:
                   $ref: '#/components/examples/ScoreboardNotFrozenError'
                 read_inconsistent:
                   $ref: '#/components/examples/ScoreboardReadInconsistentError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/me/bootstrap:
     get:
       tags: [Users]
@@ -267,6 +289,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/batch:
     post:
       tags: [Users]
@@ -312,6 +336,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/{user_id}:
     get:
       tags: [Users]
@@ -371,6 +397,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/{user_id}/collection:
     get:
       tags: [Users]
@@ -420,6 +448,8 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /tags/pair:
     post:
       tags: [Tags]
@@ -468,6 +498,8 @@ paths:
           $ref: '#/components/responses/UserNotFoundError'
         '409':
           $ref: '#/components/responses/TagAlreadyPairedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /collection/scan:
     post:
       tags: [Collection]
@@ -512,6 +544,8 @@ paths:
           $ref: '#/components/responses/PhysicalIdMismatchError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /collection/phishing:
     post:
       tags: [Collection]
@@ -552,6 +586,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /missions/stamp:
     get:
       tags: [Missions]
@@ -571,6 +607,8 @@ paths:
                   $ref: '#/components/examples/GetStampMissionResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /scoreboard:
     get:
       tags: [Scoreboard]
@@ -637,6 +675,8 @@ paths:
                   $ref: '#/components/examples/ScoreboardFreezingError'
                 read_inconsistent:
                   $ref: '#/components/examples/ScoreboardReadInconsistentError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /scoreboard/me:
     get:
       tags: [Scoreboard]
@@ -671,6 +711,8 @@ paths:
                   $ref: '#/components/examples/ScoreboardFreezingError'
                 read_inconsistent:
                   $ref: '#/components/examples/ScoreboardReadInconsistentError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /staff/scoreboard_status:
     get:
       tags: [Staff]
@@ -924,7 +966,14 @@ paths:
         token as a barcode on the print card. The image is only downloadable by STAFF through
         `GET /staff/print-cards/{short_token}`. Each new upload replaces the
         authenticated user's previous request, deletes its old PNG object, and
-        invalidates its old token.
+        invalidates its old token. The user must already have been initialized
+        through `GET /users/me`.
+
+        The default 4 MiB image limit accommodates a standard 85.5 mm by 54 mm
+        card rendered at up to 300 DPI, with reasonable room beyond its raw
+        pixel data. Multipart framing may use up to 64 KiB beyond the configured
+        image limit. Upload attempts are limited to five per user and three
+        hundred per serving Cloudflare location per minute.
       requestBody:
         required: true
         content:
@@ -937,7 +986,7 @@ paths:
                 image:
                   type: string
                   format: binary
-                  description: PNG image. Its maximum size is configured by the Worker `PRINT_CARD_MAX_UPLOAD_BYTES` environment variable.
+                  description: PNG image. Its maximum size is configured by the Worker `PRINT_CARD_MAX_UPLOAD_BYTES` environment variable and defaults to 4 MiB.
       responses:
         '200':
           description: Image stored and barcode token issued.
@@ -949,12 +998,12 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
         '413':
-          description: PNG image is larger than the configured upload limit.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/PayloadTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /staff/print-cards/{short_token}:
     get:
       tags: [Staff, Print cards]
@@ -1227,6 +1276,32 @@ components:
             status: error
             code: SCOREBOARD_READ_INCONSISTENT
             message: Scoreboard state changed while reading. Please retry.
+    PayloadTooLargeError:
+      description: Request body exceeds the endpoint's size limit.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: PAYLOAD_TOO_LARGE
+            message: Request body exceeds the endpoint's size limit.
+    RateLimitError:
+      description: Too many requests were made within the configured rate-limit window.
+      headers:
+        Retry-After:
+          description: Seconds until the current rate-limit window ends.
+          schema:
+            type: integer
+            example: 60
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: RATE_LIMITED
+            message: Too many requests for this endpoint. Please retry later.
 
   schemas:
     ErrorResponse:
@@ -1252,6 +1327,7 @@ components:
             - SCOREBOARD_READ_INCONSISTENT
             - PRINT_CARD_NOT_FOUND
             - PAYLOAD_TOO_LARGE
+            - RATE_LIMITED
             - PRIZE_NOT_ELIGIBLE
             - PRIZE_ALREADY_CLAIMED
         message:
@@ -1297,19 +1373,21 @@ components:
           example: kktix_hash_abc123
         display_name:
           type: string
+          description: Stored display name, limited to 100 UTF-8 bytes.
           example: Hacker_Aries
         role:
           $ref: '#/components/schemas/UserRole'
         emoji_icon:
           type: string
-          description: Emoji character shown as the user's icon.
+          description: Icon text shown for the user, limited to 64 UTF-8 bytes.
           example: 🐱
         bio:
           type: string
+          description: User bio, limited to 4096 UTF-8 bytes. May be empty.
           example: I love reverse engineering.
         pixel_avatar_base64:
           type: string
-          description: Base64-encoded 48x48 pixel avatar image.
+          description: Base64-encoded PNG avatar, or an empty string. Non-empty decoded images are limited to 256 KiB; dimensions are not validated.
           example: iVBORw0KGgoAAAANSU...
         profile_version:
           type: integer
@@ -1419,22 +1497,25 @@ components:
       type: object
       description: |
         Partial profile update. Only `display_name`, `emoji_icon`, `bio`, and
-        `pixel_avatar_base64` are updatable.
+        `pixel_avatar_base64` are updatable. Overlong text is silently
+        truncated at a UTF-8 character boundary.
       additionalProperties: false
       properties:
         display_name:
           type: string
+          description: Must not be all whitespace. Values over 100 UTF-8 bytes are silently truncated.
           example: Aries_The_Great
         emoji_icon:
           type: string
-          description: Emoji character shown as the user's icon.
+          description: Must not be all whitespace. Values over 64 UTF-8 bytes are silently truncated.
           example: 🚀
         bio:
           type: string
+          description: May be empty. Values over 4096 UTF-8 bytes are silently truncated.
           example: Updated bio.
         pixel_avatar_base64:
           type: string
-          description: Base64-encoded 48x48 pixel avatar image.
+          description: Empty string or a base64-encoded PNG no larger than 256 KiB after decoding. Image dimensions are not validated.
           example: iVBORw0KGgo...
 
     GetUserProfileResponse:
@@ -1804,13 +1885,13 @@ components:
             stamp_threshold:
               type: integer
               description: Configurable threshold for sponsor plus community stamps.
-              example: 10
+              example: 20
             sponsor_count:
               type: integer
-              example: 6
+              example: 12
             community_count:
               type: integer
-              example: 5
+              example: 8
             eligible_for_stamp_prize:
               type: boolean
               example: true
@@ -2086,7 +2167,7 @@ components:
               example: '2026-04-12T15:01:12Z'
             stamp_threshold:
               type: integer
-              example: 10
+              example: 20
             rank_threshold:
               type: integer
               example: 10
@@ -2273,7 +2354,7 @@ components:
       value:
         status: success
         data:
-          stamp_threshold: 25
+          stamp_threshold: 20
           sponsor_count: 15
           community_count: 10
           eligible_for_stamp_prize: true
@@ -2379,5 +2460,5 @@ components:
           freeze_id: freeze_20260412_01
           scoring_cutoff_at: '2026-04-12T15:00:00Z'
           frozen_at: '2026-04-12T15:01:12Z'
-          stamp_threshold: 25
+          stamp_threshold: 20
           rank_threshold: 10

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import { getStampCounts } from "./collection-store";
 import { STAMP_THRESHOLD } from "./game-config";
+import { limitUserRequests } from "./rate-limit";
 import { success } from "./responses";
 import type { AppEnv } from "./types";
 
@@ -9,7 +10,7 @@ const missions = new Hono<AppEnv>();
 
 missions.use("*", requireAuth);
 
-missions.get("/stamp", async (c) => {
+missions.get("/stamp", limitUserRequests("STAMP_MISSION_READ_RATE_LIMITER", "GET /missions/stamp"), async (c) => {
   const authUser = c.get("authUser");
 
   const counts = await getStampCounts(c.env.DB, authUser.userId);

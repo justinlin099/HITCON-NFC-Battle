@@ -43,10 +43,92 @@
 			"bucket_name": "nfc-battle-print-cards"
 		}
 	],
+	"ratelimits": [
+		{
+			"name": "PRINT_CARD_USER_RATE_LIMITER",
+			"namespace_id": "2026082101",
+			"simple": { "limit": 5, "period": 60 }
+		},
+		{
+			"name": "PRINT_CARD_GLOBAL_RATE_LIMITER",
+			"namespace_id": "2026082102",
+			"simple": { "limit": 300, "period": 60 }
+		},
+		{
+			"name": "AUTH_HEALTH_RATE_LIMITER",
+			"namespace_id": "2026082131",
+			"simple": { "limit": 10, "period": 60 }
+		},
+		{
+			"name": "MY_PROFILE_READ_RATE_LIMITER",
+			"namespace_id": "2026082132",
+			"simple": { "limit": 20, "period": 60 }
+		},
+		{
+			"name": "MY_PROFILE_UPDATE_RATE_LIMITER",
+			"namespace_id": "2026082133",
+			"simple": { "limit": 10, "period": 60 }
+		},
+		{
+			"name": "MY_PRIZE_READ_RATE_LIMITER",
+			"namespace_id": "2026082134",
+			"simple": { "limit": 20, "period": 60 }
+		},
+		{
+			"name": "MY_BOOTSTRAP_RATE_LIMITER",
+			"namespace_id": "2026082135",
+			"simple": { "limit": 3, "period": 60 }
+		},
+		{
+			"name": "USER_BATCH_READ_RATE_LIMITER",
+			"namespace_id": "2026082136",
+			"simple": { "limit": 20, "period": 60 }
+		},
+		{
+			"name": "USER_PROFILE_READ_RATE_LIMITER",
+			"namespace_id": "2026082137",
+			"simple": { "limit": 30, "period": 60 }
+		},
+		{
+			"name": "USER_COLLECTION_READ_RATE_LIMITER",
+			"namespace_id": "2026082138",
+			"simple": { "limit": 5, "period": 60 }
+		},
+		{
+			"name": "TAG_PAIR_RATE_LIMITER",
+			"namespace_id": "2026082139",
+			"simple": { "limit": 5, "period": 60 }
+		},
+		{
+			"name": "COLLECTION_SCAN_RATE_LIMITER",
+			"namespace_id": "2026082140",
+			"simple": { "limit": 30, "period": 60 }
+		},
+		{
+			"name": "PHISHING_RECORD_RATE_LIMITER",
+			"namespace_id": "2026082141",
+			"simple": { "limit": 3, "period": 60 }
+		},
+		{
+			"name": "STAMP_MISSION_READ_RATE_LIMITER",
+			"namespace_id": "2026082142",
+			"simple": { "limit": 60, "period": 60 }
+		},
+		{
+			"name": "SCOREBOARD_READ_RATE_LIMITER",
+			"namespace_id": "2026082143",
+			"simple": { "limit": 20, "period": 60 }
+		},
+		{
+			"name": "MY_SCOREBOARD_READ_RATE_LIMITER",
+			"namespace_id": "2026082144",
+			"simple": { "limit": 20, "period": 60 }
+		}
+	],
 	"vars": {
 		"JWT_ISSUER": "hitcon-2026",
 		"JWT_AUDIENCE": "nfc-battle-api-server",
-		"PRINT_CARD_MAX_UPLOAD_BYTES": "5242880"
+		"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304"
 	},
 	"env": {
 		"staging": {
@@ -70,10 +152,92 @@
 					"bucket_name": "nfc-battle-print-cards-staging"
 				}
 			],
+			"ratelimits": [
+				{
+					"name": "PRINT_CARD_USER_RATE_LIMITER",
+					"namespace_id": "2026082111",
+					"simple": { "limit": 5, "period": 60 }
+				},
+				{
+					"name": "PRINT_CARD_GLOBAL_RATE_LIMITER",
+					"namespace_id": "2026082112",
+					"simple": { "limit": 300, "period": 60 }
+				},
+				{
+					"name": "AUTH_HEALTH_RATE_LIMITER",
+					"namespace_id": "2026082151",
+					"simple": { "limit": 10, "period": 60 }
+				},
+				{
+					"name": "MY_PROFILE_READ_RATE_LIMITER",
+					"namespace_id": "2026082152",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "MY_PROFILE_UPDATE_RATE_LIMITER",
+					"namespace_id": "2026082153",
+					"simple": { "limit": 10, "period": 60 }
+				},
+				{
+					"name": "MY_PRIZE_READ_RATE_LIMITER",
+					"namespace_id": "2026082154",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "MY_BOOTSTRAP_RATE_LIMITER",
+					"namespace_id": "2026082155",
+					"simple": { "limit": 3, "period": 60 }
+				},
+				{
+					"name": "USER_BATCH_READ_RATE_LIMITER",
+					"namespace_id": "2026082156",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "USER_PROFILE_READ_RATE_LIMITER",
+					"namespace_id": "2026082157",
+					"simple": { "limit": 30, "period": 60 }
+				},
+				{
+					"name": "USER_COLLECTION_READ_RATE_LIMITER",
+					"namespace_id": "2026082158",
+					"simple": { "limit": 5, "period": 60 }
+				},
+				{
+					"name": "TAG_PAIR_RATE_LIMITER",
+					"namespace_id": "2026082159",
+					"simple": { "limit": 5, "period": 60 }
+				},
+				{
+					"name": "COLLECTION_SCAN_RATE_LIMITER",
+					"namespace_id": "2026082160",
+					"simple": { "limit": 30, "period": 60 }
+				},
+				{
+					"name": "PHISHING_RECORD_RATE_LIMITER",
+					"namespace_id": "2026082161",
+					"simple": { "limit": 3, "period": 60 }
+				},
+				{
+					"name": "STAMP_MISSION_READ_RATE_LIMITER",
+					"namespace_id": "2026082162",
+					"simple": { "limit": 60, "period": 60 }
+				},
+				{
+					"name": "SCOREBOARD_READ_RATE_LIMITER",
+					"namespace_id": "2026082163",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "MY_SCOREBOARD_READ_RATE_LIMITER",
+					"namespace_id": "2026082164",
+					"simple": { "limit": 20, "period": 60 }
+				}
+			],
 			"vars": {
 				"JWT_ISSUER": "hitcon-2026-staging",
 				"JWT_AUDIENCE": "nfc-battle-api-server-staging",
-				"PRINT_CARD_MAX_UPLOAD_BYTES": "5242880"
+				"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304"
 			}
 		},
 		"production": {
@@ -97,10 +261,92 @@
 					"bucket_name": "nfc-battle-print-cards"
 				}
 			],
+			"ratelimits": [
+				{
+					"name": "PRINT_CARD_USER_RATE_LIMITER",
+					"namespace_id": "2026082121",
+					"simple": { "limit": 5, "period": 60 }
+				},
+				{
+					"name": "PRINT_CARD_GLOBAL_RATE_LIMITER",
+					"namespace_id": "2026082122",
+					"simple": { "limit": 300, "period": 60 }
+				},
+				{
+					"name": "AUTH_HEALTH_RATE_LIMITER",
+					"namespace_id": "2026082171",
+					"simple": { "limit": 10, "period": 60 }
+				},
+				{
+					"name": "MY_PROFILE_READ_RATE_LIMITER",
+					"namespace_id": "2026082172",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "MY_PROFILE_UPDATE_RATE_LIMITER",
+					"namespace_id": "2026082173",
+					"simple": { "limit": 10, "period": 60 }
+				},
+				{
+					"name": "MY_PRIZE_READ_RATE_LIMITER",
+					"namespace_id": "2026082174",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "MY_BOOTSTRAP_RATE_LIMITER",
+					"namespace_id": "2026082175",
+					"simple": { "limit": 3, "period": 60 }
+				},
+				{
+					"name": "USER_BATCH_READ_RATE_LIMITER",
+					"namespace_id": "2026082176",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "USER_PROFILE_READ_RATE_LIMITER",
+					"namespace_id": "2026082177",
+					"simple": { "limit": 30, "period": 60 }
+				},
+				{
+					"name": "USER_COLLECTION_READ_RATE_LIMITER",
+					"namespace_id": "2026082178",
+					"simple": { "limit": 5, "period": 60 }
+				},
+				{
+					"name": "TAG_PAIR_RATE_LIMITER",
+					"namespace_id": "2026082179",
+					"simple": { "limit": 5, "period": 60 }
+				},
+				{
+					"name": "COLLECTION_SCAN_RATE_LIMITER",
+					"namespace_id": "2026082180",
+					"simple": { "limit": 30, "period": 60 }
+				},
+				{
+					"name": "PHISHING_RECORD_RATE_LIMITER",
+					"namespace_id": "2026082181",
+					"simple": { "limit": 3, "period": 60 }
+				},
+				{
+					"name": "STAMP_MISSION_READ_RATE_LIMITER",
+					"namespace_id": "2026082182",
+					"simple": { "limit": 60, "period": 60 }
+				},
+				{
+					"name": "SCOREBOARD_READ_RATE_LIMITER",
+					"namespace_id": "2026082183",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "MY_SCOREBOARD_READ_RATE_LIMITER",
+					"namespace_id": "2026082184",
+					"simple": { "limit": 20, "period": 60 }
+				}
+			],
 			"vars": {
 				"JWT_ISSUER": "hitcon-2026",
 				"JWT_AUDIENCE": "nfc-battle-api-server",
-				"PRINT_CARD_MAX_UPLOAD_BYTES": "5242880"
+				"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304"
 			}
 		}
 	}

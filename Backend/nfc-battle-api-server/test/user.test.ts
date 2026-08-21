@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { authHeaders, createTestServer, jsonRequest, readJson } from "./helpers";
 
+const VALID_PNG_BASE64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString(
+  "base64",
+);
+
 describe("user profile behavior", () => {
   it("returns missing, limited, then full target profiles through the scan flow", async () => {
     const server = await createTestServer();
@@ -118,7 +122,7 @@ describe("user profile behavior", () => {
           display_name: "Bob",
           emoji_icon: "🚀",
           bio: "Updated Bob detail.",
-          pixel_avatar_base64: "iVBORw0KGgo...",
+          pixel_avatar_base64: VALID_PNG_BASE64,
         },
         bobAuth,
       ),
@@ -135,7 +139,7 @@ describe("user profile behavior", () => {
         display_name: "Bob",
         emoji_icon: "🚀",
         bio: "Updated Bob detail.",
-        pixel_avatar_base64: "iVBORw0KGgo...",
+        pixel_avatar_base64: VALID_PNG_BASE64,
         profile_version: 2,
       },
     });
@@ -206,8 +210,81 @@ describe("user profile behavior", () => {
     );
     expect(invalidUpdate.status).toBe(400);
 
+    const invalidAvatar = await server.request(
+      "/users/me",
+      await jsonRequest("PATCH", { pixel_avatar_base64: btoa("not a png") }, aliceAuth),
+    );
+    expect(invalidAvatar.status).toBe(400);
+
+    const acceptedLargerAvatarBytes = Buffer.alloc(64 * 1024 + 1);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(acceptedLargerAvatarBytes);
+    const acceptedLargerAvatar = await server.request(
+      "/users/me",
+      await jsonRequest(
+        "PATCH",
+        { pixel_avatar_base64: acceptedLargerAvatarBytes.toString("base64") },
+        aliceAuth,
+      ),
+    );
+    expect(acceptedLargerAvatar.status).toBe(200);
+
+    const oversizedAvatarBytes = Buffer.alloc(256 * 1024 + 1);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(oversizedAvatarBytes);
+    const oversizedAvatar = await server.request(
+      "/users/me",
+      await jsonRequest(
+        "PATCH",
+        { pixel_avatar_base64: oversizedAvatarBytes.toString("base64") },
+        aliceAuth,
+      ),
+    );
+    expect(oversizedAvatar.status).toBe(400);
+
+    const acceptedLargerBody = await server.request(
+      "/users/me",
+      await jsonRequest("PATCH", { bio: "a".repeat(128 * 1024) }, aliceAuth),
+    );
+    expect(acceptedLargerBody.status).toBe(200);
+
+    const oversizedBody = await server.request(
+      "/users/me",
+      await jsonRequest("PATCH", { bio: "a".repeat(512 * 1024) }, aliceAuth),
+    );
+    expect(oversizedBody.status).toBe(413);
+    await expect(readJson(oversizedBody)).resolves.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
+
     const prizeResult = await server.request("/users/me/prize", { headers: aliceAuth });
     expect(prizeResult.status).toBe(409);
+  });
+
+  it("truncates profile text at UTF-8 byte boundaries and accepts PNG avatars", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    await server.request("/users/me", { headers: aliceAuth });
+
+    const response = await server.request(
+      "/users/me",
+      await jsonRequest(
+        "PATCH",
+        {
+          display_name: "界".repeat(40),
+          emoji_icon: "🚀".repeat(20),
+          bio: "界".repeat(1400),
+          pixel_avatar_base64: VALID_PNG_BASE64,
+        },
+        aliceAuth,
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(readJson(response)).resolves.toMatchObject({
+      data: {
+        display_name: "界".repeat(33),
+        emoji_icon: "🚀".repeat(16),
+        bio: "界".repeat(1365),
+        pixel_avatar_base64: VALID_PNG_BASE64,
+      },
+    });
   });
 
   it("repairs missing NFC tag keys for imported user rows", async () => {

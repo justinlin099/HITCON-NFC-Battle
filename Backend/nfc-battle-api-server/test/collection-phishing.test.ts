@@ -18,19 +18,21 @@ describe("phishing event edge cases", () => {
 
   it("rejects invalid phishing request bodies", async () => {
     const server = await createTestServer();
-    const aliceAuth = await authHeaders("alice");
 
-    for (const body of [
+    const invalidBodies = [
       {},
       { victim: "alice" },
       { attacker: "bob" },
       { victim: "", attacker: "bob" },
       { victim: "alice", attacker: "" },
       { victim: "alice", attacker: "bob", extra: "nope" },
-    ]) {
+    ];
+
+    for (const [index, body] of invalidBodies.entries()) {
+      const auth = await authHeaders(`invalid-phishing-${index}`);
       const response = await server.request(
         "/collection/phishing",
-        await jsonRequest("POST", body, aliceAuth),
+        await jsonRequest("POST", body, auth),
       );
 
       expect(response.status).toBe(400);

@@ -1,7 +1,14 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import { getCollection, hasCollected } from "./collection-store";
-import { hasOnlyKeys, isPlainObject, readJson } from "./request";
+import {
+  hasOnlyKeys,
+  isPlainObject,
+  JSON_BODY_TOO_LARGE,
+  readJson,
+  readJsonWithLimit,
+} from "./request";
+import { limitUserRequests } from "./rate-limit";
 import { errorResponse, success } from "./responses";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { getPrizeResult } from "./freeze-snapshot-store";
@@ -25,12 +32,19 @@ const PATCHABLE_PROFILE_FIELDS = new Set([
   "pixel_avatar_base64",
 ]);
 const MAX_CONSISTENT_READ_ATTEMPTS = 2;
+const PROFILE_JSON_MAX_BYTES = 512 * 1024;
+const DISPLAY_NAME_MAX_BYTES = 100;
+const EMOJI_ICON_MAX_BYTES = 64;
+const BIO_MAX_BYTES = 4096;
+const AVATAR_MAX_BYTES = 256 * 1024;
+const AVATAR_MAX_BASE64_LENGTH = 4 * Math.ceil(AVATAR_MAX_BYTES / 3);
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 const users = new Hono<AppEnv>();
 
 users.use("*", requireAuth);
 
-users.get("/me", async (c) => {
+users.get("/me", limitUserRequests("MY_PROFILE_READ_RATE_LIMITER", "GET /users/me"), async (c) => {
   const authUser = c.get("authUser");
   await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
@@ -42,10 +56,13 @@ users.get("/me", async (c) => {
   return success(c, profile);
 });
 
-users.patch("/me", async (c) => {
+users.patch("/me", limitUserRequests("MY_PROFILE_UPDATE_RATE_LIMITER", "PATCH /users/me"), async (c) => {
   const authUser = c.get("authUser");
 
-  const body = await readJson(c);
+  const body = await readJsonWithLimit(c, PROFILE_JSON_MAX_BYTES);
+  if (body === JSON_BODY_TOO_LARGE) {
+    return errorResponse(c, 413, "PAYLOAD_TOO_LARGE", "JSON body must be at most 512 KiB.");
+  }
   const update = validateProfileUpdate(body);
   if (!update) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
@@ -61,7 +78,7 @@ users.patch("/me", async (c) => {
   return success(c, profile);
 });
 
-users.get("/me/prize", async (c) => {
+users.get("/me/prize", limitUserRequests("MY_PRIZE_READ_RATE_LIMITER", "GET /users/me/prize"), async (c) => {
   const authUser = c.get("authUser");
 
   for (let attempt = 0; attempt < MAX_CONSISTENT_READ_ATTEMPTS; attempt += 1) {
@@ -92,7 +109,7 @@ users.get("/me/prize", async (c) => {
   );
 });
 
-users.get("/me/bootstrap", async (c) => {
+users.get("/me/bootstrap", limitUserRequests("MY_BOOTSTRAP_RATE_LIMITER", "GET /users/me/bootstrap"), async (c) => {
   const authUser = c.get("authUser");
 
   const me = await getSelfProfile(c.env.DB, authUser.userId);
@@ -115,7 +132,7 @@ users.get("/me/bootstrap", async (c) => {
   });
 });
 
-users.post("/batch", async (c) => {
+users.post("/batch", limitUserRequests("USER_BATCH_READ_RATE_LIMITER", "POST /users/batch"), async (c) => {
   const authUser = c.get("authUser");
 
   const request = validateBatchGetUsersRequest(await readJson(c));
@@ -157,7 +174,7 @@ users.post("/batch", async (c) => {
   return success(c, { results });
 });
 
-users.get("/:user_id", async (c) => {
+users.get("/:user_id", limitUserRequests("USER_PROFILE_READ_RATE_LIMITER", "GET /users/{user_id}"), async (c) => {
   const authUser = c.get("authUser");
   const userId = c.req.param("user_id").trim();
   if (userId === "") {
@@ -194,7 +211,7 @@ users.get("/:user_id", async (c) => {
   return success(c, getVisibleProfile(row, canViewFullProfile));
 });
 
-users.get("/:user_id/collection", async (c) => {
+users.get("/:user_id/collection", limitUserRequests("USER_COLLECTION_READ_RATE_LIMITER", "GET /users/{user_id}/collection"), async (c) => {
   const authUser = c.get("authUser");
   const userId = c.req.param("user_id").trim();
   if (userId === "") {
@@ -249,10 +266,57 @@ function validateProfileUpdate(value: unknown): ProfileUpdate | null {
       return null;
     }
 
-    update[key as keyof ProfileUpdate] = fieldValue;
+    if (key === "pixel_avatar_base64") {
+      if (!isValidAvatar(fieldValue)) {
+        return null;
+      }
+      update.pixel_avatar_base64 = fieldValue;
+      continue;
+    }
+
+    const maxBytes = key === "display_name"
+      ? DISPLAY_NAME_MAX_BYTES
+      : key === "emoji_icon"
+        ? EMOJI_ICON_MAX_BYTES
+        : BIO_MAX_BYTES;
+    update[key as "display_name" | "emoji_icon" | "bio"] = truncateUtf8(fieldValue, maxBytes);
   }
 
   return update;
+}
+
+function truncateUtf8(value: string, maxBytes: number) {
+  const encoder = new TextEncoder();
+  let result = "";
+  let byteLength = 0;
+  for (const character of value) {
+    const characterBytes = encoder.encode(character).byteLength;
+    if (byteLength + characterBytes > maxBytes) {
+      break;
+    }
+    result += character;
+    byteLength += characterBytes;
+  }
+  return result;
+}
+
+function isValidAvatar(value: string) {
+  if (value === "") {
+    return true;
+  }
+  if (value.length > AVATAR_MAX_BASE64_LENGTH) {
+    return false;
+  }
+
+  try {
+    const decoded = atob(value);
+    if (decoded.length > AVATAR_MAX_BYTES || decoded.length < PNG_SIGNATURE.length) {
+      return false;
+    }
+    return PNG_SIGNATURE.every((byte, index) => decoded.charCodeAt(index) === byte);
+  } catch {
+    return false;
+  }
 }
 
 interface BatchGetUserItem {

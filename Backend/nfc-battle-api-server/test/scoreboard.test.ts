@@ -23,7 +23,7 @@ describe("mission and scoreboard edge cases", () => {
     expect(response.status).toBe(200);
     await expect(readJson(response)).resolves.toMatchObject({
       data: {
-        stamp_threshold: 25,
+        stamp_threshold: 20,
         sponsor_count: 0,
         community_count: 0,
         eligible_for_stamp_prize: false,
@@ -369,7 +369,7 @@ describe("mission and scoreboard edge cases", () => {
       },
     });
 
-    for (let index = 0; index < 25; index += 1) {
+    for (let index = 0; index < 20; index += 1) {
       const sponsorId = `post-freeze-sponsor-${index}`;
       const sponsorTagId = `04:00:00:00:00:01:${index.toString(16).toUpperCase().padStart(2, "0")}`;
       const sponsorAuth = await authHeaders(sponsorId, "SPONSOR");
@@ -382,7 +382,7 @@ describe("mission and scoreboard edge cases", () => {
     expect(liveMission.status).toBe(200);
     await expect(readJson(liveMission)).resolves.toMatchObject({
       data: {
-        sponsor_count: 25,
+        sponsor_count: 20,
         community_count: 0,
         eligible_for_stamp_prize: true,
       },

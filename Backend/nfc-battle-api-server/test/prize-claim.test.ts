@@ -77,7 +77,7 @@ describe("staff prize claims", () => {
     const alice = await initializeUser(server, "alice");
     await pairTag(server, alice.headers, "04:00:00:00:00:00:08");
 
-    for (let index = 0; index < 25; index += 1) {
+    for (let index = 0; index < 20; index += 1) {
       const sponsorId = `sponsor-${index}`;
       await initializeUser(server, sponsorId, "SPONSOR");
       await server.db

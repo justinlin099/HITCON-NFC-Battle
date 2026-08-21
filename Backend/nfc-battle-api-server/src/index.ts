@@ -4,6 +4,7 @@ import { requireAuth } from "./auth";
 import { nowIso } from "./ids";
 import missionRoutes from "./mission-routes";
 import printCardRoutes from "./print-card-routes";
+import { limitUserRequests } from "./rate-limit";
 import { success } from "./responses";
 import scoreboardRoutes from "./scoreboard-routes";
 import { requireStaffRole } from "./staff";
@@ -22,7 +23,7 @@ app.get("/health", (c) => {
   });
 });
 
-app.get("/health/auth", requireAuth, (c) => {
+app.get("/health/auth", requireAuth, limitUserRequests("AUTH_HEALTH_RATE_LIMITER", "GET /health/auth"), (c) => {
   return success(c, {
     user: c.get("authUser"),
   });

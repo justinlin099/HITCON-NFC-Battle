@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authHeaders, createTestServer, readJson } from "./helpers";
+import { authHeaders, createTestServer, initializeUser, readJson } from "./helpers";
 
 const PNG_BYTES = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
@@ -8,7 +8,7 @@ const PNG_BYTES = new Uint8Array([
 describe("print cards", () => {
   it("issues a short token for a PNG and only lets staff download it", async () => {
     const server = await createTestServer();
-    const attendeeHeaders = await authHeaders("alice");
+    const { headers: attendeeHeaders } = await initializeUser(server, "alice");
     const form = new FormData();
     form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");
 
@@ -50,12 +50,13 @@ describe("print cards", () => {
 
   it("rejects non-PNG print-card uploads", async () => {
     const server = await createTestServer();
+    const { headers } = await initializeUser(server, "alice");
     const form = new FormData();
     form.append("image", new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }), "bad.png");
 
     const response = await server.request("/print-cards", {
       method: "POST",
-      headers: await authHeaders("alice"),
+      headers,
       body: form,
     });
 
@@ -65,13 +66,32 @@ describe("print cards", () => {
 
   it("uses the configured environment upload limit", async () => {
     const server = await createTestServer();
+    const { headers } = await initializeUser(server, "alice");
     (server.env as unknown as { PRINT_CARD_MAX_UPLOAD_BYTES: string }).PRINT_CARD_MAX_UPLOAD_BYTES = "8";
     const form = new FormData();
     form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");
 
     const response = await server.request("/print-cards", {
       method: "POST",
-      headers: await authHeaders("alice"),
+      headers,
+      body: form,
+    });
+
+    expect(response.status).toBe(413);
+    await expect(readJson(response)).resolves.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
+  });
+
+  it("bounds the complete multipart request before parsing it", async () => {
+    const server = await createTestServer();
+    const { headers } = await initializeUser(server, "alice");
+    (server.env as unknown as { PRINT_CARD_MAX_UPLOAD_BYTES: string }).PRINT_CARD_MAX_UPLOAD_BYTES = "8";
+    const form = new FormData();
+    form.append("image", new Blob([PNG_BYTES.slice(0, 8)], { type: "image/png" }), "card.png");
+    form.append("padding", "a".repeat(70 * 1024));
+
+    const response = await server.request("/print-cards", {
+      method: "POST",
+      headers,
       body: form,
     });
 
@@ -81,7 +101,7 @@ describe("print cards", () => {
 
   it("replaces a user's previous request and deletes its R2 object", async () => {
     const server = await createTestServer();
-    const headers = await authHeaders("alice");
+    const { headers } = await initializeUser(server, "alice");
     const upload = async () => {
       const form = new FormData();
       form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");
@@ -111,5 +131,59 @@ describe("print cards", () => {
       headers: await authHeaders("staff", "STAFF"),
     });
     expect(oldToken.status).toBe(404);
+  });
+
+  it("requires the authenticated user to be initialized", async () => {
+    const server = await createTestServer();
+    const headers = await authHeaders("alice");
+    const form = new FormData();
+    form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");
+
+    const response = await server.request("/print-cards", { method: "POST", headers, body: form });
+
+    expect(response.status).toBe(404);
+    await expect(readJson(response)).resolves.toMatchObject({ code: "USER_NOT_FOUND" });
+    await expect(
+      server.db.prepare("SELECT user_id FROM users WHERE user_id = ?1").bind("alice").first(),
+    ).resolves.toBeNull();
+  });
+
+  it("limits each user to five upload attempts per minute", async () => {
+    const server = await createTestServer();
+    const { headers } = await initializeUser(server, "alice");
+    const upload = () => {
+      const form = new FormData();
+      form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");
+      return server.request("/print-cards", { method: "POST", headers, body: form });
+    };
+
+    expect((await upload()).status).toBe(200);
+    expect((await upload()).status).toBe(200);
+    expect((await upload()).status).toBe(200);
+    expect((await upload()).status).toBe(200);
+    expect((await upload()).status).toBe(200);
+    const limited = await upload();
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBe("60");
+    await expect(readJson(limited)).resolves.toMatchObject({ code: "RATE_LIMITED" });
+  });
+
+  it("limits all users to three hundred upload attempts per minute", async () => {
+    const server = await createTestServer();
+
+    for (let index = 0; index < 300; index += 1) {
+      const { headers } = await initializeUser(server, `attendee-${index}`);
+      const form = new FormData();
+      form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");
+      const response = await server.request("/print-cards", { method: "POST", headers, body: form });
+      expect(response.status).toBe(200);
+    }
+
+    const { headers } = await initializeUser(server, "attendee-over-limit");
+    const form = new FormData();
+    form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");
+    const limited = await server.request("/print-cards", { method: "POST", headers, body: form });
+    expect(limited.status).toBe(429);
+    await expect(readJson(limited)).resolves.toMatchObject({ code: "RATE_LIMITED" });
   });
 });
