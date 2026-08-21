@@ -353,8 +353,15 @@ const Map<String, String> appStringsKo = <String, String>{
   "unlockTag": "태그 잠금 해제",
   "scoreboardControlShort": "점수판",
   "staffPairUserTag": "사용자 태그 페어링",
-  "staffPairUserPrompt": "사용자 ID를 입력한 다음 비어 있거나 잠금 해제된 NTAG를 준비하세요.",
+  "staffPairUserPrompt": "사용자 ID를 직접 입력하거나 기존 NTAG에서 먼저 읽으세요.",
   "staffPairUserIdRequired": "페어링할 사용자 ID를 입력하세요.",
+  "staffPairReadUserId": "NTAG에서 사용자 ID 읽기",
+  "staffPairReadUserIdHoldTag": "사용자 URL이 있는 NTAG를 스캔하세요.",
+  "staffPairUserIdReadMissing":
+      "NTAG에서 game.hitcon2026.online/b?u=... 를 찾을 수 없습니다.",
+  "staffPairUserIdReadComplete":
+      "사용자 ID를 읽었습니다: {userId}. 이제 태그 페어링 시작을 누르고 다른 빈 태그를 스캔하세요.",
+  "staffPairUserIdReadFailed": "사용자 ID를 읽지 못했습니다: {error}",
   "staffPairHoldTag": "전화기 근처에 NTAG를 잡고 가만히 두십시오.",
   "staffPairUserDescription":
       "앱은 사용자 URL을 작성하고, 서버에서 UID를 페어링하고, 사용자 잠금 해제 코드를 로드하고, 태그를 보호합니다.",
@@ -363,7 +370,9 @@ const Map<String, String> appStringsKo = <String, String>{
   "staffPairFailed": "페어링이 완료되지 않았습니다: {error}",
   "staffPairStart": "태그 페어링 시작",
   "staffUnpairUserTag": "사용자 태그 페어링 해제",
-  "staffUnpairUserPrompt": "페어링된 사용자 ID를 입력한 후 실제 태그를 스캔하세요.",
+  "staffUnpairUserPrompt": "사용자 ID를 직접 입력하거나 페어링된 NTAG에서 먼저 읽으세요.",
+  "staffUnpairUserIdReadComplete":
+      "사용자 ID를 읽었습니다: {userId}. 이제 태그 페어링 해제를 누르고 이 태그를 다시 스캔하세요.",
   "staffUnpairUserDescription":
       "이렇게 하면 서버 페어링만 제거됩니다. 태그를 지우거나 잠금 해제하지는 않습니다. 태그를 다시 작성해야 하는 경우 먼저 태그를 잠금 해제하세요.",
   "staffUnpairUserIdRequired": "페어링을 해제하려면 사용자 ID를 입력하세요.",

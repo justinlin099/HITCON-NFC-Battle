@@ -396,8 +396,15 @@ const Map<String, String> appStringsEn = <String, String>{
   'scoreboardControlShort': 'Scoreboard',
   'staffPairUserTag': 'PAIR USER TAG',
   'staffPairUserPrompt':
-      'Enter a User ID, then prepare a blank or unlocked NTAG.',
+      'Enter a User ID manually or read it from an existing NTAG first.',
   'staffPairUserIdRequired': 'Enter the User ID to pair.',
+  'staffPairReadUserId': 'Read User ID from NTAG',
+  'staffPairReadUserIdHoldTag': 'Scan the NTAG that contains the user URL.',
+  'staffPairUserIdReadMissing':
+      'No game.hitcon2026.online/b?u=... URL was found on the NTAG.',
+  'staffPairUserIdReadComplete':
+      'Read User ID: {userId}. Now tap Start Tag pairing and scan a different blank tag.',
+  'staffPairUserIdReadFailed': 'Could not read User ID: {error}',
   'staffPairHoldTag': 'Hold the NTAG near the phone and keep it still.',
   'staffPairUserDescription':
       'The App writes the user URL, pairs the UID on the server, loads the user unlock code, and protects the Tag.',
@@ -408,7 +415,9 @@ const Map<String, String> appStringsEn = <String, String>{
   'staffPairStart': 'Start Tag pairing',
   'staffUnpairUserTag': 'UNPAIR USER TAG',
   'staffUnpairUserPrompt':
-      'Enter the paired User ID, then scan the physical Tag.',
+      'Enter the User ID manually or read it from the paired NTAG first.',
+  'staffUnpairUserIdReadComplete':
+      'Read User ID: {userId}. Now tap Scan Tag to unpair and scan this Tag again.',
   'staffUnpairUserDescription':
       'This removes only the server pairing. It does not erase or unlock the Tag. Unlock the Tag first if it must be rewritten.',
   'staffUnpairUserIdRequired': 'Enter the User ID to unpair.',
