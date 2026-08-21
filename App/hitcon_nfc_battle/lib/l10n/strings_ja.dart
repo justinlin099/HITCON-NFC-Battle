@@ -357,8 +357,15 @@ const Map<String, String> appStringsJa = <String, String>{
   "unlockTag": "タグのロックを解除する",
   "scoreboardControlShort": "スコアボード",
   "staffPairUserTag": "ユーザータグのペアリング",
-  "staffPairUserPrompt": "ユーザーIDを入力し、空白またはロック解除されたNTAGを準備します。",
-  "staffPairUserIdRequired": "ペアリングするユーザーIDを入力します。",
+  "staffPairUserPrompt": "ユーザー ID を手動入力するか、既存の NTAG から先に読み取ります。",
+  "staffPairUserIdRequired": "ペアリングするユーザー ID を入力してください。",
+  "staffPairReadUserId": "NTAG からユーザー ID を読み取る",
+  "staffPairReadUserIdHoldTag": "ユーザー URL を含む NTAG をスキャンしてください。",
+  "staffPairUserIdReadMissing":
+      "NTAG に game.hitcon2026.online/b?u=... が見つかりません。",
+  "staffPairUserIdReadComplete":
+      "ユーザー ID を読み取りました: {userId}。次にタグのペアリングを開始し、別の空白タグをスキャンしてください。",
+  "staffPairUserIdReadFailed": "ユーザー ID の読み取りに失敗しました: {error}",
   "staffPairHoldTag": "NTAG を電話機の近くに持ち、動かさないようにします。",
   "staffPairUserDescription":
       "アプリはユーザー URL を書き込み、サーバー上で UID をペアリングし、ユーザーのロック解除コードをロードして、タグを保護します。",
@@ -367,7 +374,9 @@ const Map<String, String> appStringsJa = <String, String>{
   "staffPairFailed": "ペアリングが完了しませんでした: {error}",
   "staffPairStart": "タグペアリングの開始",
   "staffUnpairUserTag": "ユーザータグのペアリングを解除する",
-  "staffUnpairUserPrompt": "ペアになったユーザー ID を入力し、物理タグをスキャンします。",
+  "staffUnpairUserPrompt": "ユーザー ID を手動入力するか、ペアリング済みの NTAG から先に読み取ります。",
+  "staffUnpairUserIdReadComplete":
+      "ユーザー ID を読み取りました: {userId}。次にペアリング解除を開始し、このタグをもう一度スキャンしてください。",
   "staffUnpairUserDescription":
       "これにより、サーバーのペアリングのみが削除されます。タグを消去したりロックを解除したりすることはありません。タグを書き換える必要がある場合は、まずタグのロックを解除してください。",
   "staffUnpairUserIdRequired": "ペアリングを解除するユーザー ID を入力します。",
