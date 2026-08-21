@@ -34,9 +34,23 @@ export interface JwtPayload {
   role: UserRole;
 }
 
+export type UserRateLimitBinding =
+  | "USER_RARE_RATE_LIMITER"
+  | "USER_SENSITIVE_RATE_LIMITER"
+  | "USER_HEAVY_RATE_LIMITER"
+  | "USER_PROFILE_RATE_LIMITER"
+  | "USER_STANDARD_RATE_LIMITER"
+  | "USER_HIGH_RATE_LIMITER";
+
 export interface AppBindings extends CloudflareBindings {
   JWT_SECRET: string;
   STAFF_DANGER_TOKEN: string;
+  USER_RARE_RATE_LIMITER: RateLimit;
+  USER_SENSITIVE_RATE_LIMITER: RateLimit;
+  USER_HEAVY_RATE_LIMITER: RateLimit;
+  USER_PROFILE_RATE_LIMITER: RateLimit;
+  USER_STANDARD_RATE_LIMITER: RateLimit;
+  USER_HIGH_RATE_LIMITER: RateLimit;
   PRINT_CARD_USER_RATE_LIMITER: RateLimit;
   PRINT_CARD_GLOBAL_RATE_LIMITER: RateLimit;
 }

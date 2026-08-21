@@ -47,12 +47,42 @@
 		{
 			"name": "PRINT_CARD_USER_RATE_LIMITER",
 			"namespace_id": "2026082101",
-			"simple": { "limit": 2, "period": 60 }
+			"simple": { "limit": 5, "period": 60 }
 		},
 		{
 			"name": "PRINT_CARD_GLOBAL_RATE_LIMITER",
 			"namespace_id": "2026082102",
+			"simple": { "limit": 300, "period": 60 }
+		},
+		{
+			"name": "USER_RARE_RATE_LIMITER",
+			"namespace_id": "2026082103",
+			"simple": { "limit": 5, "period": 60 }
+		},
+		{
+			"name": "USER_SENSITIVE_RATE_LIMITER",
+			"namespace_id": "2026082104",
+			"simple": { "limit": 10, "period": 60 }
+		},
+		{
+			"name": "USER_HEAVY_RATE_LIMITER",
+			"namespace_id": "2026082105",
+			"simple": { "limit": 20, "period": 60 }
+		},
+		{
+			"name": "USER_PROFILE_RATE_LIMITER",
+			"namespace_id": "2026082106",
 			"simple": { "limit": 30, "period": 60 }
+		},
+		{
+			"name": "USER_STANDARD_RATE_LIMITER",
+			"namespace_id": "2026082107",
+			"simple": { "limit": 60, "period": 60 }
+		},
+		{
+			"name": "USER_HIGH_RATE_LIMITER",
+			"namespace_id": "2026082108",
+			"simple": { "limit": 120, "period": 60 }
 		}
 	],
 	"vars": {
@@ -86,12 +116,42 @@
 				{
 					"name": "PRINT_CARD_USER_RATE_LIMITER",
 					"namespace_id": "2026082111",
-					"simple": { "limit": 2, "period": 60 }
+					"simple": { "limit": 5, "period": 60 }
 				},
 				{
 					"name": "PRINT_CARD_GLOBAL_RATE_LIMITER",
 					"namespace_id": "2026082112",
+					"simple": { "limit": 300, "period": 60 }
+				},
+				{
+					"name": "USER_RARE_RATE_LIMITER",
+					"namespace_id": "2026082113",
+					"simple": { "limit": 5, "period": 60 }
+				},
+				{
+					"name": "USER_SENSITIVE_RATE_LIMITER",
+					"namespace_id": "2026082114",
+					"simple": { "limit": 10, "period": 60 }
+				},
+				{
+					"name": "USER_HEAVY_RATE_LIMITER",
+					"namespace_id": "2026082115",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "USER_PROFILE_RATE_LIMITER",
+					"namespace_id": "2026082116",
 					"simple": { "limit": 30, "period": 60 }
+				},
+				{
+					"name": "USER_STANDARD_RATE_LIMITER",
+					"namespace_id": "2026082117",
+					"simple": { "limit": 60, "period": 60 }
+				},
+				{
+					"name": "USER_HIGH_RATE_LIMITER",
+					"namespace_id": "2026082118",
+					"simple": { "limit": 120, "period": 60 }
 				}
 			],
 			"vars": {
@@ -125,12 +185,42 @@
 				{
 					"name": "PRINT_CARD_USER_RATE_LIMITER",
 					"namespace_id": "2026082121",
-					"simple": { "limit": 2, "period": 60 }
+					"simple": { "limit": 5, "period": 60 }
 				},
 				{
 					"name": "PRINT_CARD_GLOBAL_RATE_LIMITER",
 					"namespace_id": "2026082122",
+					"simple": { "limit": 300, "period": 60 }
+				},
+				{
+					"name": "USER_RARE_RATE_LIMITER",
+					"namespace_id": "2026082123",
+					"simple": { "limit": 5, "period": 60 }
+				},
+				{
+					"name": "USER_SENSITIVE_RATE_LIMITER",
+					"namespace_id": "2026082124",
+					"simple": { "limit": 10, "period": 60 }
+				},
+				{
+					"name": "USER_HEAVY_RATE_LIMITER",
+					"namespace_id": "2026082125",
+					"simple": { "limit": 20, "period": 60 }
+				},
+				{
+					"name": "USER_PROFILE_RATE_LIMITER",
+					"namespace_id": "2026082126",
 					"simple": { "limit": 30, "period": 60 }
+				},
+				{
+					"name": "USER_STANDARD_RATE_LIMITER",
+					"namespace_id": "2026082127",
+					"simple": { "limit": 60, "period": 60 }
+				},
+				{
+					"name": "USER_HIGH_RATE_LIMITER",
+					"namespace_id": "2026082128",
+					"simple": { "limit": 120, "period": 60 }
 				}
 			],
 			"vars": {

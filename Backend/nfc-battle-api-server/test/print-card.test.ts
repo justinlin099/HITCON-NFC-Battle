@@ -148,7 +148,7 @@ describe("print cards", () => {
     ).resolves.toBeNull();
   });
 
-  it("limits each user to two upload attempts per minute", async () => {
+  it("limits each user to five upload attempts per minute", async () => {
     const server = await createTestServer();
     const { headers } = await initializeUser(server, "alice");
     const upload = () => {
@@ -159,16 +159,19 @@ describe("print cards", () => {
 
     expect((await upload()).status).toBe(200);
     expect((await upload()).status).toBe(200);
+    expect((await upload()).status).toBe(200);
+    expect((await upload()).status).toBe(200);
+    expect((await upload()).status).toBe(200);
     const limited = await upload();
     expect(limited.status).toBe(429);
     expect(limited.headers.get("Retry-After")).toBe("60");
     await expect(readJson(limited)).resolves.toMatchObject({ code: "RATE_LIMITED" });
   });
 
-  it("limits all users to thirty upload attempts per minute", async () => {
+  it("limits all users to three hundred upload attempts per minute", async () => {
     const server = await createTestServer();
 
-    for (let index = 0; index < 30; index += 1) {
+    for (let index = 0; index < 300; index += 1) {
       const { headers } = await initializeUser(server, `attendee-${index}`);
       const form = new FormData();
       form.append("image", new Blob([PNG_BYTES], { type: "image/png" }), "card.png");

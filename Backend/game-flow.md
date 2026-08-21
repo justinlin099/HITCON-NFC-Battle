@@ -34,6 +34,8 @@ The `freeze_timeout` should be a configurable variable or a constant, indicating
 
 JWT verification is simple: the backend verifies the token with a shared secret and HMAC. The JWT must contain `sub`, `exp`, `iss`, `aud`, and `role`. The JWT subject (`sub`) is the user's ID. The `role` claim is used for fast role lookup, so the backend does not need to query the database just to check the caller's role.
 
+Authenticated attendee endpoints are rate-limited per user and per endpoint over a 60-second window. The limits are 5 requests for bootstrap and tag pairing, 10 for phishing, 20 for profile updates and collection browsing, 30 for self-profile and prize reads plus batch refresh, 60 for health, mission, and scoreboard reads, and 120 for profile lookups and NFC scans. `POST /print-cards` allows 5 attempts per user and 300 attempts per serving Cloudflare location. A rejected request returns `429 RATE_LIMITED` with `Retry-After: 60`. Cloudflare applies these counters independently at each location, so they are intended for abuse and quota protection rather than exact global accounting. Staff operations under `/staff/*` are not rate-limited by this policy.
+
 ## Before Conference Starts
 
 The user will receive an email, containing a link like `https://game.hitcon2026.online/b?whatever={whatever_related_to_the_user}`. This is hosted elsewhere, and will redirect to app store to download the mobile app.
@@ -58,7 +60,7 @@ The user can still use `PATCH /users/me` to update their profile at any time.
 
 ### Printing and Pairing NFC Cards
 
-The app can call `POST /print-cards` with an initialized user's JWT and one PNG image. The default 4 MiB image limit allows a standard 85.5 mm by 54 mm card rendered at up to 300 DPI, including reasonable encoding room. The complete multipart request may use up to 64 KiB beyond the image limit. Upload attempts are limited to two per user and thirty globally per minute. The API stores the PNG in protected object storage, stores its opaque object metadata in D1, and returns a short token. The app renders that token as a barcode for the printing workflow. Each new upload replaces that user's previous print-card request: the old metadata and PNG object are replaced, the old R2 object is deleted, and the previous barcode token stops working.
+The app can call `POST /print-cards` with an initialized user's JWT and one PNG image. The default 4 MiB image limit allows a standard 85.5 mm by 54 mm card rendered at up to 300 DPI, including reasonable encoding room. The complete multipart request may use up to 64 KiB beyond the image limit. Upload attempts are limited to five per user and three hundred per serving Cloudflare location per minute. The API stores the PNG in protected object storage, stores its opaque object metadata in D1, and returns a short token. The app renders that token as a barcode for the printing workflow. Each new upload replaces that user's previous print-card request: the old metadata and PNG object are replaced, the old R2 object is deleted, and the previous barcode token stops working.
 
 After scanning the barcode, staff can call `GET /staff/print-cards/{short_token}` with a JWT whose `role` is `STAFF` to download the original PNG for printing.
 

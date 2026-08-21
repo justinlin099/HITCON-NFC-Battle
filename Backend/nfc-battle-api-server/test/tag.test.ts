@@ -18,17 +18,19 @@ describe("tag pairing edge cases", () => {
 
   it("rejects invalid pair request bodies", async () => {
     const server = await createTestServer();
-    const aliceAuth = await authHeaders("alice");
 
-    for (const body of [
+    const invalidBodies = [
       {},
       { physical_id: "" },
       { physical_id: "04:00:00:00:00:00" },
       { physical_id: "not-a-tag" },
       { physical_id: "04:00:00:00:00:00:01", extra: "nope" },
       { physical_id: 123 },
-    ]) {
-      const response = await server.request("/tags/pair", await jsonRequest("POST", body, aliceAuth));
+    ];
+
+    for (const [index, body] of invalidBodies.entries()) {
+      const auth = await authHeaders(`invalid-pair-${index}`);
+      const response = await server.request("/tags/pair", await jsonRequest("POST", body, auth));
 
       expect(response.status).toBe(400);
       await expect(readJson(response)).resolves.toMatchObject({

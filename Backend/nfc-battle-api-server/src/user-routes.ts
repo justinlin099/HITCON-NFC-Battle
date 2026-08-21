@@ -8,6 +8,7 @@ import {
   readJson,
   readJsonWithLimit,
 } from "./request";
+import { limitUserRequests } from "./rate-limit";
 import { errorResponse, success } from "./responses";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { getPrizeResult } from "./freeze-snapshot-store";
@@ -43,7 +44,7 @@ const users = new Hono<AppEnv>();
 
 users.use("*", requireAuth);
 
-users.get("/me", async (c) => {
+users.get("/me", limitUserRequests("USER_PROFILE_RATE_LIMITER", "GET /users/me"), async (c) => {
   const authUser = c.get("authUser");
   await lazyInitializeUser(c.env.DB, authUser.userId, authUser.role);
 
@@ -55,7 +56,7 @@ users.get("/me", async (c) => {
   return success(c, profile);
 });
 
-users.patch("/me", async (c) => {
+users.patch("/me", limitUserRequests("USER_HEAVY_RATE_LIMITER", "PATCH /users/me"), async (c) => {
   const authUser = c.get("authUser");
 
   const body = await readJsonWithLimit(c, PROFILE_JSON_MAX_BYTES);
@@ -77,7 +78,7 @@ users.patch("/me", async (c) => {
   return success(c, profile);
 });
 
-users.get("/me/prize", async (c) => {
+users.get("/me/prize", limitUserRequests("USER_PROFILE_RATE_LIMITER", "GET /users/me/prize"), async (c) => {
   const authUser = c.get("authUser");
 
   for (let attempt = 0; attempt < MAX_CONSISTENT_READ_ATTEMPTS; attempt += 1) {
@@ -108,7 +109,7 @@ users.get("/me/prize", async (c) => {
   );
 });
 
-users.get("/me/bootstrap", async (c) => {
+users.get("/me/bootstrap", limitUserRequests("USER_RARE_RATE_LIMITER", "GET /users/me/bootstrap"), async (c) => {
   const authUser = c.get("authUser");
 
   const me = await getSelfProfile(c.env.DB, authUser.userId);
@@ -131,7 +132,7 @@ users.get("/me/bootstrap", async (c) => {
   });
 });
 
-users.post("/batch", async (c) => {
+users.post("/batch", limitUserRequests("USER_PROFILE_RATE_LIMITER", "POST /users/batch"), async (c) => {
   const authUser = c.get("authUser");
 
   const request = validateBatchGetUsersRequest(await readJson(c));
@@ -173,7 +174,7 @@ users.post("/batch", async (c) => {
   return success(c, { results });
 });
 
-users.get("/:user_id", async (c) => {
+users.get("/:user_id", limitUserRequests("USER_HIGH_RATE_LIMITER", "GET /users/{user_id}"), async (c) => {
   const authUser = c.get("authUser");
   const userId = c.req.param("user_id").trim();
   if (userId === "") {
@@ -210,7 +211,7 @@ users.get("/:user_id", async (c) => {
   return success(c, getVisibleProfile(row, canViewFullProfile));
 });
 
-users.get("/:user_id/collection", async (c) => {
+users.get("/:user_id/collection", limitUserRequests("USER_HEAVY_RATE_LIMITER", "GET /users/{user_id}/collection"), async (c) => {
   const authUser = c.get("authUser");
   const userId = c.req.param("user_id").trim();
   if (userId === "") {

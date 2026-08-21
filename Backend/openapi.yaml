@@ -41,6 +41,15 @@ info:
     events, uploading a print-card image, or using cache/bootstrap APIs that
     expect the authenticated user row to already exist.
 
+    Authenticated attendee endpoints are rate-limited per JWT subject and per
+    endpoint over a 60-second window. Limits range from 5 requests for rare
+    operations to 120 requests for profile lookups and NFC scans. Print-card
+    uploads additionally allow 300 attempts per serving Cloudflare location.
+    Rejected requests return `429 RATE_LIMITED` with `Retry-After: 60`.
+    Cloudflare applies these counters independently at each location, so they
+    are abuse and quota controls rather than exact global accounting. Staff
+    operations under `/staff/*` are excluded from this policy.
+
     `nfc_tag_key` is a per-user random 6-byte key encoded as a 12-character
     lowercase hex string. It is returned only in self-profile responses
     (`GET /users/me` and the `me` object from `GET /users/me/bootstrap`). The
@@ -174,6 +183,8 @@ paths:
                   $ref: '#/components/examples/GetMyUnpairedProfileResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
     patch:
       tags: [Users]
       summary: Update my profile
@@ -216,6 +227,8 @@ paths:
           $ref: '#/components/responses/UserNotFoundError'
         '413':
           $ref: '#/components/responses/PayloadTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/me/prize:
     get:
       tags: [Users]
@@ -250,6 +263,8 @@ paths:
                   $ref: '#/components/examples/ScoreboardNotFrozenError'
                 read_inconsistent:
                   $ref: '#/components/examples/ScoreboardReadInconsistentError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/me/bootstrap:
     get:
       tags: [Users]
@@ -274,6 +289,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/batch:
     post:
       tags: [Users]
@@ -319,6 +336,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/{user_id}:
     get:
       tags: [Users]
@@ -378,6 +397,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /users/{user_id}/collection:
     get:
       tags: [Users]
@@ -427,6 +448,8 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /tags/pair:
     post:
       tags: [Tags]
@@ -475,6 +498,8 @@ paths:
           $ref: '#/components/responses/UserNotFoundError'
         '409':
           $ref: '#/components/responses/TagAlreadyPairedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /collection/scan:
     post:
       tags: [Collection]
@@ -519,6 +544,8 @@ paths:
           $ref: '#/components/responses/PhysicalIdMismatchError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /collection/phishing:
     post:
       tags: [Collection]
@@ -559,6 +586,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /missions/stamp:
     get:
       tags: [Missions]
@@ -578,6 +607,8 @@ paths:
                   $ref: '#/components/examples/GetStampMissionResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /scoreboard:
     get:
       tags: [Scoreboard]
@@ -644,6 +675,8 @@ paths:
                   $ref: '#/components/examples/ScoreboardFreezingError'
                 read_inconsistent:
                   $ref: '#/components/examples/ScoreboardReadInconsistentError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /scoreboard/me:
     get:
       tags: [Scoreboard]
@@ -678,6 +711,8 @@ paths:
                   $ref: '#/components/examples/ScoreboardFreezingError'
                 read_inconsistent:
                   $ref: '#/components/examples/ScoreboardReadInconsistentError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /staff/scoreboard_status:
     get:
       tags: [Staff]
@@ -937,8 +972,8 @@ paths:
         The default 4 MiB image limit accommodates a standard 85.5 mm by 54 mm
         card rendered at up to 300 DPI, with reasonable room beyond its raw
         pixel data. Multipart framing may use up to 64 KiB beyond the configured
-        image limit. Upload attempts are limited to two per user and thirty
-        globally per minute.
+        image limit. Upload attempts are limited to five per user and three
+        hundred per serving Cloudflare location per minute.
       requestBody:
         required: true
         content:
@@ -1253,6 +1288,12 @@ components:
             message: Request body exceeds the endpoint's size limit.
     RateLimitError:
       description: Too many requests were made within the configured rate-limit window.
+      headers:
+        Retry-After:
+          description: Seconds until the current rate-limit window ends.
+          schema:
+            type: integer
+            example: 60
       content:
         application/json:
           schema:
@@ -1260,7 +1301,7 @@ components:
           example:
             status: error
             code: RATE_LIMITED
-            message: Too many print-card upload requests.
+            message: Too many requests for this endpoint. Please retry later.
 
   schemas:
     ErrorResponse:
