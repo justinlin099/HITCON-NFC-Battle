@@ -62,16 +62,98 @@ void main() {
     expect(find.text('Token 格式不正確，應為 8 至 32 個英數字、底線或連字號。'), findsOneWidget);
   });
 
-  testWidgets('staff pairing page requires a user ID before NFC scanning', (
+  testWidgets('staff pairing requires a user ID before NFC scanning', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(app(const AdminPairUserTagPage()));
-
-    expect(find.text('替使用者配對 Tag'), findsOneWidget);
     await tester.tap(find.text('開始配對 Tag'));
     await tester.pump();
 
     expect(find.text('請先輸入要配對的 User ID。'), findsOneWidget);
+  });
+
+  testWidgets('staff pairing reads a user ID before scanning another tag', (
+    WidgetTester tester,
+  ) async {
+    const MethodChannel nfcChannel = MethodChannel(
+      'plugins.flutter.io/nfc_manager',
+    );
+    final List<String> platformCalls = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(nfcChannel, (
+      MethodCall call,
+    ) async {
+      platformCalls.add(call.method);
+      return call.method == 'Nfc#isAvailable' ? true : null;
+    });
+    NfcSessionController.instance.resetForTest();
+
+    try {
+      await tester.pumpWidget(app(const AdminPairUserTagPage()));
+      await tester.tap(find.text('從 NTAG 讀取 User ID'));
+      await tester.pumpAndSettle();
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        nfcChannel.name,
+        StandardMethodCodec().encodeMethodCall(
+          MethodCall('onDiscovered', <String, Object>{
+            'handle': 'ntag-user-id',
+            'mifare': <String, Object>{
+              'identifier': Uint8List.fromList(<int>[0x04, 0xA1, 0xB2, 0xC3]),
+            },
+            'ndef': <String, Object>{
+              'isWritable': false,
+              'maxSize': 144,
+              'cachedMessage': <String, Object>{
+                'records': <Map<String, Object>>[
+                  <String, Object>{
+                    'typeNameFormat': 0x01,
+                    'type': Uint8List.fromList(<int>[0x55]),
+                    'identifier': Uint8List(0),
+                    'payload': Uint8List.fromList(<int>[
+                      0x04,
+                      ...'game.hitcon2026.online/b?u=test_attendee_004'
+                          .codeUnits,
+                    ]),
+                  },
+                ],
+              },
+            },
+          }),
+        ),
+        (_) {},
+      );
+      await tester.pump();
+
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'test_attendee_004',
+      );
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(
+        platformCalls.where((String call) => call == 'Ndef#write'),
+        isEmpty,
+      );
+      expect(
+        platformCalls.where((String call) => call == 'Nfc#startSession'),
+        hasLength(1),
+      );
+
+      await tester.tap(find.text('開始配對 Tag'));
+      await tester.pumpAndSettle();
+
+      expect(
+        platformCalls.where((String call) => call == 'Nfc#startSession'),
+        hasLength(2),
+      );
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        nfcChannel,
+        null,
+      );
+      NfcSessionController.instance.resetForTest();
+    }
   });
 
   testWidgets('staff unlock can select production or staging API', (

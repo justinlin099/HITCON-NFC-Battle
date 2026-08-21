@@ -33,6 +33,7 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
   String _status = '';
   String _lastUid = '-';
   bool _isScanning = false;
+  bool _isReadingUserId = false;
   bool _isHandlingTag = false;
   bool _isSuppressingDeepLinks = false;
 
@@ -86,6 +87,7 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     }
     setState(() {
       _isScanning = true;
+      _isReadingUserId = false;
       _lastUid = '-';
       _status = l10n.tr('staffPairHoldTag');
     });
@@ -127,7 +129,6 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
             if (ndef == null || !ndef.isWritable) {
               throw StateError(l10n.tr('tagNotWritable'));
             }
-
             final bool pairAccepted = await AuthService().pairStaffUserTag(
               userId: userId,
               uid: uid,
@@ -192,6 +193,100 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     }
   }
 
+  Future<void> _startUserIdScan() async {
+    if (_isScanning) {
+      return;
+    }
+    final AppLocalizations l10n = context.l10n;
+    bool available;
+    try {
+      available = await NfcManager.instance.isAvailable();
+    } catch (error) {
+      await _finishSession(null, error: error);
+      return;
+    }
+    if (!available) {
+      setState(() {
+        _status = l10n.tr('nfcUnavailable');
+      });
+      return;
+    }
+
+    await _beginDeepLinkSuppression();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isScanning = true;
+      _isReadingUserId = true;
+      _lastUid = '-';
+      _status = l10n.tr('staffPairReadUserIdHoldTag');
+    });
+
+    NfcSessionLease? sessionLease;
+    try {
+      sessionLease = await _nfcSession.acquire(onPreempt: _handlePreempted);
+      if (sessionLease == null) {
+        await _endDeepLinkSuppression();
+        if (mounted) {
+          setState(() {
+            _isScanning = false;
+            _isReadingUserId = false;
+            _status = l10n.tr('nfcSessionBusy');
+          });
+        }
+        return;
+      }
+      if (!_isScanning || !mounted) {
+        await _nfcSession.stop(sessionLease);
+        return;
+      }
+
+      final NfcSessionLease activeLease = sessionLease;
+      await NfcManager.instance.startSession(
+        pollingOptions: const <NfcPollingOption>{NfcPollingOption.iso14443},
+        onDiscovered: (NfcTag tag) async {
+          if (!activeLease.isActive || _isHandlingTag || !mounted) {
+            return;
+          }
+          _isHandlingTag = true;
+          final String uid = _security.readTagId(tag);
+          String status;
+          try {
+            final String? userId = NfcTagPayload.readUserId(
+              Ndef.from(tag)?.cachedMessage,
+            );
+            if (userId == null) {
+              throw StateError(l10n.tr('staffPairUserIdReadMissing'));
+            }
+            _userIdController.text = userId;
+            status = l10n.tr('staffPairUserIdReadComplete', <String, Object?>{
+              'userId': userId,
+            });
+          } catch (error) {
+            status = l10n.tr('staffPairUserIdReadFailed', <String, Object?>{
+              'error': error,
+            });
+          }
+
+          if (mounted && activeLease.isActive) {
+            setState(() {
+              _lastUid = uid.isEmpty ? '-' : uid;
+              _status = status;
+            });
+          }
+          await Future<void>.delayed(_tagGracePeriod);
+          await _finishSession(activeLease);
+        },
+        onError: (NfcError error) async {
+          await _finishSession(activeLease, error: error);
+        },
+      );
+    } catch (error) {
+      await _finishSession(sessionLease, error: error);
+    }
+  }
+
   Future<void> _finishSession(
     NfcSessionLease? sessionLease, {
     Object? error,
@@ -209,13 +304,14 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     }
     setState(() {
       _isScanning = false;
+      _isReadingUserId = false;
       if (error != null) {
         _status = nfcSessionErrorMessage(context.l10n, error);
       }
     });
   }
 
-  Future<void> _stopPairing() async {
+  Future<void> _stopScanning() async {
     if (_isHandlingTag) {
       return;
     }
@@ -226,6 +322,7 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     }
     setState(() {
       _isScanning = false;
+      _isReadingUserId = false;
       _status = context.l10n.tr('scanStopped');
     });
   }
@@ -238,6 +335,7 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
     }
     setState(() {
       _isScanning = false;
+      _isReadingUserId = false;
       _status = context.l10n.tr('nfcSessionBusy');
     });
   }
@@ -280,17 +378,46 @@ class _AdminPairUserTagPageState extends State<AdminPairUserTagPage> {
               controller: _userIdController,
               label: 'User ID',
             ),
+            const SizedBox(height: 8),
+            AdminPixelButton(
+              label: context.l10n.tr(
+                _isScanning && _isReadingUserId
+                    ? 'stopScan'
+                    : 'staffPairReadUserId',
+              ),
+              icon: _isScanning && _isReadingUserId
+                  ? Icons.stop_rounded
+                  : Icons.contactless_rounded,
+              color: _isScanning && _isReadingUserId
+                  ? PixelTheme.warning
+                  : PixelTheme.textWhite,
+              onPressed: !_isScanning
+                  ? _startUserIdScan
+                  : _isReadingUserId
+                  ? _stopScanning
+                  : null,
+            ),
             const SizedBox(height: 12),
             AdminStatusLine(label: context.l10n.tr('status'), value: _status),
             AdminStatusLine(label: 'UID', value: _lastUid),
             const SizedBox(height: 4),
             AdminPixelButton(
               label: context.l10n.tr(
-                _isScanning ? 'stopScan' : 'staffPairStart',
+                _isScanning && !_isReadingUserId
+                    ? 'stopScan'
+                    : 'staffPairStart',
               ),
-              icon: _isScanning ? Icons.stop_rounded : Icons.nfc_rounded,
-              color: _isScanning ? PixelTheme.warning : PixelTheme.accent,
-              onPressed: _isScanning ? _stopPairing : _startPairing,
+              icon: _isScanning && !_isReadingUserId
+                  ? Icons.stop_rounded
+                  : Icons.nfc_rounded,
+              color: _isScanning && !_isReadingUserId
+                  ? PixelTheme.warning
+                  : PixelTheme.accent,
+              onPressed: !_isScanning
+                  ? _startPairing
+                  : _isReadingUserId
+                  ? null
+                  : _stopScanning,
             ),
           ],
         ),
