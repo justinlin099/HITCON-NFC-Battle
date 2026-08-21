@@ -37,7 +37,7 @@ const scoreboard = new Hono<AppEnv>();
 
 scoreboard.use("*", requireAuth);
 
-scoreboard.get("/", limitUserRequests("USER_STANDARD_RATE_LIMITER", "GET /scoreboard"), async (c) => {
+scoreboard.get("/", limitUserRequests("USER_HEAVY_RATE_LIMITER", "GET /scoreboard"), async (c) => {
   const pagination = parsePagination(c.req.query("offset"), c.req.query("limit"));
   if (!pagination) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
@@ -101,7 +101,7 @@ scoreboard.get("/", limitUserRequests("USER_STANDARD_RATE_LIMITER", "GET /scoreb
   );
 });
 
-scoreboard.get("/me", limitUserRequests("USER_STANDARD_RATE_LIMITER", "GET /scoreboard/me"), async (c) => {
+scoreboard.get("/me", limitUserRequests("USER_HEAVY_RATE_LIMITER", "GET /scoreboard/me"), async (c) => {
   const authUser = c.get("authUser");
 
   for (let attempt = 0; attempt < MAX_CONSISTENT_READ_ATTEMPTS; attempt += 1) {

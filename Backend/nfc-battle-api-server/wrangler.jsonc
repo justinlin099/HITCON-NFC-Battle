@@ -80,9 +80,9 @@
 			"simple": { "limit": 60, "period": 60 }
 		},
 		{
-			"name": "USER_HIGH_RATE_LIMITER",
+			"name": "USER_BOOTSTRAP_RATE_LIMITER",
 			"namespace_id": "2026082108",
-			"simple": { "limit": 120, "period": 60 }
+			"simple": { "limit": 3, "period": 60 }
 		}
 	],
 	"vars": {
@@ -149,9 +149,9 @@
 					"simple": { "limit": 60, "period": 60 }
 				},
 				{
-					"name": "USER_HIGH_RATE_LIMITER",
+					"name": "USER_BOOTSTRAP_RATE_LIMITER",
 					"namespace_id": "2026082118",
-					"simple": { "limit": 120, "period": 60 }
+					"simple": { "limit": 3, "period": 60 }
 				}
 			],
 			"vars": {
@@ -218,9 +218,9 @@
 					"simple": { "limit": 60, "period": 60 }
 				},
 				{
-					"name": "USER_HIGH_RATE_LIMITER",
+					"name": "USER_BOOTSTRAP_RATE_LIMITER",
 					"namespace_id": "2026082128",
-					"simple": { "limit": 120, "period": 60 }
+					"simple": { "limit": 3, "period": 60 }
 				}
 			],
 			"vars": {

@@ -12,7 +12,7 @@ describe("attendee rate limits", () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");
 
-    for (let request = 0; request < 30; request += 1) {
+    for (let request = 0; request < 20; request += 1) {
       const response = await server.request("/users/me", { headers: aliceAuth });
       expect(response.status).toBe(200);
     }
@@ -55,7 +55,7 @@ describe("attendee rate limits", () => {
     const staffAuth = await authHeaders("staff", "STAFF");
     await server.request("/users/me", { headers: staffAuth });
 
-    for (let request = 0; request < 5; request += 1) {
+    for (let request = 0; request < 3; request += 1) {
       const response = await server.request("/users/me/bootstrap", { headers: staffAuth });
       expect(response.status).toBe(200);
     }

@@ -23,7 +23,7 @@ app.get("/health", (c) => {
   });
 });
 
-app.get("/health/auth", requireAuth, limitUserRequests("USER_STANDARD_RATE_LIMITER", "GET /health/auth"), (c) => {
+app.get("/health/auth", requireAuth, limitUserRequests("USER_SENSITIVE_RATE_LIMITER", "GET /health/auth"), (c) => {
   return success(c, {
     user: c.get("authUser"),
   });

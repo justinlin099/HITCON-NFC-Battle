@@ -42,8 +42,8 @@ info:
     expect the authenticated user row to already exist.
 
     Authenticated attendee endpoints are rate-limited per JWT subject and per
-    endpoint over a 60-second window. Limits range from 5 requests for rare
-    operations to 120 requests for profile lookups and NFC scans. Print-card
+    endpoint over a 60-second window. Limits range from 3 requests for cache
+    bootstrap to 60 requests for stamp mission reads. Print-card
     uploads additionally allow 300 attempts per serving Cloudflare location.
     Rejected requests return `429 RATE_LIMITED` with `Retry-After: 60`.
     Cloudflare applies these counters independently at each location, so they
