@@ -99,6 +99,18 @@ class TestR2Bucket {
   }
 }
 
+class TestRateLimit {
+  private readonly counts = new Map<string, number>();
+
+  constructor(private readonly limitValue: number) {}
+
+  async limit({ key }: { key: string }) {
+    const count = (this.counts.get(key) ?? 0) + 1;
+    this.counts.set(key, count);
+    return { success: count <= this.limitValue };
+  }
+}
+
 export interface TestServer {
   env: AppBindings;
   db: D1Database;
@@ -118,7 +130,9 @@ export async function createTestServer(): Promise<TestServer> {
     DB: db,
     ASSETS: {} as Fetcher,
     PRINT_CARD_IMAGES: new TestR2Bucket() as unknown as R2Bucket,
-    PRINT_CARD_MAX_UPLOAD_BYTES: "5242880",
+    PRINT_CARD_USER_RATE_LIMITER: new TestRateLimit(2) as unknown as RateLimit,
+    PRINT_CARD_GLOBAL_RATE_LIMITER: new TestRateLimit(30) as unknown as RateLimit,
+    PRINT_CARD_MAX_UPLOAD_BYTES: "4194304",
     JWT_SECRET,
     STAFF_DANGER_TOKEN: "test-staff-token",
     JWT_ISSUER,

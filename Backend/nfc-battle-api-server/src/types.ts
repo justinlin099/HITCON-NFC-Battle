@@ -14,6 +14,7 @@ export type ErrorCode =
   | "SCOREBOARD_READ_INCONSISTENT"
   | "PRINT_CARD_NOT_FOUND"
   | "PAYLOAD_TOO_LARGE"
+  | "RATE_LIMITED"
   | "PRIZE_NOT_ELIGIBLE"
   | "PRIZE_ALREADY_CLAIMED";
 
@@ -36,6 +37,8 @@ export interface JwtPayload {
 export interface AppBindings extends CloudflareBindings {
   JWT_SECRET: string;
   STAFF_DANGER_TOKEN: string;
+  PRINT_CARD_USER_RATE_LIMITER: RateLimit;
+  PRINT_CARD_GLOBAL_RATE_LIMITER: RateLimit;
 }
 
 export interface AppVariables {

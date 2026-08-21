@@ -40,7 +40,7 @@ The user will receive an email, containing a link like `https://game.hitcon2026.
 
 After downloading the app, the user will somehow setup the app, and somehow the app will obtain their JWT token.
 
-The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. The app should call it before pairing tags, scanning, recording phishing events, or using cache/bootstrap APIs that expect the authenticated user row to already exist. `POST /print-cards` can also lazy-initialize a user so the app can submit a print job directly with a valid JWT. The self-profile response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts. That endpoint silently truncates overlong text at UTF-8 character boundaries, rejects malformed or oversized non-empty PNG avatars, and limits the complete JSON body to 128 KiB.
+The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. The app should call it before pairing tags, scanning, recording phishing events, uploading a print-card image, or using cache/bootstrap APIs that expect the authenticated user row to already exist. The self-profile response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts. That endpoint silently truncates overlong text at UTF-8 character boundaries, rejects malformed or oversized non-empty PNG avatars, and limits the complete JSON body to 128 KiB.
 
 ## When Conference Starts, at Reception Desk
 
@@ -58,7 +58,7 @@ The user can still use `PATCH /users/me` to update their profile at any time.
 
 ### Printing and Pairing NFC Cards
 
-The app can call `POST /print-cards` with the user's JWT and one PNG image. The API stores the PNG in protected object storage, stores its opaque object metadata in D1, and returns a short token. The app renders that token as a barcode for the printing workflow. This endpoint may lazy-initialize the user when their JWT is valid. Each new upload replaces that user's previous print-card request: the old metadata and PNG object are replaced, the old R2 object is deleted, and the previous barcode token stops working.
+The app can call `POST /print-cards` with an initialized user's JWT and one PNG image. The default 4 MiB image limit allows a standard 85.5 mm by 54 mm card rendered at up to 300 DPI, including reasonable encoding room. The complete multipart request may use up to 64 KiB beyond the image limit. Upload attempts are limited to two per user and thirty globally per minute. The API stores the PNG in protected object storage, stores its opaque object metadata in D1, and returns a short token. The app renders that token as a barcode for the printing workflow. Each new upload replaces that user's previous print-card request: the old metadata and PNG object are replaced, the old R2 object is deleted, and the previous barcode token stops working.
 
 After scanning the barcode, staff can call `GET /staff/print-cards/{short_token}` with a JWT whose `role` is `STAFF` to download the original PNG for printing.
 

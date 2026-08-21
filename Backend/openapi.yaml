@@ -36,10 +36,9 @@ info:
     the user row. `profile_version` changes when profile fields change.
     `collection_version` changes only when that user's own collection changes.
 
-    `GET /users/me` lazy-initializes a user profile. `POST /print-cards` also
-    lazy-initializes so an attendee can create a print job directly from a
-    valid JWT. The app should call `GET /users/me` before pairing tags,
-    scanning, recording phishing events, or using cache/bootstrap APIs that
+    `GET /users/me` is the only endpoint that lazy-initializes a user profile.
+    The app should call it before pairing tags, scanning, recording phishing
+    events, uploading a print-card image, or using cache/bootstrap APIs that
     expect the authenticated user row to already exist.
 
     `nfc_tag_key` is a per-user random 6-byte key encoded as a 12-character
@@ -932,7 +931,14 @@ paths:
         token as a barcode on the print card. The image is only downloadable by STAFF through
         `GET /staff/print-cards/{short_token}`. Each new upload replaces the
         authenticated user's previous request, deletes its old PNG object, and
-        invalidates its old token.
+        invalidates its old token. The user must already have been initialized
+        through `GET /users/me`.
+
+        The default 4 MiB image limit accommodates a standard 85.5 mm by 54 mm
+        card rendered at up to 300 DPI, with reasonable room beyond its raw
+        pixel data. Multipart framing may use up to 64 KiB beyond the configured
+        image limit. Upload attempts are limited to two per user and thirty
+        globally per minute.
       requestBody:
         required: true
         content:
@@ -945,7 +951,7 @@ paths:
                 image:
                   type: string
                   format: binary
-                  description: PNG image. Its maximum size is configured by the Worker `PRINT_CARD_MAX_UPLOAD_BYTES` environment variable.
+                  description: PNG image. Its maximum size is configured by the Worker `PRINT_CARD_MAX_UPLOAD_BYTES` environment variable and defaults to 4 MiB.
       responses:
         '200':
           description: Image stored and barcode token issued.
@@ -957,12 +963,12 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/UserNotFoundError'
         '413':
-          description: PNG image is larger than the configured upload limit.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/PayloadTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
   /staff/print-cards/{short_token}:
     get:
       tags: [Staff, Print cards]
@@ -1245,6 +1251,16 @@ components:
             status: error
             code: PAYLOAD_TOO_LARGE
             message: Request body exceeds the endpoint's size limit.
+    RateLimitError:
+      description: Too many requests were made within the configured rate-limit window.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: RATE_LIMITED
+            message: Too many print-card upload requests.
 
   schemas:
     ErrorResponse:
@@ -1270,6 +1286,7 @@ components:
             - SCOREBOARD_READ_INCONSISTENT
             - PRINT_CARD_NOT_FOUND
             - PAYLOAD_TOO_LARGE
+            - RATE_LIMITED
             - PRIZE_NOT_ELIGIBLE
             - PRIZE_ALREADY_CLAIMED
         message:

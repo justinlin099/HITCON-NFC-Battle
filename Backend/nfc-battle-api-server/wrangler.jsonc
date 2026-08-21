@@ -43,10 +43,22 @@
 			"bucket_name": "nfc-battle-print-cards"
 		}
 	],
+	"ratelimits": [
+		{
+			"name": "PRINT_CARD_USER_RATE_LIMITER",
+			"namespace_id": "2026082101",
+			"simple": { "limit": 2, "period": 60 }
+		},
+		{
+			"name": "PRINT_CARD_GLOBAL_RATE_LIMITER",
+			"namespace_id": "2026082102",
+			"simple": { "limit": 30, "period": 60 }
+		}
+	],
 	"vars": {
 		"JWT_ISSUER": "hitcon-2026",
 		"JWT_AUDIENCE": "nfc-battle-api-server",
-		"PRINT_CARD_MAX_UPLOAD_BYTES": "5242880"
+		"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304"
 	},
 	"env": {
 		"staging": {
@@ -70,10 +82,22 @@
 					"bucket_name": "nfc-battle-print-cards-staging"
 				}
 			],
+			"ratelimits": [
+				{
+					"name": "PRINT_CARD_USER_RATE_LIMITER",
+					"namespace_id": "2026082111",
+					"simple": { "limit": 2, "period": 60 }
+				},
+				{
+					"name": "PRINT_CARD_GLOBAL_RATE_LIMITER",
+					"namespace_id": "2026082112",
+					"simple": { "limit": 30, "period": 60 }
+				}
+			],
 			"vars": {
 				"JWT_ISSUER": "hitcon-2026-staging",
 				"JWT_AUDIENCE": "nfc-battle-api-server-staging",
-				"PRINT_CARD_MAX_UPLOAD_BYTES": "5242880"
+				"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304"
 			}
 		},
 		"production": {
@@ -97,10 +121,22 @@
 					"bucket_name": "nfc-battle-print-cards"
 				}
 			],
+			"ratelimits": [
+				{
+					"name": "PRINT_CARD_USER_RATE_LIMITER",
+					"namespace_id": "2026082121",
+					"simple": { "limit": 2, "period": 60 }
+				},
+				{
+					"name": "PRINT_CARD_GLOBAL_RATE_LIMITER",
+					"namespace_id": "2026082122",
+					"simple": { "limit": 30, "period": 60 }
+				}
+			],
 			"vars": {
 				"JWT_ISSUER": "hitcon-2026",
 				"JWT_AUDIENCE": "nfc-battle-api-server",
-				"PRINT_CARD_MAX_UPLOAD_BYTES": "5242880"
+				"PRINT_CARD_MAX_UPLOAD_BYTES": "4194304"
 			}
 		}
 	}
