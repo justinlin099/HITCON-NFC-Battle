@@ -184,6 +184,12 @@ paths:
         `display_name`, `emoji_icon`, `bio`, and `pixel_avatar_base64`. If the
         submitted fields are identical to the stored profile, the server returns
         the current profile without incrementing `profile_version`.
+
+        Text fields are truncated without error at UTF-8 character boundaries:
+        `display_name` to 100 bytes, `emoji_icon` to 64 bytes, and `bio` to
+        4096 bytes. A non-empty avatar must be a base64-encoded PNG whose
+        decoded size does not exceed 64 KiB. Image dimensions are not checked.
+        The complete JSON request body must not exceed 128 KiB.
       requestBody:
         required: true
         content:
@@ -209,6 +215,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeError'
   /users/me/prize:
     get:
       tags: [Users]
@@ -1227,6 +1235,16 @@ components:
             status: error
             code: SCOREBOARD_READ_INCONSISTENT
             message: Scoreboard state changed while reading. Please retry.
+    PayloadTooLargeError:
+      description: Request body exceeds the endpoint's size limit.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: PAYLOAD_TOO_LARGE
+            message: Request body exceeds the endpoint's size limit.
 
   schemas:
     ErrorResponse:
@@ -1297,19 +1315,21 @@ components:
           example: kktix_hash_abc123
         display_name:
           type: string
+          description: Stored display name, limited to 100 UTF-8 bytes.
           example: Hacker_Aries
         role:
           $ref: '#/components/schemas/UserRole'
         emoji_icon:
           type: string
-          description: Emoji character shown as the user's icon.
+          description: Icon text shown for the user, limited to 64 UTF-8 bytes.
           example: 🐱
         bio:
           type: string
+          description: User bio, limited to 4096 UTF-8 bytes. May be empty.
           example: I love reverse engineering.
         pixel_avatar_base64:
           type: string
-          description: Base64-encoded 48x48 pixel avatar image.
+          description: Base64-encoded PNG avatar, or an empty string. Non-empty decoded images are limited to 64 KiB; dimensions are not validated.
           example: iVBORw0KGgoAAAANSU...
         profile_version:
           type: integer
@@ -1419,22 +1439,25 @@ components:
       type: object
       description: |
         Partial profile update. Only `display_name`, `emoji_icon`, `bio`, and
-        `pixel_avatar_base64` are updatable.
+        `pixel_avatar_base64` are updatable. Overlong text is silently
+        truncated at a UTF-8 character boundary.
       additionalProperties: false
       properties:
         display_name:
           type: string
+          description: Must not be all whitespace. Values over 100 UTF-8 bytes are silently truncated.
           example: Aries_The_Great
         emoji_icon:
           type: string
-          description: Emoji character shown as the user's icon.
+          description: Must not be all whitespace. Values over 64 UTF-8 bytes are silently truncated.
           example: 🚀
         bio:
           type: string
+          description: May be empty. Values over 4096 UTF-8 bytes are silently truncated.
           example: Updated bio.
         pixel_avatar_base64:
           type: string
-          description: Base64-encoded 48x48 pixel avatar image.
+          description: Empty string or a base64-encoded PNG no larger than 64 KiB after decoding. Image dimensions are not validated.
           example: iVBORw0KGgo...
 
     GetUserProfileResponse:

@@ -1,7 +1,13 @@
 import { Hono } from "hono";
 import { requireAuth } from "./auth";
 import { getCollection, hasCollected } from "./collection-store";
-import { hasOnlyKeys, isPlainObject, readJson } from "./request";
+import {
+  hasOnlyKeys,
+  isPlainObject,
+  JSON_BODY_TOO_LARGE,
+  readJson,
+  readJsonWithLimit,
+} from "./request";
 import { errorResponse, success } from "./responses";
 import { getGameState, isSameGameStateSnapshot } from "./game-state";
 import { getPrizeResult } from "./freeze-snapshot-store";
@@ -25,6 +31,13 @@ const PATCHABLE_PROFILE_FIELDS = new Set([
   "pixel_avatar_base64",
 ]);
 const MAX_CONSISTENT_READ_ATTEMPTS = 2;
+const PROFILE_JSON_MAX_BYTES = 128 * 1024;
+const DISPLAY_NAME_MAX_BYTES = 100;
+const EMOJI_ICON_MAX_BYTES = 64;
+const BIO_MAX_BYTES = 4096;
+const AVATAR_MAX_BYTES = 64 * 1024;
+const AVATAR_MAX_BASE64_LENGTH = 4 * Math.ceil(AVATAR_MAX_BYTES / 3);
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 const users = new Hono<AppEnv>();
 
@@ -45,7 +58,10 @@ users.get("/me", async (c) => {
 users.patch("/me", async (c) => {
   const authUser = c.get("authUser");
 
-  const body = await readJson(c);
+  const body = await readJsonWithLimit(c, PROFILE_JSON_MAX_BYTES);
+  if (body === JSON_BODY_TOO_LARGE) {
+    return errorResponse(c, 413, "PAYLOAD_TOO_LARGE", "JSON body must be at most 128 KiB.");
+  }
   const update = validateProfileUpdate(body);
   if (!update) {
     return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
@@ -249,10 +265,57 @@ function validateProfileUpdate(value: unknown): ProfileUpdate | null {
       return null;
     }
 
-    update[key as keyof ProfileUpdate] = fieldValue;
+    if (key === "pixel_avatar_base64") {
+      if (!isValidAvatar(fieldValue)) {
+        return null;
+      }
+      update.pixel_avatar_base64 = fieldValue;
+      continue;
+    }
+
+    const maxBytes = key === "display_name"
+      ? DISPLAY_NAME_MAX_BYTES
+      : key === "emoji_icon"
+        ? EMOJI_ICON_MAX_BYTES
+        : BIO_MAX_BYTES;
+    update[key as "display_name" | "emoji_icon" | "bio"] = truncateUtf8(fieldValue, maxBytes);
   }
 
   return update;
+}
+
+function truncateUtf8(value: string, maxBytes: number) {
+  const encoder = new TextEncoder();
+  let result = "";
+  let byteLength = 0;
+  for (const character of value) {
+    const characterBytes = encoder.encode(character).byteLength;
+    if (byteLength + characterBytes > maxBytes) {
+      break;
+    }
+    result += character;
+    byteLength += characterBytes;
+  }
+  return result;
+}
+
+function isValidAvatar(value: string) {
+  if (value === "") {
+    return true;
+  }
+  if (value.length > AVATAR_MAX_BASE64_LENGTH) {
+    return false;
+  }
+
+  try {
+    const decoded = atob(value);
+    if (decoded.length > AVATAR_MAX_BYTES || decoded.length < PNG_SIGNATURE.length) {
+      return false;
+    }
+    return PNG_SIGNATURE.every((byte, index) => decoded.charCodeAt(index) === byte);
+  } catch {
+    return false;
+  }
 }
 
 interface BatchGetUserItem {
