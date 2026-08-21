@@ -72,6 +72,21 @@ describe("attendee rate limits", () => {
     expect(limited.status).toBe(429);
   });
 
+  it("allows sixty requests per minute for each scoreboard endpoint", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+
+    for (const endpoint of ["/scoreboard", "/scoreboard/me"]) {
+      for (let request = 0; request < 60; request += 1) {
+        const response = await server.request(endpoint, { headers: aliceAuth });
+        expect(response.status).not.toBe(429);
+      }
+
+      const limited = await server.request(endpoint, { headers: aliceAuth });
+      expect(limited.status).toBe(429);
+    }
+  });
+
   it("does not apply attendee limits to staff routes", async () => {
     const server = await createTestServer();
     const staffAuth = await authHeaders("staff", "STAFF");
