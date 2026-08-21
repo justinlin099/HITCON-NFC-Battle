@@ -1,0 +1,35 @@
+name = "hitcon-nfc-battle-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Set via `wrangler secret put` (do NOT commit secrets):
+#   SSO_JWKS_URL   — JWKS endpoint of the conference SSO
+#   SSO_ISSUER     — expected `iss` claim
+#   SSO_AUDIENCE   — expected `aud` claim
+#
+# Public env (safe to commit) goes under [vars]; everything secret stays as a
+# Wrangler secret so it never lands in git.
+
+[vars]
+ENVIRONMENT = "development"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hitcon_nfc_battle"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# Production env — populate database_id once the D1 instance is provisioned.
+[env.production]
+name = "hitcon-nfc-battle-api"
+route = { pattern = "game.hitcon2026.online/v1/*", zone_name = "hitcon2026.online" }
+
+[env.production.vars]
+ENVIRONMENT = "production"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "hitcon_nfc_battle"
+database_id = "REPLACE_WITH_PROD_D1_DATABASE_ID"
+migrations_dir = "migrations"
