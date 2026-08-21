@@ -10,7 +10,7 @@ const missions = new Hono<AppEnv>();
 
 missions.use("*", requireAuth);
 
-missions.get("/stamp", limitUserRequests("USER_STANDARD_RATE_LIMITER", "GET /missions/stamp"), async (c) => {
+missions.get("/stamp", limitUserRequests("STAMP_MISSION_READ_RATE_LIMITER", "GET /missions/stamp"), async (c) => {
   const authUser = c.get("authUser");
 
   const counts = await getStampCounts(c.env.DB, authUser.userId);

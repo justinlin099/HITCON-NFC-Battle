@@ -50,6 +50,28 @@ describe("attendee rate limits", () => {
     expect(limited.status).toBe(429);
   });
 
+  it("limits phishing records to three requests per user per minute", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    const bobAuth = await authHeaders("bob");
+    await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
+
+    for (let request = 0; request < 3; request += 1) {
+      const response = await server.request(
+        "/collection/phishing",
+        await jsonRequest("POST", { victim: "alice", attacker: "bob" }, aliceAuth),
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const limited = await server.request(
+      "/collection/phishing",
+      await jsonRequest("POST", { victim: "alice", attacker: "bob" }, aliceAuth),
+    );
+    expect(limited.status).toBe(429);
+  });
+
   it("does not apply attendee limits to staff routes", async () => {
     const server = await createTestServer();
     const staffAuth = await authHeaders("staff", "STAFF");

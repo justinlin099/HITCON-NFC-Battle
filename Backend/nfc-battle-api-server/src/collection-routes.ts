@@ -22,7 +22,7 @@ const collection = new Hono<AppEnv>();
 
 collection.use("*", requireAuth);
 
-collection.post("/scan", limitUserRequests("USER_PROFILE_RATE_LIMITER", "POST /collection/scan"), async (c) => {
+collection.post("/scan", limitUserRequests("COLLECTION_SCAN_RATE_LIMITER", "POST /collection/scan"), async (c) => {
   const authUser = c.get("authUser");
 
   const request = validateScanCollectionRequest(await readJson(c));
@@ -52,7 +52,7 @@ collection.post("/scan", limitUserRequests("USER_PROFILE_RATE_LIMITER", "POST /c
   });
 });
 
-collection.post("/phishing", limitUserRequests("USER_SENSITIVE_RATE_LIMITER", "POST /collection/phishing"), async (c) => {
+collection.post("/phishing", limitUserRequests("PHISHING_RECORD_RATE_LIMITER", "POST /collection/phishing"), async (c) => {
   const authUser = c.get("authUser");
 
   const request = validatePhishingRequest(await readJson(c));

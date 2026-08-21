@@ -13,7 +13,7 @@ const tags = new Hono<AppEnv>();
 
 tags.use("*", requireAuth);
 
-tags.post("/pair", limitUserRequests("USER_RARE_RATE_LIMITER", "POST /tags/pair"), async (c) => {
+tags.post("/pair", limitUserRequests("TAG_PAIR_RATE_LIMITER", "POST /tags/pair"), async (c) => {
   const authUser = c.get("authUser");
 
   const request = validatePairTagRequest(await readJson(c));

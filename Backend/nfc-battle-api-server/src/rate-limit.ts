@@ -1,11 +1,11 @@
 import type { MiddlewareHandler } from "hono";
 import { errorResponse } from "./responses";
-import type { AppEnv, UserRateLimitBinding } from "./types";
+import type { AppEnv, EndpointRateLimitBinding } from "./types";
 
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 
 export function limitUserRequests(
-  binding: UserRateLimitBinding,
+  binding: EndpointRateLimitBinding,
   routeKey: string,
 ): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
