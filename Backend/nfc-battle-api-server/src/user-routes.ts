@@ -31,11 +31,11 @@ const PATCHABLE_PROFILE_FIELDS = new Set([
   "pixel_avatar_base64",
 ]);
 const MAX_CONSISTENT_READ_ATTEMPTS = 2;
-const PROFILE_JSON_MAX_BYTES = 128 * 1024;
+const PROFILE_JSON_MAX_BYTES = 512 * 1024;
 const DISPLAY_NAME_MAX_BYTES = 100;
 const EMOJI_ICON_MAX_BYTES = 64;
 const BIO_MAX_BYTES = 4096;
-const AVATAR_MAX_BYTES = 64 * 1024;
+const AVATAR_MAX_BYTES = 256 * 1024;
 const AVATAR_MAX_BASE64_LENGTH = 4 * Math.ceil(AVATAR_MAX_BYTES / 3);
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -60,7 +60,7 @@ users.patch("/me", async (c) => {
 
   const body = await readJsonWithLimit(c, PROFILE_JSON_MAX_BYTES);
   if (body === JSON_BODY_TOO_LARGE) {
-    return errorResponse(c, 413, "PAYLOAD_TOO_LARGE", "JSON body must be at most 128 KiB.");
+    return errorResponse(c, 413, "PAYLOAD_TOO_LARGE", "JSON body must be at most 512 KiB.");
   }
   const update = validateProfileUpdate(body);
   if (!update) {

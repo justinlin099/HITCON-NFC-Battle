@@ -216,7 +216,19 @@ describe("user profile behavior", () => {
     );
     expect(invalidAvatar.status).toBe(400);
 
-    const oversizedAvatarBytes = Buffer.alloc(64 * 1024 + 1);
+    const acceptedLargerAvatarBytes = Buffer.alloc(64 * 1024 + 1);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(acceptedLargerAvatarBytes);
+    const acceptedLargerAvatar = await server.request(
+      "/users/me",
+      await jsonRequest(
+        "PATCH",
+        { pixel_avatar_base64: acceptedLargerAvatarBytes.toString("base64") },
+        aliceAuth,
+      ),
+    );
+    expect(acceptedLargerAvatar.status).toBe(200);
+
+    const oversizedAvatarBytes = Buffer.alloc(256 * 1024 + 1);
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(oversizedAvatarBytes);
     const oversizedAvatar = await server.request(
       "/users/me",
@@ -228,9 +240,15 @@ describe("user profile behavior", () => {
     );
     expect(oversizedAvatar.status).toBe(400);
 
-    const oversizedBody = await server.request(
+    const acceptedLargerBody = await server.request(
       "/users/me",
       await jsonRequest("PATCH", { bio: "a".repeat(128 * 1024) }, aliceAuth),
+    );
+    expect(acceptedLargerBody.status).toBe(200);
+
+    const oversizedBody = await server.request(
+      "/users/me",
+      await jsonRequest("PATCH", { bio: "a".repeat(512 * 1024) }, aliceAuth),
     );
     expect(oversizedBody.status).toBe(413);
     await expect(readJson(oversizedBody)).resolves.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });

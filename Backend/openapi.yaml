@@ -187,8 +187,8 @@ paths:
         Text fields are truncated without error at UTF-8 character boundaries:
         `display_name` to 100 bytes, `emoji_icon` to 64 bytes, and `bio` to
         4096 bytes. A non-empty avatar must be a base64-encoded PNG whose
-        decoded size does not exceed 64 KiB. Image dimensions are not checked.
-        The complete JSON request body must not exceed 128 KiB.
+        decoded size does not exceed 256 KiB. Image dimensions are not checked.
+        The complete JSON request body must not exceed 512 KiB.
       requestBody:
         required: true
         content:
@@ -1346,7 +1346,7 @@ components:
           example: I love reverse engineering.
         pixel_avatar_base64:
           type: string
-          description: Base64-encoded PNG avatar, or an empty string. Non-empty decoded images are limited to 64 KiB; dimensions are not validated.
+          description: Base64-encoded PNG avatar, or an empty string. Non-empty decoded images are limited to 256 KiB; dimensions are not validated.
           example: iVBORw0KGgoAAAANSU...
         profile_version:
           type: integer
@@ -1474,7 +1474,7 @@ components:
           example: Updated bio.
         pixel_avatar_base64:
           type: string
-          description: Empty string or a base64-encoded PNG no larger than 64 KiB after decoding. Image dimensions are not validated.
+          description: Empty string or a base64-encoded PNG no larger than 256 KiB after decoding. Image dimensions are not validated.
           example: iVBORw0KGgo...
 
     GetUserProfileResponse:

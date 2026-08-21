@@ -12,7 +12,7 @@ A user's data contains:
 * user role
 * emoji icon, stored at no more than 64 UTF-8 bytes
 * bio, stored at no more than 4096 UTF-8 bytes
-* pixel_avatar_base64: an empty string or base64-encoded PNG no larger than 64 KiB after decoding; the API does not enforce image dimensions
+* pixel_avatar_base64: an empty string or base64-encoded PNG no larger than 256 KiB after decoding; the API does not enforce image dimensions
 * first paired NFC tag physical ID, used as a backwards-compatible signal that the user has at least one paired tag
 * nfc_tag_key: a 6-byte key, encoded as a 12-character lowercase hex string, shared by all of the user's NFC tags and used to lock or unlock them
 * profile version
@@ -40,7 +40,7 @@ The user will receive an email, containing a link like `https://game.hitcon2026.
 
 After downloading the app, the user will somehow setup the app, and somehow the app will obtain their JWT token.
 
-The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. The app should call it before pairing tags, scanning, recording phishing events, uploading a print-card image, or using cache/bootstrap APIs that expect the authenticated user row to already exist. The self-profile response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts. That endpoint silently truncates overlong text at UTF-8 character boundaries, rejects malformed or oversized non-empty PNG avatars, and limits the complete JSON body to 128 KiB.
+The app will then make a query to `GET /users/me`, triggering lazy initialization of the user's profile. The app should call it before pairing tags, scanning, recording phishing events, uploading a print-card image, or using cache/bootstrap APIs that expect the authenticated user row to already exist. The self-profile response includes `nfc_tag_key`, which the app should store locally but not show to the user. The user can use `PATCH /users/me` to update their profile before the conference starts. That endpoint silently truncates overlong text at UTF-8 character boundaries, rejects malformed or oversized non-empty PNG avatars, and limits the complete JSON body to 512 KiB.
 
 ## When Conference Starts, at Reception Desk
 
