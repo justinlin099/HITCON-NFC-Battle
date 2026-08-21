@@ -1844,13 +1844,13 @@ components:
             stamp_threshold:
               type: integer
               description: Configurable threshold for sponsor plus community stamps.
-              example: 10
+              example: 20
             sponsor_count:
               type: integer
-              example: 6
+              example: 12
             community_count:
               type: integer
-              example: 5
+              example: 8
             eligible_for_stamp_prize:
               type: boolean
               example: true
@@ -2126,7 +2126,7 @@ components:
               example: '2026-04-12T15:01:12Z'
             stamp_threshold:
               type: integer
-              example: 10
+              example: 20
             rank_threshold:
               type: integer
               example: 10
@@ -2313,7 +2313,7 @@ components:
       value:
         status: success
         data:
-          stamp_threshold: 25
+          stamp_threshold: 20
           sponsor_count: 15
           community_count: 10
           eligible_for_stamp_prize: true
@@ -2419,5 +2419,5 @@ components:
           freeze_id: freeze_20260412_01
           scoring_cutoff_at: '2026-04-12T15:00:00Z'
           frozen_at: '2026-04-12T15:01:12Z'
-          stamp_threshold: 25
+          stamp_threshold: 20
           rank_threshold: 10

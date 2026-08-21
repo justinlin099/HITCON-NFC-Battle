@@ -22,7 +22,7 @@ The collection table records which user IDs a user has previously scanned. A col
 
 `profile_version` and `collection_version` are integer versions stored on the user row. `profile_version` changes when profile fields change. `collection_version` changes only when that user's own collection changes. For example, when Alice scans Bob, Alice's `collection_version` changes, but Alice's `profile_version`, Bob's `profile_version` and `collection_version` do not change.
 
-The current `stamp_threshold` is 25. A user who collects at least 25 sponsor plus community stamps can win the stamp prize.
+The current `stamp_threshold` is 20. A user who collects at least 20 sponsor plus community stamps can win the stamp prize.
 
 The `rank_threshold` should be a configurable variable or a constant. The top ranked users can win a prize at the end of the conference.
 
