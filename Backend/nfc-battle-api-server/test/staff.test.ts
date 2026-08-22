@@ -6,16 +6,45 @@ import {
   jsonRequest,
   pairTag,
   readJson,
+  refreshScoreboard,
   scanTag,
   staffHeaders,
 } from "./helpers";
 
 describe("staff scoreboard edge cases", () => {
+  it("returns the complete scoreboard to staff without pagination", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    const bobAuth = await authHeaders("bob");
+    const staffAuth = await authHeaders("staff", "STAFF");
+    await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
+    await refreshScoreboard(server);
+
+    const response = await server.request("/staff/scoreboard", { headers: staffAuth });
+
+    expect(response.status).toBe(200);
+    await expect(readJson(response)).resolves.toMatchObject({
+      status: "success",
+      data: {
+        rank_threshold: 10,
+        frozen: false,
+        freeze_id: null,
+        scoring_cutoff_at: null,
+        rankings: [
+          { rank: 1, user_id: "alice", score: 0 },
+          { rank: 2, user_id: "bob", score: 0 },
+        ],
+      },
+    });
+  });
+
   it("rejects staff endpoints without a staff JWT", async () => {
     const server = await createTestServer();
 
     for (const [path, method] of [
       ["/staff/scoreboard_status", "GET"],
+      ["/staff/scoreboard", "GET"],
       ["/staff/pair_user_tag", "POST"],
       ["/staff/unpair_user_tag", "POST"],
       ["/staff/freeze_scoreboard", "POST"],
@@ -36,6 +65,7 @@ describe("staff scoreboard edge cases", () => {
 
     for (const [path, method] of [
       ["/staff/scoreboard_status", "GET"],
+      ["/staff/scoreboard", "GET"],
       ["/staff/pair_user_tag", "POST"],
       ["/staff/unpair_user_tag", "POST"],
       ["/staff/freeze_scoreboard", "POST"],

@@ -79,6 +79,8 @@ export type ScoreboardPageReadResult =
   | { status: "FREEZING" }
   | { status: "UNAVAILABLE" };
 
+export type ScoreboardReadResult = ScoreboardPageReadResult;
+
 export type ScoreboardUserReadResult =
   | {
       status: "READY";
@@ -142,6 +144,29 @@ export class ScoreboardCoordinatorService {
       freeze_id: snapshot.freeze_id,
       scoring_cutoff_at: snapshot.scoring_cutoff_at,
       entries: snapshot.entries.slice(offset, offset + limit),
+    };
+  }
+
+  async readAll(): Promise<ScoreboardReadResult> {
+    const state = await this.storage.readState();
+    const control = validControl(state.control);
+    if (control.mode !== "IDLE") {
+      return { status: "FREEZING" };
+    }
+
+    const snapshot = validSnapshot(state.snapshot);
+    if (!snapshot) {
+      await this.scheduler.schedule(0);
+      return { status: "UNAVAILABLE" };
+    }
+
+    return {
+      status: "READY",
+      generated_at: snapshot.generated_at,
+      frozen: snapshot.state === "FROZEN",
+      freeze_id: snapshot.freeze_id,
+      scoring_cutoff_at: snapshot.scoring_cutoff_at,
+      entries: snapshot.entries,
     };
   }
 

@@ -24,6 +24,7 @@ import {
 } from "./request";
 import { errorResponse, success, successMessage } from "./responses";
 import { getScoreboardCoordinator } from "./scoreboard-coordinator-service";
+import { getScoreboardPresentations } from "./scoreboard-store";
 import { requireStaffDangerToken, requireStaffRole } from "./staff";
 import { getPrintCard } from "./print-card-store";
 import type { AppEnv } from "./types";
@@ -43,6 +44,47 @@ staffRoutes.get("/scoreboard_status", requireStaffDangerToken, async (c) => {
   const state = await getGameState(c.env.DB);
 
   return success(c, scoreboardStatusData(state));
+});
+
+staffRoutes.get("/scoreboard", async (c) => {
+  const result = await getScoreboardCoordinator(c.env).readAll();
+  if (result.status === "FREEZING") {
+    return errorResponse(c, 409, "SCOREBOARD_FREEZING", "Scoreboard is being frozen.");
+  }
+  if (result.status === "UNAVAILABLE") {
+    return errorResponse(
+      c,
+      409,
+      "SCOREBOARD_READ_INCONSISTENT",
+      "Scoreboard data is temporarily unavailable. Please retry.",
+    );
+  }
+
+  const presentations = await getScoreboardPresentations(
+    c.env.DB,
+    result.entries.map((entry) => entry.user_id),
+  );
+  const rankings = result.entries.flatMap((entry) => {
+    const presentation = presentations.get(entry.user_id);
+    return presentation
+      ? [{
+          rank: entry.rank,
+          user_id: entry.user_id,
+          display_name: presentation.display_name,
+          emoji_icon: presentation.emoji_icon,
+          score: entry.score,
+          external_prize: presentation.external_prize,
+        }]
+      : [];
+  });
+
+  return success(c, {
+    rank_threshold: RANK_THRESHOLD,
+    frozen: result.frozen,
+    freeze_id: result.freeze_id,
+    scoring_cutoff_at: result.scoring_cutoff_at,
+    rankings,
+  });
 });
 
 staffRoutes.post("/pair_user_tag", async (c) => {

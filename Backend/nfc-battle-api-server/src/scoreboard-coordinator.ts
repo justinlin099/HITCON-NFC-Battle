@@ -5,6 +5,7 @@ import {
   type ResumeScoreboardResult,
   type ScoreboardCoordinatorScheduler,
   type ScoreboardCoordinatorStorage,
+  type ScoreboardReadResult,
   type ScoreboardPageReadResult,
   type ScoreboardUserReadResult,
   type StoredCoordinatorState,
@@ -30,6 +31,10 @@ export class ScoreboardCoordinator extends DurableObject<AppBindings> {
 
   readPage(offset: number, limit: number): Promise<ScoreboardPageReadResult> {
     return this.service.readPage(offset, limit);
+  }
+
+  readAll(): Promise<ScoreboardReadResult> {
+    return this.service.readAll();
   }
 
   readUser(userId: string): Promise<ScoreboardUserReadResult> {

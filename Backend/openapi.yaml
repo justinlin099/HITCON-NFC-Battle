@@ -133,6 +133,9 @@ info:
       breakdown from the latest stored live snapshot in `OPEN`, returns their
       values from the stored freeze snapshot in `FROZEN`, and is rejected in
       `FREEZING` with `SCOREBOARD_FREEZING` error.
+    - `GET /staff/scoreboard`; staff-only endpoint that returns the complete
+      stored snapshot without pagination. It is rejected in `FREEZING` with a
+      `SCOREBOARD_FREEZING` error.
 
     If no valid stored snapshot is temporarily available, either endpoint is
     rejected with `SCOREBOARD_READ_INCONSISTENT` and clients should retry.
@@ -724,6 +727,41 @@ paths:
                   $ref: '#/components/examples/ScoreboardReadInconsistentError'
         '429':
           $ref: '#/components/responses/RateLimitError'
+  /staff/scoreboard:
+    get:
+      tags: [Staff]
+      summary: Get the complete scoreboard
+      description: |
+        Returns every ranking from one stored scoreboard snapshot without
+        offset or limit pagination. Requires a conference JWT whose `role`
+        claim is `STAFF`. In `OPEN`, the response contains the latest
+        periodically published live snapshot; in `FROZEN`, it contains the
+        stored freeze snapshot. The endpoint is rejected while `FREEZING` or
+        while no valid stored snapshot is temporarily available.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Complete scoreboard loaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetFullScoreboardResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          description: Scoreboard is freezing, or no valid stored snapshot is temporarily available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                freezing:
+                  $ref: '#/components/examples/ScoreboardFreezingError'
+                read_inconsistent:
+                  $ref: '#/components/examples/ScoreboardReadInconsistentError'
   /staff/scoreboard_status:
     get:
       tags: [Staff]
@@ -1976,6 +2014,46 @@ components:
               example: '2026-04-12T15:00:00Z'
             rankings:
               type: array
+              items:
+                $ref: '#/components/schemas/ScoreboardItem'
+
+    GetFullScoreboardResponse:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: object
+          required:
+            - rank_threshold
+            - frozen
+            - freeze_id
+            - scoring_cutoff_at
+            - rankings
+          properties:
+            rank_threshold:
+              type: integer
+              description: Configurable top-rank threshold for rank prizes.
+              example: 10
+            frozen:
+              type: boolean
+              example: false
+            freeze_id:
+              type: string
+              nullable: true
+              description: Current freeze snapshot ID when frozen, otherwise null.
+              example: freeze_20260412_01
+            scoring_cutoff_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Latest event timestamp included in the frozen score snapshot, or null for live scores.
+              example: '2026-04-12T15:00:00Z'
+            rankings:
+              type: array
+              description: Every ranking from the stored snapshot.
               items:
                 $ref: '#/components/schemas/ScoreboardItem'
 
