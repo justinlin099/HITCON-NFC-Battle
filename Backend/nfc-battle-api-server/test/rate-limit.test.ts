@@ -72,6 +72,27 @@ describe("attendee rate limits", () => {
     expect(limited.status).toBe(429);
   });
 
+  it("limits collection scans to ten requests per user per minute", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+
+    for (let request = 0; request < 10; request += 1) {
+      const response = await server.request(
+        "/collection/scan",
+        await jsonRequest("POST", {}, aliceAuth),
+      );
+      expect(response.status).toBe(400);
+    }
+
+    const limited = await server.request(
+      "/collection/scan",
+      await jsonRequest("POST", {}, aliceAuth),
+    );
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBe("60");
+    await expect(readJson(limited)).resolves.toMatchObject({ code: "RATE_LIMITED" });
+  });
+
   it("allows sixty requests per minute for each scoreboard endpoint", async () => {
     const server = await createTestServer();
     const aliceAuth = await authHeaders("alice");

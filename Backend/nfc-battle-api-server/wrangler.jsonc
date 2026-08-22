@@ -119,7 +119,7 @@
 		{
 			"name": "COLLECTION_SCAN_RATE_LIMITER",
 			"namespace_id": "2026082140",
-			"simple": { "limit": 30, "period": 60 }
+			"simple": { "limit": 10, "period": 60 }
 		},
 		{
 			"name": "PHISHING_RECORD_RATE_LIMITER",
@@ -237,7 +237,7 @@
 				{
 					"name": "COLLECTION_SCAN_RATE_LIMITER",
 					"namespace_id": "2026082160",
-					"simple": { "limit": 30, "period": 60 }
+					"simple": { "limit": 10, "period": 60 }
 				},
 				{
 					"name": "PHISHING_RECORD_RATE_LIMITER",
@@ -355,7 +355,7 @@
 				{
 					"name": "COLLECTION_SCAN_RATE_LIMITER",
 					"namespace_id": "2026082180",
-					"simple": { "limit": 30, "period": 60 }
+					"simple": { "limit": 10, "period": 60 }
 				},
 				{
 					"name": "PHISHING_RECORD_RATE_LIMITER",

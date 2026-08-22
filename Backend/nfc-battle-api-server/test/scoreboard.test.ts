@@ -383,7 +383,11 @@ describe("mission and scoreboard edge cases", () => {
       },
     });
 
+    server.resetRateLimitWindow("COLLECTION_SCAN_RATE_LIMITER");
     for (let index = 0; index < 20; index += 1) {
+      if (index === 10) {
+        server.resetRateLimitWindow("COLLECTION_SCAN_RATE_LIMITER");
+      }
       const sponsorId = `post-freeze-sponsor-${index}`;
       const sponsorTagId = `04:00:00:00:00:01:${index.toString(16).toUpperCase().padStart(2, "0")}`;
       const sponsorAuth = await authHeaders(sponsorId, "SPONSOR");

@@ -10,7 +10,7 @@ import {
   type ScoreboardCoordinatorStorage,
   type StoredCoordinatorState,
 } from "../src/scoreboard-coordinator-service";
-import type { AppBindings, UserRole } from "../src/types";
+import type { AppBindings, EndpointRateLimitBinding, UserRole } from "../src/types";
 
 const JWT_SECRET = "test-secret";
 const JWT_ISSUER = "hitcon-2026";
@@ -116,6 +116,10 @@ class TestRateLimit {
     this.counts.set(key, count);
     return { success: count <= this.limitValue };
   }
+
+  reset() {
+    this.counts.clear();
+  }
 }
 
 class TestScoreboardStorage implements ScoreboardCoordinatorStorage {
@@ -150,6 +154,7 @@ export interface TestServer {
   env: AppBindings;
   db: D1Database;
   request(path: string, init?: RequestInit): Promise<Response>;
+  resetRateLimitWindow(binding: EndpointRateLimitBinding): void;
 }
 
 export async function createTestServer(): Promise<TestServer> {
@@ -174,7 +179,7 @@ export async function createTestServer(): Promise<TestServer> {
     USER_PROFILE_READ_RATE_LIMITER: new TestRateLimit(30) as unknown as RateLimit,
     USER_COLLECTION_READ_RATE_LIMITER: new TestRateLimit(5) as unknown as RateLimit,
     TAG_PAIR_RATE_LIMITER: new TestRateLimit(5) as unknown as RateLimit,
-    COLLECTION_SCAN_RATE_LIMITER: new TestRateLimit(30) as unknown as RateLimit,
+    COLLECTION_SCAN_RATE_LIMITER: new TestRateLimit(10) as unknown as RateLimit,
     PHISHING_RECORD_RATE_LIMITER: new TestRateLimit(3) as unknown as RateLimit,
     STAMP_MISSION_READ_RATE_LIMITER: new TestRateLimit(60) as unknown as RateLimit,
     SCOREBOARD_READ_RATE_LIMITER: new TestRateLimit(60) as unknown as RateLimit,
@@ -203,6 +208,9 @@ export async function createTestServer(): Promise<TestServer> {
   return {
     env,
     db,
+    resetRateLimitWindow(binding) {
+      (env[binding] as unknown as TestRateLimit).reset();
+    },
     async request(path, init) {
       const backgroundTasks: Promise<unknown>[] = [];
       const executionCtx = {
