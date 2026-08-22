@@ -100,4 +100,34 @@ describe("phishing event edge cases", () => {
       message: "Phishing event recorded.",
     });
   });
+
+  it("rejects phishing after the scoreboard is frozen without recording an event", async () => {
+    const server = await createTestServer();
+    const aliceAuth = await authHeaders("alice");
+    const bobAuth = await authHeaders("bob");
+    await server.request("/users/me", { headers: aliceAuth });
+    await server.request("/users/me", { headers: bobAuth });
+    await server.db.exec(`
+      UPDATE game_state
+      SET state = 'FROZEN', freeze_id = 'freeze_phishing_closed'
+      WHERE id = 1
+    `);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await server.request(
+        "/collection/phishing",
+        await jsonRequest("POST", { victim: "alice", attacker: "bob" }, aliceAuth),
+      );
+
+      expect(response.status).toBe(409);
+      await expect(readJson(response)).resolves.toEqual({
+        status: "error",
+        code: "EVENT_ENDED",
+        message: "Thank you for participating HITCON 2026! See you next year!",
+      });
+    }
+    await expect(
+      server.db.prepare("SELECT COUNT(*) AS count FROM phishing_events").first(),
+    ).resolves.toEqual({ count: 0 });
+  });
 });

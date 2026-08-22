@@ -66,12 +66,12 @@ export async function getPrizeClaim(
     .first<PrizeClaimRow>();
 }
 
-export async function recordPhishingEvent(
+export async function recordPhishingEventUnlessFrozen(
   db: D1Database,
   victimUserId: string,
   attackerUserId: string,
 ) {
-  await db
+  const result = await db
     .prepare(
       `
       INSERT INTO phishing_events (
@@ -79,11 +79,18 @@ export async function recordPhishingEvent(
         victim_user_id,
         attacker_user_id
       )
-      VALUES (?1, ?2, ?3)
+      SELECT ?1, ?2, ?3
+      WHERE EXISTS (
+        SELECT 1
+        FROM game_state
+        WHERE id = 1 AND state != 'FROZEN'
+      )
       `,
     )
     .bind(newId("phishing"), victimUserId, attackerUserId)
     .run();
+
+  return result.meta.changes > 0;
 }
 
 export async function writePrizeSnapshot(

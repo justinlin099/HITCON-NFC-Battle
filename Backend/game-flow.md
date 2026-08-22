@@ -119,7 +119,7 @@ Example:
 
 ### Phishing
 
-If the mobile app is triggered by clicking a link (like `https://game.hitcon2026.online/b?u={user_id}`) instead of scanning a tag, the app will not detect a physical ID. Then, the app will send request to `POST /collection/phishing` with `victim` and `attacker`. Our API server will record this event. The freeze calculation applies the phishing penalty to eligible phishing events in the stored score snapshot.
+If the mobile app is triggered by clicking a link (like `https://game.hitcon2026.online/b?u={user_id}`) instead of scanning a tag, the app will not detect a physical ID. Then, the app will send request to `POST /collection/phishing` with `victim` and `attacker`. While the scoreboard is `OPEN` or `FREEZING`, our API server records this event. After the scoreboard reaches `FROZEN`, the endpoint rejects the request with `EVENT_ENDED` and the message `Thank you for participating HITCON 2026! See you next year!`. The freeze calculation applies the phishing penalty to eligible phishing events in the stored score snapshot.
 
 ### Missions
 
@@ -129,7 +129,7 @@ The user can use `GET /missions/stamp` to see `stamp_threshold` and their progre
 
 While the scoreboard state is `OPEN`, a single coordinator periodically calculates and publishes a stored live score snapshot. The configured refresh interval is a best-effort target, currently 10 seconds, rather than an exact timer. Collection and phishing activity therefore appears on the scoreboard after the next successful refresh instead of making attendee requests recalculate the global ranking.
 
-The user can use `GET /scoreboard` with `offset` and `limit` to query the global scoreboard. In `OPEN`, each request takes its page from the latest stored live snapshot; separate page requests may observe different snapshot generations when a refresh occurs between them. In `FREEZING`, this endpoint is rejected because the final snapshot is being calculated. In `FROZEN`, it returns the stored freeze snapshot, so scores do not change even if the app continues to record pairing, scanning, phishing, profile, and collection updates. Display names, emoji icons, and the `external_prize` flag are hydrated from current live data and do not change a stored score or rank.
+The user can use `GET /scoreboard` with `offset` and `limit` to query the global scoreboard. In `OPEN`, each request takes its page from the latest stored live snapshot; separate page requests may observe different snapshot generations when a refresh occurs between them. In `FREEZING`, this endpoint is rejected because the final snapshot is being calculated. In `FROZEN`, it returns the stored freeze snapshot, so scores do not change even if the app continues to record pairing, scanning, profile, and collection updates. Display names, emoji icons, and the `external_prize` flag are hydrated from current live data and do not change a stored score or rank.
 
 The user can use `GET /scoreboard/me` to query only their own global rank and score calculation. The response includes `rank`, `score`, `num_of_collection`, `num_of_phishing`, `score_per_collection`, and `phishing_penalty`. It reads the same stored live snapshot in `OPEN`, is rejected with `SCOREBOARD_FREEZING` in `FREEZING`, and returns values from the stored freeze snapshot in `FROZEN`. If no valid stored snapshot is temporarily available, `GET /scoreboard` and `GET /scoreboard/me` return `SCOREBOARD_READ_INCONSISTENT`, and the client should retry.
 
@@ -158,7 +158,7 @@ To avoid race conditions and support resume, the scoreboard should use a state m
 
 If the scoreboard stays in `FREEZING` longer than `freeze_timeout`, the freeze is considered stale. Partial results for that `freeze_id` should not be visible to users, because `GET /users/me/prize` only reads a stored snapshot when the scoreboard state is `FROZEN`.
 
-The app should keep working after the scoreboard is frozen. `PATCH /users/me`, `POST /tags/pair`, `POST /staff/pair_user_tag`, `POST /staff/unpair_user_tag`, `POST /collection/scan`, `POST /collection/phishing`, `POST /print-cards`, profile lookup, collection lookup, bootstrap, batch refresh, mission progress, print-card download, and NFC unlock-code lookup continue to use and update live app data after the conference ends. These later live updates must not change the stored score and prize snapshot unless staff explicitly resumes scoring and freezes again.
+The app should keep working after the scoreboard is frozen. `PATCH /users/me`, `POST /tags/pair`, `POST /staff/pair_user_tag`, `POST /staff/unpair_user_tag`, `POST /collection/scan`, `POST /print-cards`, profile lookup, collection lookup, bootstrap, batch refresh, mission progress, print-card download, and NFC unlock-code lookup continue to use and update live app data after the conference ends. `POST /collection/phishing` instead returns `EVENT_ENDED` with the conference thank-you message while the scoreboard remains `FROZEN`. Later live updates must not change the stored score and prize snapshot unless staff explicitly resumes scoring and freezes again.
 
 The API server should provide `GET /staff/scoreboard_status` with a JWT whose `role` is `STAFF` plus `STAFF_DANGER_TOKEN` so staff can inspect the current scoreboard state, current `freeze_id`, and freeze timestamps.
 

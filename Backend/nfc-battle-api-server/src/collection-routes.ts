@@ -1,7 +1,8 @@
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { requireAuth } from "./auth";
 import { collectUserIfNew } from "./collection-store";
-import { recordPhishingEvent } from "./freeze-snapshot-store";
+import { recordPhishingEventUnlessFrozen } from "./freeze-snapshot-store";
+import { getGameState } from "./game-state";
 import {
   hasOnlyKeys,
   isPlainObject,
@@ -17,6 +18,7 @@ import { getUserRow, publicFullProfileFromRow } from "./user-store";
 
 const SCAN_COLLECTION_KEYS = new Set(["user_id", "physical_id"]);
 const PHISHING_KEYS = new Set(["victim", "attacker"]);
+const EVENT_ENDED_MESSAGE = "Thank you for participating HITCON 2026! See you next year!";
 
 const collection = new Hono<AppEnv>();
 
@@ -52,32 +54,53 @@ collection.post("/scan", limitUserRequests("COLLECTION_SCAN_RATE_LIMITER", "POST
   });
 });
 
-collection.post("/phishing", limitUserRequests("PHISHING_RECORD_RATE_LIMITER", "POST /collection/phishing"), async (c) => {
-  const authUser = c.get("authUser");
+collection.post(
+  "/phishing",
+  rejectPhishingAfterEvent,
+  limitUserRequests("PHISHING_RECORD_RATE_LIMITER", "POST /collection/phishing"),
+  async (c) => {
+    const authUser = c.get("authUser");
 
-  const request = validatePhishingRequest(await readJson(c));
-  if (!request || request.victim !== authUser.userId || request.victim === request.attacker) {
-    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
-  }
+    const request = validatePhishingRequest(await readJson(c));
+    if (!request || request.victim !== authUser.userId || request.victim === request.attacker) {
+      return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+    }
 
-  const [victim, attacker] = await Promise.all([
-    getUserRow(c.env.DB, request.victim),
-    getUserRow(c.env.DB, request.attacker),
-  ]);
-  if (!victim) {
-    return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
-  }
+    const [victim, attacker] = await Promise.all([
+      getUserRow(c.env.DB, request.victim),
+      getUserRow(c.env.DB, request.attacker),
+    ]);
+    if (!victim) {
+      return errorResponse(c, 404, "USER_NOT_FOUND", "User not found.");
+    }
 
-  if (!attacker) {
-    return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
-  }
+    if (!attacker) {
+      return errorResponse(c, 400, "BAD_REQUEST", "Invalid request body or query parameter.");
+    }
 
-  await recordPhishingEvent(c.env.DB, request.victim, request.attacker);
+    const recorded = await recordPhishingEventUnlessFrozen(
+      c.env.DB,
+      request.victim,
+      request.attacker,
+    );
+    if (!recorded) {
+      return errorResponse(c, 409, "EVENT_ENDED", EVENT_ENDED_MESSAGE);
+    }
 
-  return successMessage(c, "Phishing event recorded.");
-});
+    return successMessage(c, "Phishing event recorded.");
+  },
+);
 
 export default collection;
+
+async function rejectPhishingAfterEvent(c: Context<AppEnv>, next: Next) {
+  const gameState = await getGameState(c.env.DB);
+  if (gameState.state === "FROZEN") {
+    return errorResponse(c, 409, "EVENT_ENDED", EVENT_ENDED_MESSAGE);
+  }
+
+  await next();
+}
 
 function validateScanCollectionRequest(value: unknown) {
   if (!isPlainObject(value) || !hasOnlyKeys(value, SCAN_COLLECTION_KEYS)) {

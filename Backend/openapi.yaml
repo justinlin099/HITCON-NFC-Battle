@@ -103,7 +103,6 @@ info:
       permission
     - `POST /tags/pair`
     - `POST /collection/scan`
-    - `POST /collection/phishing`
     - `GET /missions/stamp`
     - `POST /print-cards`
     - `GET /staff/scoreboard_status`
@@ -123,6 +122,11 @@ info:
       clients should retry.
     - `POST /staff/prize-claims` with `type: RANKING`; rejected in `OPEN` and
       `FREEZING` with `SCOREBOARD_NOT_FROZEN`.
+
+    The following endpoint is available in `OPEN` and `FREEZING`, but rejected
+    in `FROZEN`:
+    - `POST /collection/phishing`; rejected with `EVENT_ENDED` and the
+      conference thank-you message.
 
     The following endpoints are available in `OPEN` and `FROZEN`, but rejected
     in `FREEZING`:
@@ -148,11 +152,11 @@ info:
       `SCOREBOARD_NOT_FROZEN`
 
     The app remains usable after the conference ends. Pairing, scanning,
-    phishing records, profile updates, collection browsing, bootstrap, and
-    batch refresh continue to update live app data after the scoreboard is
-    frozen. The freeze operation creates a score and prize snapshot; later live
-    activity must not change that stored snapshot unless staff explicitly
-    resumes scoring and freezes again.
+    profile updates, collection browsing, bootstrap, and batch refresh continue
+    to update live app data after the scoreboard is frozen. Phishing records are
+    rejected while frozen. The freeze operation creates a score and prize
+    snapshot; later live activity must not change that stored snapshot unless
+    staff explicitly resumes scoring and freezes again.
 servers:
   - url: https://nfc-battle-api.hitcon2026.online
     description: Production API
@@ -565,10 +569,10 @@ paths:
         physical NFC tag, so the app cannot detect a physical ID. The server
         records `victim` and `attacker`.
 
-        This endpoint remains available in `OPEN`, `FREEZING`, and `FROZEN` so
-        the app keeps working after the conference ends. Phishing records after
-        a freeze update live event data but do not change the stored score and
-        prize snapshot.
+        This endpoint is available while the scoreboard is `OPEN` or
+        `FREEZING`. After the scoreboard reaches `FROZEN`, it returns
+        `EVENT_ENDED` with the conference thank-you message and does not record
+        a phishing event.
       requestBody:
         required: true
         content:
@@ -596,6 +600,8 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/UserNotFoundError'
+        '409':
+          $ref: '#/components/responses/EventEndedError'
         '429':
           $ref: '#/components/responses/RateLimitError'
   /missions/stamp:
@@ -637,8 +643,8 @@ paths:
         is being calculated.
 
         In `FROZEN`, this endpoint returns the stored freeze snapshot, so scores
-        do not change even if pairing, scanning, phishing records, and profile
-        updates continue after the conference ends. The response includes the
+        do not change even if pairing, scanning, and profile updates continue
+        after the conference ends. The response includes the
         snapshot `freeze_id` and `scoring_cutoff_at`. Each ranking includes a
         live `external_prize` flag, which does not affect score, rank,
         or the freeze snapshot.
@@ -1325,6 +1331,16 @@ components:
             status: error
             code: SCOREBOARD_READ_INCONSISTENT
             message: Scoreboard data is temporarily unavailable. Please retry.
+    EventEndedError:
+      description: The conference has ended and phishing events are no longer accepted.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            code: EVENT_ENDED
+            message: Thank you for participating HITCON 2026! See you next year!
     PayloadTooLargeError:
       description: Request body exceeds the endpoint's size limit.
       content:
@@ -1374,6 +1390,7 @@ components:
             - SCOREBOARD_FREEZING
             - SCOREBOARD_NOT_FROZEN
             - SCOREBOARD_READ_INCONSISTENT
+            - EVENT_ENDED
             - PRINT_CARD_NOT_FOUND
             - PAYLOAD_TOO_LARGE
             - RATE_LIMITED

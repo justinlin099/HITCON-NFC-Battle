@@ -79,6 +79,10 @@ describe("OpenAPI contract drift", () => {
     expect(readOpenApiOperationResponses("/scoreboard", "get")).toContain("400");
   });
 
+  it("documents phishing as unavailable after the event ends", () => {
+    expect(readOpenApiOperationResponses("/collection/phishing", "post")).toContain("409");
+  });
+
   it("documents the physical NFC tag ID format", () => {
     const schema = parse(readOpenApi()).components.schemas.PhysicalTagId;
 
