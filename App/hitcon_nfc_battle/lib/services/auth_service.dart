@@ -346,14 +346,16 @@ class AuthService {
       _setNtagSecretError('No authenticated session is available.');
       return null;
     }
-    if (uid.trim().isEmpty) {
+    final bool staffUnlockRequest =
+        purpose == 'unlock' && (isAdmin || isEventStaff) && userId != null;
+    if (staffUnlockRequest && uid.trim().isEmpty) {
       _setNtagSecretError('The phone could not read the physical Tag UID.');
       return null;
     }
 
     try {
       final String targetUserId = (userId ?? '').trim();
-      if (purpose == 'unlock' && (isAdmin || isEventStaff)) {
+      if (staffUnlockRequest) {
         if (targetUserId.isEmpty) {
           _setNtagSecretError(
             'The Tag URL does not contain a user_id, so the STAFF API cannot identify its owner.',
@@ -387,25 +389,12 @@ class AuthService {
         return secret;
       }
 
-      final Map<String, dynamic>? profile =
-          _userProfile ?? await fetchUserProfile();
+      final Map<String, dynamic>? profile = purpose == 'unlock'
+          ? await fetchUserProfile()
+          : _userProfile ?? await fetchUserProfile();
       if (profile == null) {
         _setNtagSecretError('The current user profile could not be loaded.');
         return null;
-      }
-      if (purpose == 'unlock') {
-        final String pairedUid =
-            (profile['paired_ntag_uid'] as String? ??
-                    profile['physical_id'] as String? ??
-                    '')
-                .trim()
-                .toUpperCase();
-        if (pairedUid.isNotEmpty && pairedUid != uid.trim().toUpperCase()) {
-          _setNtagSecretError(
-            'The scanned Tag UID does not match the Tag paired to this account.',
-          );
-          return null;
-        }
       }
       final NtagLockSecret? secret = _secretFromNfcTagKey(
         profile['nfc_tag_key'],

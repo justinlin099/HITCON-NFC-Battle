@@ -486,14 +486,24 @@ class _NtagUnlockPageState extends State<NtagUnlockPage> {
           NtagSecurityResult result;
           try {
             parsedTagId = _security.readTagId(tag);
-            final NtagLockSecret? lockSecret = await AuthService()
+            final AuthService authService = AuthService();
+            final NtagLockSecret? lockSecret = await authService
                 .requestNtagLockSecret(uid: parsedTagId, purpose: 'unlock');
-            result = lockSecret == null
-                ? const NtagSecurityResult(
-                    success: false,
-                    messageKey: 'unlockSecretFailed',
-                  )
-                : await _security.unlockForRewrite(tag, lockSecret);
+            if (lockSecret == null) {
+              final String reason =
+                  authService.lastNtagSecretError?.trim() ?? '';
+              result = NtagSecurityResult(
+                success: false,
+                messageKey: reason.isEmpty
+                    ? 'unlockSecretFailed'
+                    : 'unlockSecretFailedWithReason',
+                values: reason.isEmpty
+                    ? const <String, Object?>{}
+                    : <String, Object?>{'reason': reason},
+              );
+            } else {
+              result = await _security.unlockForRewrite(tag, lockSecret);
+            }
           } catch (error) {
             result = NtagSecurityResult(
               success: false,

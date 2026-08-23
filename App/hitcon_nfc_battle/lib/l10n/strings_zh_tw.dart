@@ -320,6 +320,7 @@ const Map<String, String> appStringsZhTw = <String, String>{
   'scanOwnNtagToUnlock': '請掃描自己的 NTAG 進行解鎖',
   'holdOwnNtagNearPhone': '請將手機靠近自己的 NTAG',
   'unlockSecretFailed': '無法取得解鎖金鑰，請確認這是你已配對的 NTAG 並檢查網路。',
+  'unlockSecretFailedWithReason': '無法取得解鎖金鑰。原因：{reason}',
   'scanStopped': '已停止掃描。',
   'unlockOwnNtag': '解鎖自己的 NTAG',
   'loginPrompt': '請登入 HITCON NFC Battle',

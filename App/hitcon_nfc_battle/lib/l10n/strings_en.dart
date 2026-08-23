@@ -361,6 +361,8 @@ const Map<String, String> appStringsEn = <String, String>{
   'holdOwnNtagNearPhone': 'Hold your own NTAG near the phone',
   'unlockSecretFailed':
       'Could not get the unlock key. Check that this is your paired NTAG and verify the connection.',
+  'unlockSecretFailedWithReason':
+      'Could not get the unlock key. Reason: {reason}',
   'scanStopped': 'Scanning stopped.',
   'unlockOwnNtag': 'Unlock your NTAG',
   'loginPrompt': 'Sign in to HITCON NFC Battle',

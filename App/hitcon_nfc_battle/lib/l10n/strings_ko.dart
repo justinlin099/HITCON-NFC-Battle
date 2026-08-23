@@ -322,6 +322,7 @@ const Map<String, String> appStringsKo = <String, String>{
   "scanOwnNtagToUnlock": "NTAG를 스캔하여 잠금을 해제하세요.",
   "holdOwnNtagNearPhone": "전화기 근처에 자신의 NTAG를 들고",
   "unlockSecretFailed": "잠금해제 키를 얻을 수 없습니다. 이것이 페어링된 NTAG인지 확인하고 연결을 확인하세요.",
+  "unlockSecretFailedWithReason": "잠금 해제 키를 가져올 수 없습니다. 이유: {reason}",
   "scanStopped": "스캔이 중지되었습니다.",
   "unlockOwnNtag": "NTAG 잠금 해제",
   "loginPrompt": "HITCON NFC 배틀에 로그인하세요",

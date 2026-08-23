@@ -326,6 +326,7 @@ const Map<String, String> appStringsJa = <String, String>{
   "holdOwnNtagNearPhone": "自分の NTAG を電話機の近くに持ちます",
   "unlockSecretFailed":
       "ロック解除キーを取得できませんでした。これがペアリングされた NTAG であることを確認し、接続を確認します。",
+  "unlockSecretFailedWithReason": "ロック解除キーを取得できませんでした。理由: {reason}",
   "scanStopped": "スキャンが停止しました。",
   "unlockOwnNtag": "NTAG のロックを解除する",
   "loginPrompt": "HITCON NFC バトルにサインインする",
