@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "api_base_url": "https://nfc-battle-api.hitcon2026.online",
-  "allow_user_tag_unlock": false,
+  "allow_user_tag_unlock": true,
   "show_panasonic_logo": true,
   "show_panasonic_logo_on_print": true,
   "manual_url": "https://github.com/justinlin099/HITCON-NFC-Battle/blob/main/App/hitcon_nfc_battle/docs/user_manual.md",
