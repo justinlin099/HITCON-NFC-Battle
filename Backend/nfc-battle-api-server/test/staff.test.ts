@@ -799,13 +799,14 @@ describe("staff scoreboard edge cases", () => {
     ).run();
     await server.db.prepare(
       `
-      INSERT INTO phishing_events (
-        event_id,
-        victim_user_id,
-        attacker_user_id,
+      INSERT INTO phishing_events_condensed (
+        victim_id,
+        attacker_id,
+        count,
+        last_created_at,
         applied_freeze_id
       )
-      VALUES ('phishing_stale', 'alice', 'alice', 'freeze_stale')
+      VALUES ('alice', 'alice', 1, '2026-04-12T14:59:00.000Z', 'freeze_stale')
       `,
     ).run();
 
@@ -835,7 +836,13 @@ describe("staff scoreboard edge cases", () => {
     ).resolves.toEqual({ count: 0 });
     await expect(
       server.db
-        .prepare("SELECT applied_freeze_id FROM phishing_events WHERE event_id = 'phishing_stale'")
+        .prepare(
+          `
+          SELECT applied_freeze_id
+          FROM phishing_events_condensed
+          WHERE victim_id = 'alice' AND attacker_id = 'alice'
+          `,
+        )
         .first<{ applied_freeze_id: string | null }>(),
     ).resolves.toEqual({ applied_freeze_id: null });
 

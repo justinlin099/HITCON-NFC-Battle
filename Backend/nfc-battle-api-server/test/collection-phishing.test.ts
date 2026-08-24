@@ -99,6 +99,24 @@ describe("phishing event edge cases", () => {
     await expect(readJson(response)).resolves.toMatchObject({
       message: "Phishing event recorded.",
     });
+
+    const repeatedResponse = await server.request(
+      "/collection/phishing",
+      await jsonRequest("POST", { victim: "alice", attacker: "bob" }, aliceAuth),
+    );
+    expect(repeatedResponse.status).toBe(200);
+
+    await expect(
+      server.db
+        .prepare(
+          `
+          SELECT victim_id, attacker_id, count
+          FROM phishing_events_condensed
+          WHERE victim_id = 'alice' AND attacker_id = 'bob'
+          `,
+        )
+        .first(),
+    ).resolves.toEqual({ victim_id: "alice", attacker_id: "bob", count: 2 });
   });
 
   it("rejects phishing after the scoreboard is frozen without recording an event", async () => {
@@ -127,7 +145,7 @@ describe("phishing event edge cases", () => {
       });
     }
     await expect(
-      server.db.prepare("SELECT COUNT(*) AS count FROM phishing_events").first(),
+      server.db.prepare("SELECT COUNT(*) AS count FROM phishing_events_condensed").first(),
     ).resolves.toEqual({ count: 0 });
   });
 });

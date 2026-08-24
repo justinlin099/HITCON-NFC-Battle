@@ -307,15 +307,15 @@ describe("mission and scoreboard edge cases", () => {
     await server.db
       .prepare(
         `
-        INSERT INTO phishing_events (
-          event_id,
-          victim_user_id,
-          attacker_user_id,
-          created_at
+        INSERT INTO phishing_events_condensed (
+          victim_id,
+          attacker_id,
+          count,
+          last_created_at
         )
         VALUES
-          ('phish-before-cutoff', 'alice', 'bob', '2026-04-12T14:58:00.000Z'),
-          ('phish-after-cutoff', 'alice', 'bob', '2026-04-12T15:03:00.000Z')
+          ('alice', 'bob', 1, '2026-04-12T14:58:00.000Z'),
+          ('alice', 'carol', 1, '2026-04-12T15:03:00.000Z')
         `,
       )
       .run();
@@ -354,21 +354,22 @@ describe("mission and scoreboard edge cases", () => {
       server.db
         .prepare(
           `
-          SELECT event_id, applied_freeze_id
-          FROM phishing_events
-          ORDER BY event_id ASC
+          SELECT attacker_id, applied_freeze_id
+          FROM phishing_events_condensed
+          WHERE victim_id = 'alice'
+          ORDER BY attacker_id ASC
           `,
         )
-        .all<{ event_id: string; applied_freeze_id: string | null }>(),
+        .all<{ attacker_id: string; applied_freeze_id: string | null }>(),
     ).resolves.toMatchObject({
       results: [
         {
-          event_id: "phish-after-cutoff",
-          applied_freeze_id: null,
+          attacker_id: "bob",
+          applied_freeze_id: freezeBody.data.freeze_id,
         },
         {
-          event_id: "phish-before-cutoff",
-          applied_freeze_id: freezeBody.data.freeze_id,
+          attacker_id: "carol",
+          applied_freeze_id: null,
         },
       ],
     });

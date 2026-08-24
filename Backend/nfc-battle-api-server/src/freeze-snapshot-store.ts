@@ -4,7 +4,7 @@ import {
   SCORE_PER_COLLECTION,
   STAMP_THRESHOLD,
 } from "./game-config";
-import { newId, nowIso } from "./ids";
+import { nowIso } from "./ids";
 
 export interface PrizeResultRow {
   final_score: number;
@@ -74,20 +74,25 @@ export async function recordPhishingEventUnlessFrozen(
   const result = await db
     .prepare(
       `
-      INSERT INTO phishing_events (
-        event_id,
-        victim_user_id,
-        attacker_user_id
+      INSERT INTO phishing_events_condensed (
+        victim_id,
+        attacker_id,
+        count,
+        last_created_at
       )
-      SELECT ?1, ?2, ?3
+      SELECT ?1, ?2, 1, ?3
       WHERE EXISTS (
         SELECT 1
         FROM game_state
-        WHERE id = 1 AND state != 'FROZEN'
+        WHERE id = 1 AND state = 'OPEN'
       )
+      ON CONFLICT (victim_id, attacker_id) DO UPDATE SET
+        count = phishing_events_condensed.count + 1,
+        last_created_at = excluded.last_created_at,
+        applied_freeze_id = NULL
       `,
     )
-    .bind(newId("phishing"), victimUserId, attackerUserId)
+    .bind(victimUserId, attackerUserId, nowIso())
     .run();
 
   return result.meta.changes > 0;
@@ -111,11 +116,11 @@ export async function writePrizeSnapshot(
       ),
       phishing_counts AS (
         SELECT
-          victim_user_id AS user_id,
-          COUNT(*) AS num_of_phishing
-        FROM phishing_events
-        WHERE applied_freeze_id IS NULL AND created_at <= ?7
-        GROUP BY victim_user_id
+          victim_id AS user_id,
+          SUM(count) AS num_of_phishing
+        FROM phishing_events_condensed
+        WHERE applied_freeze_id IS NULL AND last_created_at <= ?7
+        GROUP BY victim_id
       ),
       stamp_counts AS (
         SELECT
@@ -200,9 +205,9 @@ export async function markPhishingEventsApplied(
   await db
     .prepare(
       `
-      UPDATE phishing_events
+      UPDATE phishing_events_condensed
       SET applied_freeze_id = ?1
-      WHERE applied_freeze_id IS NULL AND created_at <= ?2
+      WHERE applied_freeze_id IS NULL AND last_created_at <= ?2
       `,
     )
     .bind(freezeId, scoringCutoffAt)
@@ -220,7 +225,7 @@ export async function unmarkPhishingEventsApplied(db: D1Database, freezeId: stri
   await db
     .prepare(
       `
-      UPDATE phishing_events
+      UPDATE phishing_events_condensed
       SET applied_freeze_id = NULL
       WHERE applied_freeze_id = ?1
       `,

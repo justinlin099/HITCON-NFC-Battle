@@ -177,7 +177,7 @@ then applies the current initial schema directly. Applying the schema with
 have been dropped.
 
 ```txt
-npm run wrangler -- d1 execute nfc-battle-api-server-staging --remote --command "DROP TRIGGER IF EXISTS bump_collection_version_after_insert; DROP TABLE IF EXISTS prize_results; DROP TABLE IF EXISTS game_state; DROP TABLE IF EXISTS phishing_events; DROP TABLE IF EXISTS collections; DROP TABLE IF EXISTS nfc_tags; DROP TABLE IF EXISTS users;"
+npm run wrangler -- d1 execute nfc-battle-api-server-staging --remote --command "DROP TRIGGER IF EXISTS bump_collection_version_after_insert; DROP TABLE IF EXISTS prize_results; DROP TABLE IF EXISTS game_state; DROP TABLE IF EXISTS phishing_events_condensed; DROP TABLE IF EXISTS collections; DROP TABLE IF EXISTS nfc_tags; DROP TABLE IF EXISTS users;"
 npm run wrangler -- d1 execute nfc-battle-api-server-staging --remote --file ./migrations/0001_initial_schema.sql
 ```
 

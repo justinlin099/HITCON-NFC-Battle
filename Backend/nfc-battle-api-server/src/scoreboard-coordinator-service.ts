@@ -15,7 +15,6 @@ import {
 } from "./game-state";
 import { nowIso } from "./ids";
 import {
-  advanceLiveScoreboard,
   getFrozenScoreboardEntries,
   getLiveScoreboardBaseline,
   type ScoreboardSnapshotEntry,
@@ -298,11 +297,7 @@ export class ScoreboardCoordinatorService {
     const pendingSnapshot = validSnapshot(stored.pending_snapshot);
 
     if (gameState.state === "OPEN") {
-      if (control.mode !== "IDLE" || snapshot?.state !== "OPEN") {
-        await this.publishOpenBaseline();
-      } else {
-        await this.publishOpenIncrement(snapshot);
-      }
+      await this.publishOpenBaseline();
       return;
     }
 
@@ -350,31 +345,6 @@ export class ScoreboardCoordinatorService {
     } else {
       await this.scheduler.schedule(refreshIntervalMs(this.env()));
     }
-  }
-
-  private async publishOpenIncrement(snapshot: ScoreboardSnapshot) {
-    if (!snapshot.cursors) {
-      await this.publishOpenBaseline();
-      return;
-    }
-
-    const next = await advanceLiveScoreboard(
-      this.env().DB,
-      snapshot.entries,
-      snapshot.cursors,
-    );
-    if (!next) {
-      await this.publishOpenBaseline();
-      return;
-    }
-
-    const latestState = await getGameState(this.env().DB);
-    if (latestState.state !== "OPEN") {
-      await this.scheduler.schedule(0);
-      return;
-    }
-
-    await this.publishSnapshot(makeSnapshot("OPEN", null, null, next.entries, next.cursors));
   }
 
   private async publishOpenBaseline() {

@@ -41,8 +41,13 @@ describe("ScoreboardCoordinator", () => {
     ).run();
     await env.DB.prepare(
       `
-      INSERT INTO phishing_events (event_id, victim_user_id, attacker_user_id)
-      VALUES ('phishing-1', 'bob', 'alice')
+      INSERT INTO phishing_events_condensed (
+        victim_id,
+        attacker_id,
+        count,
+        last_created_at
+      )
+      VALUES ('bob', 'alice', 1, '2026-04-12T14:58:00.000Z')
       `,
     ).run();
 
