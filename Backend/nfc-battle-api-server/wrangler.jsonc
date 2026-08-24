@@ -13,9 +13,6 @@
 			"new_sqlite_classes": ["ScoreboardCoordinator"]
 		}
 	],
-	"triggers": {
-		"crons": ["* * * * *"]
-	},
 	"assets": {
 		"binding": "ASSETS",
 		"directory": "./public"

@@ -47,9 +47,9 @@ the scoreboard Durable Object, including alarms and persisted-state eviction.
 The `ScoreboardCoordinator` Durable Object is the source of truth for the
 published live or frozen score/rank snapshot. While scoring is open, its alarm
 targets the interval configured by `SCOREBOARD_REFRESH_SECONDS` (10 seconds in
-all current environments). The cron trigger runs once per minute as a watchdog
-that restarts refresh work after an alarm or object failure. Attendee scoreboard
-requests read the latest stored snapshot and do not recalculate global ranks.
+all current environments). The event is permanently frozen, so the former
+once-per-minute cron watchdog is disabled. Attendee scoreboard requests read
+the latest stored snapshot and do not recalculate global ranks.
 
 The Durable Object class migration is applied by Worker deployment through
 [`wrangler.jsonc`](./wrangler.jsonc); it is separate from the D1 migrations.
