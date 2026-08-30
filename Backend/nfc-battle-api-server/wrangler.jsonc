@@ -51,12 +51,13 @@
 			}
 		]
 	},
-	"r2_buckets": [
-		{
-			"binding": "PRINT_CARD_IMAGES",
-			"bucket_name": "nfc-battle-print-cards"
-		}
-	],
+	// Print-card service retired after the event; uncomment to restore R2 image access.
+	// "r2_buckets": [
+	// 	{
+	// 		"binding": "PRINT_CARD_IMAGES",
+	// 		"bucket_name": "nfc-battle-print-cards"
+	// 	}
+	// ],
 	"ratelimits": [
 		{
 			"name": "PRINT_CARD_USER_RATE_LIMITER",
@@ -169,12 +170,13 @@
 					}
 				]
 			},
-			"r2_buckets": [
-				{
-					"binding": "PRINT_CARD_IMAGES",
-					"bucket_name": "nfc-battle-print-cards-staging"
-				}
-			],
+			// Print-card service retired after the event; uncomment to restore staging R2 image access.
+			// "r2_buckets": [
+			// 	{
+			// 		"binding": "PRINT_CARD_IMAGES",
+			// 		"bucket_name": "nfc-battle-print-cards-staging"
+			// 	}
+			// ],
 			"ratelimits": [
 				{
 					"name": "PRINT_CARD_USER_RATE_LIMITER",
@@ -287,12 +289,13 @@
 					}
 				]
 			},
-			"r2_buckets": [
-				{
-					"binding": "PRINT_CARD_IMAGES",
-					"bucket_name": "nfc-battle-print-cards"
-				}
-			],
+			// Print-card service retired after the event; uncomment to restore production R2 image access.
+			// "r2_buckets": [
+			// 	{
+			// 		"binding": "PRINT_CARD_IMAGES",
+			// 		"bucket_name": "nfc-battle-print-cards"
+			// 	}
+			// ],
 			"ratelimits": [
 				{
 					"name": "PRINT_CARD_USER_RATE_LIMITER",

@@ -52,6 +52,7 @@ export type EndpointRateLimitBinding =
   | "MY_SCOREBOARD_READ_RATE_LIMITER";
 
 export interface AppBindings extends CloudflareBindings {
+  PRINT_CARD_IMAGES?: R2Bucket;
   JWT_SECRET: string;
   STAFF_DANGER_TOKEN: string;
   AUTH_HEALTH_RATE_LIMITER: RateLimit;

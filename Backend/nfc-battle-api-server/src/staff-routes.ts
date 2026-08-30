@@ -26,6 +26,7 @@ import { errorResponse, success, successMessage } from "./responses";
 import { getScoreboardCoordinator } from "./scoreboard-coordinator-service";
 import { getScoreboardPresentations } from "./scoreboard-store";
 import { requireStaffDangerToken, requireStaffRole } from "./staff";
+import { rejectPrintCardsAfterEvent } from "./print-card-routes";
 import { getPrintCard } from "./print-card-store";
 import type { AppEnv } from "./types";
 import { getUserNfcTagKey, getUserRow } from "./user-store";
@@ -125,15 +126,19 @@ staffRoutes.post("/unpair_user_tag", async (c) => {
   return successMessage(c, "User tag unpaired successfully.");
 });
 
-staffRoutes.get("/print-cards/:short_token", async (c) => {
+staffRoutes.get("/print-cards/:short_token", rejectPrintCardsAfterEvent, async (c) => {
   const shortToken = c.req.param("short_token");
-  if (!SHORT_TOKEN_PATTERN.test(shortToken)) {
+  if (!shortToken || !SHORT_TOKEN_PATTERN.test(shortToken)) {
     return errorResponse(c, 404, "PRINT_CARD_NOT_FOUND", "Print-card token not found.");
   }
 
   const card = await getPrintCard(c.env.DB, shortToken);
   if (!card) {
     return errorResponse(c, 404, "PRINT_CARD_NOT_FOUND", "Print-card token not found.");
+  }
+
+  if (!c.env.PRINT_CARD_IMAGES) {
+    return rejectPrintCardsAfterEvent(c);
   }
 
   const image = await c.env.PRINT_CARD_IMAGES.get(card.object_key);

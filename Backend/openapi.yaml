@@ -38,8 +38,8 @@ info:
 
     `GET /users/me` is the only endpoint that lazy-initializes a user profile.
     The app should call it before pairing tags, scanning, recording phishing
-    events, uploading a print-card image, or using cache/bootstrap APIs that
-    expect the authenticated user row to already exist.
+    events, or using cache/bootstrap APIs that expect the authenticated user
+    row to already exist.
 
     Authenticated attendee endpoints are rate-limited per JWT subject and per
     endpoint over a 60-second window. Limits range from 3 requests for cache
@@ -104,11 +104,9 @@ info:
     - `POST /tags/pair`
     - `POST /collection/scan`
     - `GET /missions/stamp`
-    - `POST /print-cards`
     - `GET /staff/scoreboard_status`
     - `POST /staff/pair_user_tag`
     - `POST /staff/unpair_user_tag`
-    - `GET /staff/print-cards/{short_token}`
     - `POST /staff/nfc-unlock-code`
     - `POST /staff/prize-claims` with `type: EXTERNAL`
     - `GET /staff/prize-claims/{user_id}?type=EXTERNAL`
@@ -150,6 +148,11 @@ info:
     - `POST /staff/resume_scoreboard`: accepted in `FROZEN` and stale
       `FREEZING`; rejected in `OPEN` and non-stale `FREEZING` with
       `SCOREBOARD_NOT_FROZEN`
+
+    The print-card endpoints are retained for compatibility but are disabled
+    after the event. Authenticated requests to `POST /print-cards` and STAFF
+    requests to `GET /staff/print-cards/{short_token}` are rejected with
+    `EVENT_ENDED` before accessing D1 or R2.
 
     The app remains usable after the conference ends. Pairing, scanning,
     profile updates, collection browsing, bootstrap, and batch refresh continue
@@ -1013,57 +1016,21 @@ paths:
           $ref: '#/components/responses/ScoreboardNotFrozenError'
   /print-cards:
     post:
+      deprecated: true
       tags: [Print cards]
-      summary: Upload a PNG for staff to print
-      description: |
-        Stores one PNG image in protected object storage for the authenticated
-        user and returns a compact, opaque `short_token`. The app renders that
-        token as a barcode on the print card. The image is only downloadable by STAFF through
-        `GET /staff/print-cards/{short_token}`. Each new upload replaces the
-        authenticated user's previous request, deletes its old PNG object, and
-        invalidates its old token. The user must already have been initialized
-        through `GET /users/me`.
-
-        The default 4 MiB image limit accommodates a standard 85.5 mm by 54 mm
-        card rendered at up to 300 DPI, with reasonable room beyond its raw
-        pixel data. Multipart framing may use up to 64 KiB beyond the configured
-        image limit. Upload attempts are limited to five per user and three
-        hundred per serving Cloudflare location per minute.
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [image]
-              additionalProperties: false
-              properties:
-                image:
-                  type: string
-                  format: binary
-                  description: PNG image. Its maximum size is configured by the Worker `PRINT_CARD_MAX_UPLOAD_BYTES` environment variable and defaults to 4 MiB.
+      summary: Retired print-card upload endpoint
+      description: The event has ended, so authenticated requests are rejected before the body is read.
       responses:
-        '200':
-          description: Image stored and barcode token issued.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreatePrintCardResponse'
-        '400':
-          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
-        '404':
-          $ref: '#/components/responses/UserNotFoundError'
-        '413':
-          $ref: '#/components/responses/PayloadTooLargeError'
-        '429':
-          $ref: '#/components/responses/RateLimitError'
+        '409':
+          $ref: '#/components/responses/EventEndedError'
   /staff/print-cards/{short_token}:
     get:
+      deprecated: true
       tags: [Staff, Print cards]
-      summary: Download a print-card PNG after scanning its barcode
-      description: Requires a STAFF JWT. The response body is the original PNG bytes.
+      summary: Retired print-card download endpoint
+      description: The event has ended, so STAFF requests are rejected before D1 or R2 access.
       security:
         - bearerAuth: []
       parameters:
@@ -1073,25 +1040,13 @@ paths:
           schema:
             type: string
             pattern: '^[A-Za-z0-9_-]{8,32}$'
-          description: Opaque token decoded from the attendee barcode.
       responses:
-        '200':
-          description: PNG image.
-          content:
-            image/png:
-              schema:
-                type: string
-                format: binary
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
           $ref: '#/components/responses/ForbiddenError'
-        '404':
-          description: Print-card token was not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/EventEndedError'
   /staff/prize-claims:
     post:
       tags: [Staff]
@@ -1391,7 +1346,6 @@ components:
             - SCOREBOARD_NOT_FROZEN
             - SCOREBOARD_READ_INCONSISTENT
             - EVENT_ENDED
-            - PRINT_CARD_NOT_FOUND
             - PAYLOAD_TOO_LARGE
             - RATE_LIMITED
             - PRIZE_NOT_ELIGIBLE
@@ -1749,22 +1703,6 @@ components:
           allOf:
             - $ref: '#/components/schemas/PhysicalTagId'
           description: Physical ID of the NFC tag to unpair.
-
-    CreatePrintCardResponse:
-      type: object
-      required: [status, data]
-      properties:
-        status:
-          type: string
-          enum: [success]
-        data:
-          type: object
-          required: [short_token]
-          properties:
-            short_token:
-              type: string
-              description: Opaque value to encode in the attendee barcode.
-              example: wQ8Yp2-Lz9M
 
     ClaimPrizeRequest:
       type: object

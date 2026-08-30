@@ -12,6 +12,11 @@ cp .dev.vars.example .dev.vars
 Use `.dev.vars` for local Worker runtime settings such as `JWT_SECRET`,
 `STAFF_DANGER_TOKEN`, and `PRINT_CARD_MAX_UPLOAD_BYTES`.
 
+The print-card implementation and API paths are retained, but both paths return
+`EVENT_ENDED` before accessing D1 or R2. The `PRINT_CARD_IMAGES` R2 binding
+blocks remain commented in [`wrangler.jsonc`](./wrangler.jsonc), preserving the
+bucket names without exposing the buckets to the deployed Worker.
+
 ## Local Wrangler Auth
 
 Wrangler login state is machine-wide by default. For this repo, use the npm
@@ -130,8 +135,8 @@ Create the staging D1 database:
 npm run wrangler -- d1 create nfc-battle-api-server-staging
 ```
 
-Create the staging R2 bucket used for print-card PNGs. The Worker stores only
-print-card metadata in D1; image bytes are stored in this private bucket.
+When re-enabling print cards in a new staging environment, create the private
+R2 bucket and uncomment its staging binding in `wrangler.jsonc`:
 
 ```txt
 npm run wrangler -- r2 bucket create nfc-battle-print-cards-staging
@@ -190,7 +195,8 @@ production D1 database:
 npm run wrangler -- d1 create nfc-battle-api-server
 ```
 
-Create the production R2 bucket used for print-card PNGs:
+When re-enabling print cards in a new production environment, create the
+private R2 bucket and uncomment its production binding in `wrangler.jsonc`:
 
 ```txt
 npm run wrangler -- r2 bucket create nfc-battle-print-cards

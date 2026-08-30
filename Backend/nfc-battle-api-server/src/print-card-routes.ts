@@ -9,12 +9,13 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const REQUEST_TOO_LARGE = Symbol("REQUEST_TOO_LARGE");
+const PRINT_CARD_ENDED_MESSAGE = "The print-card service has ended.";
 
 const printCards = new Hono<AppEnv>();
 
 printCards.use("*", requireAuth);
 
-printCards.post("/", async (c) => {
+printCards.post("/", rejectPrintCardsAfterEvent, async (c) => {
   const authUser = c.get("authUser");
   const userRate = await c.env.PRINT_CARD_USER_RATE_LIMITER.limit({ key: authUser.userId });
   if (!userRate.success) {
@@ -40,6 +41,10 @@ printCards.post("/", async (c) => {
     return errorResponse(c, 400, "BAD_REQUEST", "A single PNG image is required.");
   }
 
+  if (!c.env.PRINT_CARD_IMAGES) {
+    return rejectPrintCardsAfterEvent(c);
+  }
+
   const shortToken = await createPrintCard(
     c.env.DB,
     c.env.PRINT_CARD_IMAGES,
@@ -51,6 +56,10 @@ printCards.post("/", async (c) => {
 });
 
 export default printCards;
+
+export function rejectPrintCardsAfterEvent(c: Parameters<typeof errorResponse>[0]) {
+  return errorResponse(c, 409, "EVENT_ENDED", PRINT_CARD_ENDED_MESSAGE);
+}
 
 async function readPngUpload(
   request: Request,
